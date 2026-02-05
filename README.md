@@ -50,21 +50,21 @@ import {
   positiveNumber,
   redacted,
   withDefault,
-  Url,
-  PostgresUrl,
+  url,
+  postgresUrl,
 } from "@ayronforge/better-env";
 
 export const env = createEnv({
   /* Server-only variables — accessing these on the client will throw */
   server: {
-    DATABASE_URL: PostgresUrl,
+    DATABASE_URL: postgresUrl,
     API_SECRET: redacted(requiredString),
     PORT: withDefault(positiveNumber, 3000),
   },
 
   /* Client-safe variables */
   client: {
-    PUBLIC_API_URL: Url,
+    PUBLIC_API_URL: url,
   },
 
   /* Shared between server and client */
@@ -80,7 +80,7 @@ export const env = createEnv({
 // src/server.ts
 import { env } from "./env";
 
-console.log(env.DATABASE_URL); // string (PostgresUrl) — fully typed
+console.log(env.DATABASE_URL); // string (postgresUrl) — fully typed
 console.log(env.API_SECRET);   // string — redacted value auto-unwrapped
 console.log(env.PORT);         // number — transformed from string
 console.log(env.APP_NAME);     // string — falls back to "my-app"
@@ -125,7 +125,7 @@ Inject a custom env source to make your tests deterministic:
 
 ```ts
 const env = createEnv({
-  server: { DATABASE_URL: PostgresUrl },
+  server: { DATABASE_URL: postgresUrl },
   runtimeEnv: {
     DATABASE_URL: "postgresql://user:pass@localhost:5432/testdb",
   },
@@ -140,9 +140,9 @@ const env = createEnv({
 | `requiredString` | `string` | `string` | Non-empty string |
 | `optionalString` | `string \| undefined` | `string \| undefined` | String or undefined |
 | `positiveNumber` | `string` | `number` | Parses string to a positive number |
-| `Url` | `string` | `string` | Validates HTTP/HTTPS URLs |
-| `PostgresUrl` | `string` | `string` | Validates `postgresql://` connection strings |
-| `RedisUrl` | `string` | `string` | Validates `redis://` / `rediss://` connection strings |
+| `url` | `string` | `string` | Validates HTTP/HTTPS URLs |
+| `postgresUrl` | `string` | `string` | Validates `postgresql://` connection strings |
+| `redisUrl` | `string` | `string` | Validates `redis://` / `rediss://` connection strings |
 | `commaSeparated` | `string` | `string[]` | Splits and trims a comma-separated string |
 | `commaSeparatedNumbers` | `string` | `number[]` | Splits into a number array |
 | `commaSeparatedUrls` | `string` | `string[]` | Splits into validated URLs |

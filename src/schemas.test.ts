@@ -8,11 +8,11 @@ import {
   commaSeparatedUrls,
   optionalString,
   positiveNumber,
-  PostgresUrl,
+  postgresUrl,
   redacted,
-  RedisUrl,
+  redisUrl,
   requiredString,
-  Url,
+  url,
   withDefault,
 } from "./schemas.ts";
 
@@ -156,81 +156,81 @@ describe("commaSeparatedNumbers", () => {
   });
 });
 
-describe("Url", () => {
+describe("url", () => {
   test("accepts http:// URLs", () => {
-    expect(decode(Url, "http://example.com")).toBe("http://example.com");
+    expect(decode(url, "http://example.com")).toBe("http://example.com");
   });
 
   test("accepts https:// URLs", () => {
-    expect(decode(Url, "https://example.com/path?q=1")).toBe("https://example.com/path?q=1");
+    expect(decode(url, "https://example.com/path?q=1")).toBe("https://example.com/path?q=1");
   });
 
   test("accepts URLs with port", () => {
-    expect(decode(Url, "http://localhost:3000")).toBe("http://localhost:3000");
+    expect(decode(url, "http://localhost:3000")).toBe("http://localhost:3000");
   });
 
   test("rejects ftp:// URLs", () => {
-    expect(() => decode(Url, "ftp://example.com")).toThrow();
+    expect(() => decode(url, "ftp://example.com")).toThrow();
   });
 
   test("rejects no-protocol strings", () => {
-    expect(() => decode(Url, "example.com")).toThrow();
+    expect(() => decode(url, "example.com")).toThrow();
   });
 
   test("rejects empty string", () => {
-    expect(() => decode(Url, "")).toThrow();
+    expect(() => decode(url, "")).toThrow();
   });
 });
 
-describe("PostgresUrl", () => {
+describe("postgresUrl", () => {
   test("accepts valid postgresql:// URL", () => {
-    const url = "postgresql://user:pass@host:5432/db";
-    expect(decode(PostgresUrl, url)).toBe(url);
+    const pgUrl = "postgresql://user:pass@host:5432/db";
+    expect(decode(postgresUrl, pgUrl)).toBe(pgUrl);
   });
 
   test("rejects missing port", () => {
-    expect(() => decode(PostgresUrl, "postgresql://user:pass@host/db")).toThrow();
+    expect(() => decode(postgresUrl, "postgresql://user:pass@host/db")).toThrow();
   });
 
   test("rejects missing db name", () => {
-    expect(() => decode(PostgresUrl, "postgresql://user:pass@host:5432")).toThrow();
+    expect(() => decode(postgresUrl, "postgresql://user:pass@host:5432")).toThrow();
   });
 
   test("rejects missing password", () => {
-    expect(() => decode(PostgresUrl, "postgresql://user@host:5432/db")).toThrow();
+    expect(() => decode(postgresUrl, "postgresql://user@host:5432/db")).toThrow();
   });
 
   test("rejects postgres:// prefix", () => {
-    expect(() => decode(PostgresUrl, "postgres://user:pass@host:5432/db")).toThrow();
+    expect(() => decode(postgresUrl, "postgres://user:pass@host:5432/db")).toThrow();
   });
 
   test("rejects other protocols", () => {
-    expect(() => decode(PostgresUrl, "mysql://user:pass@host:3306/db")).toThrow();
+    expect(() => decode(postgresUrl, "mysql://user:pass@host:3306/db")).toThrow();
   });
 });
 
-describe("RedisUrl", () => {
+describe("redisUrl", () => {
   test("accepts redis:// URL with auth, port, and db", () => {
-    const url = "redis://user:pass@host:6379/0";
-    expect(decode(RedisUrl, url)).toBe(url);
+    const rUrl = "redis://user:pass@host:6379/0";
+    expect(decode(redisUrl, rUrl)).toBe(rUrl);
   });
 
   test("accepts redis:// URL without auth", () => {
-    const url = "redis://host:6379/0";
-    expect(decode(RedisUrl, url)).toBe(url);
+    const rUrl = "redis://host:6379/0";
+    expect(decode(redisUrl, rUrl)).toBe(rUrl);
   });
 
   test("accepts redis:// URL with port only", () => {
-    const url = "redis://host:6379";
-    expect(decode(RedisUrl, url)).toBe(url);
+    const rUrl = "redis://host:6379";
+    expect(decode(redisUrl, rUrl)).toBe(rUrl);
   });
 
   test("rejects rediss:// URLs", () => {
-    expect(() => decode(RedisUrl, "rediss://host:6379")).toThrow();
+    expect(() => decode(redisUrl, "rediss://host:6379")).toThrow();
   });
 
   test("rejects other protocols", () => {
-    expect(() => decode(RedisUrl, "http://host:6379")).toThrow();
+    expect(() => decode(redisUrl, "http://host:6379")).toThrow();
   });
 });
 

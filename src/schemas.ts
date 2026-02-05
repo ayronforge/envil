@@ -33,7 +33,7 @@ export const commaSeparatedNumbers = Schema.transform(
   },
 );
 
-export const Url = Schema.String.pipe(
+export const url = Schema.String.pipe(
   Schema.filter((s) => {
     try {
       new URL(s);
@@ -43,25 +43,25 @@ export const Url = Schema.String.pipe(
     }
   }),
 );
-export type Url = Schema.Schema.Type<typeof Url>;
+export type Url = Schema.Schema.Type<typeof url>;
 
-export const PostgresUrl = Schema.String.pipe(
+export const postgresUrl = Schema.String.pipe(
   Schema.startsWith("postgresql://"),
   Schema.pattern(/^(postgres|postgresql):\/\/[^:]+:[^@]+@[^:]+:\d+\/.+$/),
 );
-export type PostgresUrl = Schema.Schema.Type<typeof PostgresUrl>;
+export type PostgresUrl = Schema.Schema.Type<typeof postgresUrl>;
 
-export const RedisUrl = Schema.String.pipe(
+export const redisUrl = Schema.String.pipe(
   Schema.startsWith("redis://"),
   Schema.pattern(/^redis[s]?:\/\/(?:[^:]+:[^@]+@)?[^:]+(?::\d+)?(?:\/\d+)?$/),
 );
-export type RedisUrl = Schema.Schema.Type<typeof RedisUrl>;
+export type RedisUrl = Schema.Schema.Type<typeof redisUrl>;
 
 export const commaSeparatedUrls = Schema.transform(
   Schema.String,
-  Schema.mutable(Schema.Array(Url)),
+  Schema.mutable(Schema.Array(url)),
   {
-    decode: (s) => s.split(",").map((x) => Schema.decodeUnknownSync(Url)(x.trim())),
+    decode: (s) => s.split(",").map((x) => Schema.decodeUnknownSync(url)(x.trim())),
     encode: (a) => a.join(","),
   },
 );
