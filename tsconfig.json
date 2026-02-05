@@ -1,0 +1,29 @@
+{
+	"$schema": "https://json.schemastore.org/tsconfig",
+	"exclude": ["node_modules", "build", "dist", "**/*.test.ts"],
+	"compilerOptions": {
+		"target": "ES2022",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"],
+		"strict": true,
+		"strictNullChecks": true,
+		"noEmit": true,
+		"esModuleInterop": true,
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true,
+		"resolveJsonModule": true,
+		"sourceMap": true,
+		"noImplicitAny": true,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true,
+		"noUncheckedIndexedAccess": false,
+
+		"allowImportingTsExtensions": true,
+		"verbatimModuleSyntax": true,
+
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noUncheckedSideEffectImports": true
+	}
+}

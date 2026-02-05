@@ -1,0 +1,61 @@
+{
+  "name": "@ayronforge/better-env",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Type-safe environment variable validation using Effect Schema",
+  "keywords": [
+    "env",
+    "environment",
+    "validation",
+    "typescript",
+    "effect",
+    "schema",
+    "type-safe"
+  ],
+  "license": "MIT",
+  "author": "Pedro Toledo",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pltoledo/better-env.git"
+  },
+  "homepage": "https://github.com/pltoledo/better-env#readme",
+  "bugs": {
+    "url": "https://github.com/pltoledo/better-env/issues"
+  },
+  "files": ["dist"],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "bun run build:js && bun run build:types",
+    "build:js": "bun build src/index.ts --outdir dist --format esm --packages external --sourcemap=linked",
+    "build:types": "tsgo --noEmit false --declaration --emitDeclarationOnly --outDir dist --rootDir src",
+    "prepublishOnly": "bun run build",
+    "typecheck": "tsgo --noEmit",
+    "lint": "oxlint --type-aware ./src",
+    "lint:fix": "oxlint --type-aware --fix ./src",
+    "fmt": "oxfmt ./src",
+    "fmt:check": "oxfmt --check ./src",
+    "check": "bun run lint:fix && bun run fmt",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage"
+  },
+  "dependencies": {
+    "effect": "^3.19.11"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.1",
+    "@typescript/native-preview": "^7.0.0-dev.20260108.1",
+    "oxfmt": "^0.24.0",
+    "oxlint": "^1.39.0",
+    "oxlint-tsgolint": "^0.11.0"
+  }
+}
