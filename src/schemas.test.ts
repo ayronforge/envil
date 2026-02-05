@@ -3,15 +3,23 @@ import { describe, expect, test } from "bun:test";
 import { Redacted, Schema } from "effect";
 
 import {
+  boolean,
   commaSeparated,
   commaSeparatedNumbers,
   commaSeparatedUrls,
+  integer,
+  json,
+  mongoUrl,
+  mysqlUrl,
+  nonNegativeNumber,
   optionalString,
+  port,
   positiveNumber,
   postgresUrl,
   redacted,
   redisUrl,
   requiredString,
+  stringEnum,
   url,
   withDefault,
 } from "./schemas.ts";
@@ -148,11 +156,8 @@ describe("commaSeparatedNumbers", () => {
     expect(decode(commaSeparatedNumbers, "42")).toEqual([42]);
   });
 
-  test("produces NaN for non-numeric entries", () => {
-    const result = decode(commaSeparatedNumbers, "1,abc,3");
-    expect(result[0]).toBe(1);
-    expect(result[1]).toBeNaN();
-    expect(result[2]).toBe(3);
+  test("rejects non-numeric entries", () => {
+    expect(() => decode(commaSeparatedNumbers, "1,abc,3")).toThrow('"abc" is not a valid number');
   });
 });
 
@@ -200,8 +205,9 @@ describe("postgresUrl", () => {
     expect(() => decode(postgresUrl, "postgresql://user@host:5432/db")).toThrow();
   });
 
-  test("rejects postgres:// prefix", () => {
-    expect(() => decode(postgresUrl, "postgres://user:pass@host:5432/db")).toThrow();
+  test("accepts postgres:// prefix", () => {
+    const pgUrl = "postgres://user:pass@host:5432/db";
+    expect(decode(postgresUrl, pgUrl)).toBe(pgUrl);
   });
 
   test("rejects other protocols", () => {
@@ -225,8 +231,13 @@ describe("redisUrl", () => {
     expect(decode(redisUrl, rUrl)).toBe(rUrl);
   });
 
-  test("rejects rediss:// URLs", () => {
-    expect(() => decode(redisUrl, "rediss://host:6379")).toThrow();
+  test("accepts rediss:// URLs (TLS)", () => {
+    expect(decode(redisUrl, "rediss://host:6379")).toBe("rediss://host:6379");
+  });
+
+  test("accepts rediss:// URL with auth", () => {
+    const rUrl = "rediss://user:pass@host:6379/0";
+    expect(decode(redisUrl, rUrl)).toBe(rUrl);
   });
 
   test("rejects other protocols", () => {
@@ -242,5 +253,259 @@ describe("commaSeparatedUrls", () => {
 
   test("throws when any URL is invalid", () => {
     expect(() => decode(commaSeparatedUrls, "http://a.com, not-a-url")).toThrow();
+  });
+});
+
+describe("boolean", () => {
+  test('accepts "true"', () => {
+    expect(decode(boolean, "true")).toBe(true);
+  });
+
+  test('accepts "TRUE"', () => {
+    expect(decode(boolean, "TRUE")).toBe(true);
+  });
+
+  test('accepts "True"', () => {
+    expect(decode(boolean, "True")).toBe(true);
+  });
+
+  test('accepts "false"', () => {
+    expect(decode(boolean, "false")).toBe(false);
+  });
+
+  test('accepts "FALSE"', () => {
+    expect(decode(boolean, "FALSE")).toBe(false);
+  });
+
+  test('accepts "False"', () => {
+    expect(decode(boolean, "False")).toBe(false);
+  });
+
+  test('accepts "1"', () => {
+    expect(decode(boolean, "1")).toBe(true);
+  });
+
+  test('accepts "0"', () => {
+    expect(decode(boolean, "0")).toBe(false);
+  });
+
+  test('rejects "yes"', () => {
+    expect(() => decode(boolean, "yes")).toThrow();
+  });
+
+  test('rejects "no"', () => {
+    expect(() => decode(boolean, "no")).toThrow();
+  });
+
+  test('rejects "2"', () => {
+    expect(() => decode(boolean, "2")).toThrow();
+  });
+
+  test("rejects empty string", () => {
+    expect(() => decode(boolean, "")).toThrow();
+  });
+
+  test("rejects undefined", () => {
+    expect(() => decode(boolean, undefined)).toThrow();
+  });
+});
+
+describe("integer", () => {
+  test('accepts "1"', () => {
+    expect(decode(integer, "1")).toBe(1);
+  });
+
+  test('accepts "0"', () => {
+    expect(decode(integer, "0")).toBe(0);
+  });
+
+  test('accepts "-5"', () => {
+    expect(decode(integer, "-5")).toBe(-5);
+  });
+
+  test('accepts "100"', () => {
+    expect(decode(integer, "100")).toBe(100);
+  });
+
+  test('rejects "3.14"', () => {
+    expect(() => decode(integer, "3.14")).toThrow();
+  });
+
+  test('rejects "abc"', () => {
+    expect(() => decode(integer, "abc")).toThrow();
+  });
+
+  test("rejects empty string", () => {
+    expect(() => decode(integer, "")).toThrow();
+  });
+
+  test("rejects undefined", () => {
+    expect(() => decode(integer, undefined)).toThrow();
+  });
+});
+
+describe("nonNegativeNumber", () => {
+  test('accepts "0"', () => {
+    expect(decode(nonNegativeNumber, "0")).toBe(0);
+  });
+
+  test('accepts "1"', () => {
+    expect(decode(nonNegativeNumber, "1")).toBe(1);
+  });
+
+  test('accepts "3.14"', () => {
+    expect(decode(nonNegativeNumber, "3.14")).toBe(3.14);
+  });
+
+  test('rejects "-1"', () => {
+    expect(() => decode(nonNegativeNumber, "-1")).toThrow();
+  });
+
+  test('rejects "-0.5"', () => {
+    expect(() => decode(nonNegativeNumber, "-0.5")).toThrow();
+  });
+
+  test('rejects "abc"', () => {
+    expect(() => decode(nonNegativeNumber, "abc")).toThrow();
+  });
+});
+
+describe("port", () => {
+  test('accepts "1"', () => {
+    expect(decode(port, "1")).toBe(1);
+  });
+
+  test('accepts "80"', () => {
+    expect(decode(port, "80")).toBe(80);
+  });
+
+  test('accepts "443"', () => {
+    expect(decode(port, "443")).toBe(443);
+  });
+
+  test('accepts "8080"', () => {
+    expect(decode(port, "8080")).toBe(8080);
+  });
+
+  test('accepts "65535"', () => {
+    expect(decode(port, "65535")).toBe(65535);
+  });
+
+  test('rejects "0"', () => {
+    expect(() => decode(port, "0")).toThrow();
+  });
+
+  test('rejects "65536"', () => {
+    expect(() => decode(port, "65536")).toThrow();
+  });
+
+  test('rejects "-1"', () => {
+    expect(() => decode(port, "-1")).toThrow();
+  });
+
+  test('rejects "3.14"', () => {
+    expect(() => decode(port, "3.14")).toThrow();
+  });
+
+  test('rejects "abc"', () => {
+    expect(() => decode(port, "abc")).toThrow();
+  });
+});
+
+describe("stringEnum", () => {
+  const nodeEnv = stringEnum(["development", "staging", "production"]);
+
+  test("accepts valid enum value", () => {
+    expect(decode(nodeEnv, "development")).toBe("development");
+  });
+
+  test("accepts another valid enum value", () => {
+    expect(decode(nodeEnv, "production")).toBe("production");
+  });
+
+  test("rejects invalid value", () => {
+    expect(() => decode(nodeEnv, "test")).toThrow();
+  });
+
+  test("rejects empty string", () => {
+    expect(() => decode(nodeEnv, "")).toThrow();
+  });
+
+  test("rejects undefined", () => {
+    expect(() => decode(nodeEnv, undefined)).toThrow();
+  });
+});
+
+describe("json", () => {
+  const featureFlags = json(Schema.Struct({ darkMode: Schema.Boolean }));
+
+  test("accepts valid JSON matching schema", () => {
+    expect(decode(featureFlags, '{"darkMode":true}')).toEqual({ darkMode: true });
+  });
+
+  test("rejects invalid JSON", () => {
+    expect(() => decode(featureFlags, "not-json")).toThrow();
+  });
+
+  test("rejects JSON not matching schema", () => {
+    expect(() => decode(featureFlags, '{"darkMode":"yes"}')).toThrow();
+  });
+
+  test("rejects undefined", () => {
+    expect(() => decode(featureFlags, undefined)).toThrow();
+  });
+});
+
+describe("mongoUrl", () => {
+  test("accepts mongodb:// URL", () => {
+    const mUrl = "mongodb://user:pass@host:27017/db";
+    expect(decode(mongoUrl, mUrl)).toBe(mUrl);
+  });
+
+  test("accepts mongodb+srv:// URL", () => {
+    const mUrl = "mongodb+srv://user:pass@host/db";
+    expect(decode(mongoUrl, mUrl)).toBe(mUrl);
+  });
+
+  test("accepts mongodb:// without auth", () => {
+    const mUrl = "mongodb://host:27017/db";
+    expect(decode(mongoUrl, mUrl)).toBe(mUrl);
+  });
+
+  test("accepts mongodb:// with query params", () => {
+    const mUrl = "mongodb://user:pass@host:27017/db?retryWrites=true";
+    expect(decode(mongoUrl, mUrl)).toBe(mUrl);
+  });
+
+  test("rejects other protocols", () => {
+    expect(() => decode(mongoUrl, "postgres://user:pass@host:5432/db")).toThrow();
+  });
+
+  test("rejects empty string", () => {
+    expect(() => decode(mongoUrl, "")).toThrow();
+  });
+});
+
+describe("mysqlUrl", () => {
+  test("accepts mysql:// URL", () => {
+    const mUrl = "mysql://user:pass@host:3306/db";
+    expect(decode(mysqlUrl, mUrl)).toBe(mUrl);
+  });
+
+  test("accepts mysqls:// URL", () => {
+    const mUrl = "mysqls://user:pass@host:3306/db";
+    expect(decode(mysqlUrl, mUrl)).toBe(mUrl);
+  });
+
+  test("rejects missing port", () => {
+    expect(() => decode(mysqlUrl, "mysql://user:pass@host/db")).toThrow();
+  });
+
+  test("rejects other protocols", () => {
+    expect(() => decode(mysqlUrl, "postgres://user:pass@host:3306/db")).toThrow();
+  });
+
+  test("rejects empty string", () => {
+    expect(() => decode(mysqlUrl, "")).toThrow();
   });
 });

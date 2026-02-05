@@ -28,7 +28,12 @@ export const commaSeparatedNumbers = Schema.transform(
   Schema.String,
   Schema.mutable(Schema.Array(Schema.Number)),
   {
-    decode: (s) => s.split(",").map((x) => Number(x.trim())),
+    decode: (s) =>
+      s.split(",").map((x) => {
+        const n = Number(x.trim());
+        if (Number.isNaN(n)) throw new Error(`"${x.trim()}" is not a valid number`);
+        return n;
+      }),
     encode: (a) => a.join(","),
   },
 );
@@ -46,14 +51,14 @@ export const url = Schema.String.pipe(
 export type Url = Schema.Schema.Type<typeof url>;
 
 export const postgresUrl = Schema.String.pipe(
-  Schema.startsWith("postgresql://"),
+  Schema.filter((s) => s.startsWith("postgres://") || s.startsWith("postgresql://")),
   Schema.pattern(/^(postgres|postgresql):\/\/[^:]+:[^@]+@[^:]+:\d+\/.+$/),
 );
 export type PostgresUrl = Schema.Schema.Type<typeof postgresUrl>;
 
 export const redisUrl = Schema.String.pipe(
-  Schema.startsWith("redis://"),
-  Schema.pattern(/^redis[s]?:\/\/(?:[^:]+:[^@]+@)?[^:]+(?::\d+)?(?:\/\d+)?$/),
+  Schema.filter((s) => s.startsWith("redis://") || s.startsWith("rediss://")),
+  Schema.pattern(/^rediss?:\/\/(?:[^:]+:[^@]+@)?[^:]+(?::\d+)?(?:\/\d+)?$/),
 );
 export type RedisUrl = Schema.Schema.Type<typeof redisUrl>;
 
@@ -65,3 +70,35 @@ export const commaSeparatedUrls = Schema.transform(
     encode: (a) => a.join(","),
   },
 );
+
+export const boolean = Schema.transform(
+  Schema.String.pipe(Schema.filter((s) => ["true", "false", "1", "0"].includes(s.toLowerCase()))),
+  Schema.Boolean,
+  {
+    decode: (s) => s.toLowerCase() === "true" || s === "1",
+    encode: (b) => (b ? "true" : "false"),
+  },
+);
+
+export const integer = Schema.NumberFromString.pipe(Schema.int());
+
+export const nonNegativeNumber = Schema.NumberFromString.pipe(Schema.nonNegative());
+
+export const port = Schema.NumberFromString.pipe(Schema.int(), Schema.between(1, 65535));
+
+export const stringEnum = <T extends readonly [string, ...string[]]>(values: T) =>
+  Schema.Literal(...values);
+
+export const json = <S extends Schema.Schema.Any>(schema: S) => Schema.parseJson(schema);
+
+export const mongoUrl = Schema.String.pipe(
+  Schema.filter((s) => s.startsWith("mongodb://") || s.startsWith("mongodb+srv://")),
+  Schema.pattern(/^mongodb(\+srv)?:\/\/(?:[^:]+:[^@]+@)?[^/]+(?:\/[^?]*)?(?:\?.*)?$/),
+);
+export type MongoUrl = Schema.Schema.Type<typeof mongoUrl>;
+
+export const mysqlUrl = Schema.String.pipe(
+  Schema.filter((s) => s.startsWith("mysql://") || s.startsWith("mysqls://")),
+  Schema.pattern(/^mysqls?:\/\/[^:]+:[^@]+@[^:]+:\d+\/.+$/),
+);
+export type MysqlUrl = Schema.Schema.Type<typeof mysqlUrl>;

@@ -104,8 +104,8 @@ describe("createEnv", () => {
         expect.unreachable("should have thrown");
       } catch (e) {
         const msg = (e as Error).message;
-        expect(msg).toContain("A: invalid or missing");
-        expect(msg).toContain("B: invalid or missing");
+        expect(msg).toContain("A:");
+        expect(msg).toContain("B:");
       }
     });
 
@@ -217,7 +217,7 @@ describe("createEnv", () => {
         });
         expect.unreachable("should have thrown");
       } catch (e) {
-        expect((e as Error).message).toContain("MY_DB: invalid or missing");
+        expect((e as Error).message).toContain("MY_DB:");
       }
     });
 
@@ -334,6 +334,136 @@ describe("createEnv", () => {
         runtimeEnv: { DB: "value" },
       });
       expect(env.DB).toBe("value");
+    });
+  });
+
+  describe("better error messages", () => {
+    test("error contains specific validation details", () => {
+      try {
+        createEnv({
+          server: { PORT: positiveNumber },
+          runtimeEnv: { PORT: "not-a-number" },
+          isServer: true,
+        });
+        expect.unreachable("should have thrown");
+      } catch (e) {
+        const msg = (e as Error).message;
+        expect(msg).toContain("PORT:");
+        expect(msg).not.toContain("invalid or missing");
+      }
+    });
+
+    test("error for missing var includes schema details", () => {
+      try {
+        createEnv({
+          server: { DB: requiredString },
+          runtimeEnv: {},
+          isServer: true,
+        });
+        expect.unreachable("should have thrown");
+      } catch (e) {
+        const msg = (e as Error).message;
+        expect(msg).toContain("DB:");
+        expect(msg).not.toContain("invalid or missing");
+      }
+    });
+  });
+
+  describe("onValidationError", () => {
+    test("callback is called with error array", () => {
+      const captured: string[][] = [];
+      expect(() =>
+        createEnv({
+          server: { A: requiredString },
+          runtimeEnv: {},
+          isServer: true,
+          onValidationError: (errors) => {
+            captured.push(errors);
+          },
+        }),
+      ).toThrow("Invalid environment variables");
+      expect(captured).toHaveLength(1);
+      expect(captured[0]!.length).toBe(1);
+      expect(captured[0]![0]).toContain("A:");
+    });
+
+    test("default throw still happens if callback returns", () => {
+      expect(() =>
+        createEnv({
+          server: { A: requiredString },
+          runtimeEnv: {},
+          isServer: true,
+          onValidationError: () => {},
+        }),
+      ).toThrow("Invalid environment variables");
+    });
+
+    test("callback can throw custom error", () => {
+      expect(() =>
+        createEnv({
+          server: { A: requiredString },
+          runtimeEnv: {},
+          isServer: true,
+          onValidationError: (errors) => {
+            throw new Error(`Custom: ${errors.join(", ")}`);
+          },
+        }),
+      ).toThrow("Custom:");
+    });
+  });
+
+  describe("prefix as object", () => {
+    test("client keys use client prefix", () => {
+      const env = createEnv({
+        client: { API_URL: requiredString },
+        prefix: { client: "NEXT_PUBLIC_" },
+        runtimeEnv: { NEXT_PUBLIC_API_URL: "http://api" },
+        isServer: true,
+      });
+      expect(env.API_URL).toBe("http://api");
+    });
+
+    test("each category uses its own prefix", () => {
+      const env = createEnv({
+        server: { DB: requiredString },
+        client: { API_URL: requiredString },
+        shared: { APP_NAME: requiredString },
+        prefix: { server: "SRV_", client: "NEXT_PUBLIC_", shared: "SHARED_" },
+        runtimeEnv: {
+          SRV_DB: "value",
+          NEXT_PUBLIC_API_URL: "http://api",
+          SHARED_APP_NAME: "app",
+        },
+        isServer: true,
+      });
+      expect(env.DB).toBe("value");
+      expect(env.API_URL).toBe("http://api");
+      expect(env.APP_NAME).toBe("app");
+    });
+
+    test("omitted categories in prefix object default to no prefix", () => {
+      const env = createEnv({
+        server: { DB: requiredString },
+        client: { API_URL: requiredString },
+        prefix: { client: "NEXT_PUBLIC_" },
+        runtimeEnv: { DB: "value", NEXT_PUBLIC_API_URL: "http://api" },
+        isServer: true,
+      });
+      expect(env.DB).toBe("value");
+      expect(env.API_URL).toBe("http://api");
+    });
+
+    test("works with preset spread", () => {
+      const mockedPreset = { prefix: { client: "NEXT_PUBLIC_" } };
+      const env = createEnv({
+        ...mockedPreset,
+        server: { DB: requiredString },
+        client: { API_URL: requiredString },
+        runtimeEnv: { DB: "value", NEXT_PUBLIC_API_URL: "http://api" },
+        isServer: true,
+      });
+      expect(env.DB).toBe("value");
+      expect(env.API_URL).toBe("http://api");
     });
   });
 });
