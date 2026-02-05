@@ -2,8 +2,8 @@
 
 Typesafe environment variables using [Effect Schema](https://effect.website/docs/schema/introduction).
 
-![NPM Version](https://img.shields.io/npm/v/%40ayronforge%2Fbetter-env)
-![License](https://img.shields.io/npm/l/%40ayronforge%2Fbetter-env)
+![NPM Version](https://img.shields.io/npm/v/@ayronforge/better-env)
+![License](https://img.shields.io/npm/l/@ayronforge/better-env)
 
 Never deploy with invalid environment variables again. **better-env** validates all your env vars at startup, gives you full TypeScript autocompletion, and keeps server secrets out of client bundles — powered by the [Effect](https://effect.website) ecosystem.
 
