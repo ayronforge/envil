@@ -16,11 +16,11 @@
   "author": "Pedro Toledo",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pltoledo/better-env.git"
+    "url": "https://github.com/ayronforge/better-env.git"
   },
-  "homepage": "https://github.com/pltoledo/better-env#readme",
+  "homepage": "https://github.com/ayronforge/better-env#readme",
   "bugs": {
-    "url": "https://github.com/pltoledo/better-env/issues"
+    "url": "https://github.com/ayronforge/better-env/issues"
   },
   "files": ["dist"],
   "exports": {
