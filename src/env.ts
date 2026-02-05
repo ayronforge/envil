@@ -1,5 +1,7 @@
 import { Either, ParseResult, Redacted, Schema } from "effect";
 
+import { ClientAccessError, EnvValidationError } from "./errors.ts";
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySchema = Schema.Schema<any, any, never>;
 type SchemaDict = Record<string, AnySchema>;
@@ -70,14 +72,14 @@ export function createEnv<
     if (opts.onValidationError) {
       opts.onValidationError(errors);
     }
-    throw new Error(`Invalid environment variables:\n${errors.join("\n")}`);
+    throw new EnvValidationError(errors);
   }
 
   return new Proxy(result, {
     get(target, prop) {
       if (typeof prop !== "string") return undefined;
       if (!isServer && prop in server && !(prop in client) && !(prop in shared)) {
-        throw new Error(`Attempted to access server-side env var "${prop}" on client`);
+        throw new ClientAccessError(prop);
       }
       const value = Reflect.get(target, prop);
       return Redacted.isRedacted(value) ? Redacted.value(value) : value;

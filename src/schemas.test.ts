@@ -51,6 +51,28 @@ describe("withDefault", () => {
   test("rejects invalid types even with a default set", () => {
     expect(() => decode(schema, 123)).toThrow();
   });
+
+  test("works piped: Schema.String.pipe(withDefault('fallback'))", () => {
+    const piped = Schema.String.pipe(withDefault("fallback"));
+    expect(decode(piped, undefined)).toBe("fallback");
+    expect(decode(piped, "hello")).toBe("hello");
+  });
+
+  test("works piped with port: port.pipe(withDefault(3000))", () => {
+    const piped = port.pipe(withDefault(3000));
+    expect(decode(piped, undefined)).toBe(3000);
+    expect(decode(piped, "8080")).toBe(8080);
+  });
+
+  test("works in composition: requiredString.pipe(withDefault('x'), redacted)", () => {
+    const composed = requiredString.pipe(withDefault("x"), redacted);
+    const result = decode(composed, undefined);
+    expect(Redacted.isRedacted(result)).toBe(true);
+    expect(Redacted.value(result as Redacted.Redacted<string>)).toBe("x");
+
+    const result2 = decode(composed, "hello");
+    expect(Redacted.value(result2 as Redacted.Redacted<string>)).toBe("hello");
+  });
 });
 
 describe("redacted", () => {

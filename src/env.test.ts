@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { Schema } from "effect";
 
 import { createEnv } from "./env.ts";
+import { ClientAccessError, EnvValidationError } from "./errors.ts";
 import {
   commaSeparated,
   optionalString,
@@ -118,6 +119,24 @@ describe("createEnv", () => {
         }),
       ).toThrow("Invalid environment variables");
     });
+
+    test("throws EnvValidationError with structured errors and _tag", () => {
+      try {
+        createEnv({
+          server: { A: requiredString, B: requiredString },
+          runtimeEnv: {},
+          isServer: true,
+        });
+        expect.unreachable("should have thrown");
+      } catch (e) {
+        expect(e).toBeInstanceOf(EnvValidationError);
+        const err = e as EnvValidationError;
+        expect(err._tag).toBe("EnvValidationError");
+        expect(err.errors.length).toBe(2);
+        expect(err.errors[0]).toContain("A:");
+        expect(err.errors[1]).toContain("B:");
+      }
+    });
   });
 
   describe("client/server separation", () => {
@@ -153,6 +172,24 @@ describe("createEnv", () => {
       expect(() => (env as Record<string, unknown>).SECRET).toThrow(
         'Attempted to access server-side env var "SECRET" on client',
       );
+    });
+
+    test("throws ClientAccessError with variableName and _tag", () => {
+      const env = createEnv({
+        server: { SECRET: requiredString },
+        client: { API_URL: requiredString },
+        runtimeEnv: { API_URL: "http://api" },
+        isServer: false,
+      });
+      try {
+        (env as Record<string, unknown>).SECRET;
+        expect.unreachable("should have thrown");
+      } catch (e) {
+        expect(e).toBeInstanceOf(ClientAccessError);
+        const err = e as ClientAccessError;
+        expect(err._tag).toBe("ClientAccessError");
+        expect(err.variableName).toBe("SECRET");
+      }
     });
 
     test("accessing client vars from client works fine", () => {

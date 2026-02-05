@@ -95,17 +95,32 @@ console.log(env.NODE_ENV);     // "development" | "staging" | "production"
 console.log(env.APP_NAME);     // string — falls back to "my-app"
 ```
 
-If any variable is missing or invalid, `createEnv()` throws immediately with detailed errors:
+If any variable is missing or invalid, `createEnv()` throws an `EnvValidationError` immediately with detailed errors:
 
 ```
-Error: Invalid environment variables:
-DATABASE_URL: Expected a string matching the pattern ^(postgres|postgresql):\/\/...
+EnvValidationError: Invalid environment variables:
+DATABASE_URL: Expected a valid PostgreSQL connection URL
 API_SECRET: Expected a string with at least 1 character(s), actual ""
+```
+
+The error exposes a structured `.errors` array for programmatic access:
+
+```ts
+import { createEnv, EnvValidationError } from "@ayronforge/better-env";
+
+try {
+  createEnv({ /* ... */ });
+} catch (e) {
+  if (e instanceof EnvValidationError) {
+    console.log(e._tag);   // "EnvValidationError"
+    console.log(e.errors);  // ["DATABASE_URL: ...", "API_SECRET: ..."]
+  }
+}
 ```
 
 ### Client-side protection
 
-When running on the client (`typeof window !== "undefined"`), server-only variables are **not validated** and any attempt to access them throws:
+When running on the client (`typeof window !== "undefined"`), server-only variables are **not validated** and any attempt to access them throws a `ClientAccessError`:
 
 ```ts
 // In a browser context
@@ -114,6 +129,21 @@ import { env } from "./env";
 env.PUBLIC_API_URL; // "https://api.example.com" — works fine
 env.APP_NAME;       // "my-app" — shared vars are accessible
 env.DATABASE_URL;   // throws: Attempted to access server-side env var "DATABASE_URL" on client
+```
+
+You can catch and inspect the error programmatically:
+
+```ts
+import { ClientAccessError } from "@ayronforge/better-env";
+
+try {
+  env.DATABASE_URL;
+} catch (e) {
+  if (e instanceof ClientAccessError) {
+    console.log(e._tag);          // "ClientAccessError"
+    console.log(e.variableName);  // "DATABASE_URL"
+  }
+}
 ```
 
 ### Prefix support
@@ -261,10 +291,26 @@ env.FEATURE_FLAGS; // { darkMode: boolean }
 
 ### Helpers
 
-| Helper | Description |
-|---|---|
-| `withDefault(schema, value)` | Falls back to `value` when the env var is undefined |
-| `redacted(schema)` | Wraps the value in Effect's `Redacted` type to prevent accidental exposure |
+| Helper | Pipe-style | Description |
+|---|---|---|
+| `withDefault(schema, value)` | `schema.pipe(withDefault(value))` | Falls back to `value` when the env var is undefined |
+| `redacted(schema)` | `schema.pipe(redacted)` | Wraps the value in Effect's `Redacted` type to prevent accidental exposure |
+| `json(schema)` | `schema.pipe(json)` | Parses a JSON string and validates against an Effect Schema |
+
+All helpers support pipe-style composition:
+
+```ts
+import { port, requiredString, withDefault, redacted } from "@ayronforge/better-env";
+
+// Data-first (nested)
+withDefault(port, 3000);
+
+// Data-last (piped)
+port.pipe(withDefault(3000));
+
+// Composition — chain multiple helpers
+requiredString.pipe(withDefault("x"), redacted);
+```
 
 You can also use **any Effect Schema** directly — `better-env` accepts any `Schema<A, string, never>`.
 
