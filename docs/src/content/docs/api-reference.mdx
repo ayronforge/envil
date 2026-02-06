@@ -45,6 +45,7 @@ Returns an `Effect` that resolves secrets, validates all variables, and produces
   { name: "emptyStringAsUndefined", type: "boolean", description: "Treat empty string values as undefined." },
   { name: "onValidationError", type: "(errors: string[]) => void", description: "Callback fired before EnvValidationError is thrown." },
   { name: "resolvers", type: "readonly Effect.Effect<ResolverResult, ResolverError>[]", description: "Array of resolver Effects. When present, createEnv returns an Effect." },
+  { name: "autoRedactResolver", type: "boolean", description: "Default true. Auto-wraps resolver-provided values in Redacted. Types reflect this automatically." },
 ]} />
 
 ### PrefixMap
@@ -116,7 +117,7 @@ All schemas are exported from `@ayronforge/better-env`.
 
 <TypeTable rows={[
   { name: "withDefault(schema, value)", type: "(schema: S, default: T) => Schema", description: "Makes a schema optional with a default value. Supports data-first and pipe style." },
-  { name: "redacted(schema)", type: "(schema: S) => Schema<Redacted<T>>", description: "Wraps schema output in Effect Redacted. Auto-unwrapped on access." },
+  { name: "redacted(schema)", type: "(schema: S) => Schema<Redacted<T>>", description: "Wraps schema output in Effect Redacted. Use Redacted.value() to unwrap." },
 ]} />
 
 ---

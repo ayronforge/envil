@@ -51,24 +51,28 @@ Both styles produce the same result. Use whichever reads better in your codebase
 
 ## redacted
 
-Wraps a schema with Effect's `Redacted` type. This prevents accidental logging of sensitive values while still giving you the plain value when accessing the env object.
+Wraps a schema with Effect's `Redacted` type. This prevents accidental logging, serialization, or spreading of sensitive values.
 
 ```ts
 import { redacted } from "@ayronforge/better-env"
-import { Schema } from "effect"
+import { Redacted, Schema } from "effect"
 
-createEnv({
+const env = createEnv({
   server: {
     API_SECRET: redacted(Schema.String),
     // Equivalent to: Schema.Redacted(Schema.String)
   },
 })
 
-// Access the value — automatically unwrapped by the proxy
-const secret: string = env.API_SECRET
+// env.API_SECRET is Redacted<string>
+console.log(env.API_SECRET)  // <redacted>
+JSON.stringify(env)           // {"API_SECRET":"<redacted>"}
+
+// Explicitly unwrap when you need the plain value
+const secret: string = Redacted.value(env.API_SECRET)
 ```
 
-The `redacted` helper is a shorthand for `Schema.Redacted(schema)`. If you log the raw validated data (before proxy unwrapping), the value appears as `<redacted>` instead of the actual secret.
+The `redacted` helper is a shorthand for `Schema.Redacted(schema)`. Values wrapped in `Redacted` appear as `<redacted>` in logs and serialized output, and remain wrapped when spread or iterated.
 
 ## json
 

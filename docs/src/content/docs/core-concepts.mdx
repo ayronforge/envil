@@ -23,11 +23,11 @@ If any variable fails validation, `createEnv` throws an `EnvValidationError` con
 
 The `server`, `client`, and `shared` buckets control where variables can be accessed:
 
-| Bucket   | Validated on server? | Validated on client? | Accessible on client? |
-|----------|---------------------|---------------------|-----------------------|
-| `server` | Yes                 | No                  | No — throws `ClientAccessError` |
-| `client` | Yes                 | Yes                 | Yes |
-| `shared` | Yes                 | Yes                 | Yes |
+| Bucket   | Validated on server? | Validated on client? | Accessible on client?           |
+| -------- | -------------------- | -------------------- | ------------------------------- |
+| `server` | Yes                  | No                   | No — throws `ClientAccessError` |
+| `client` | Yes                  | Yes                  | Yes                             |
+| `shared` | Yes                  | Yes                  | Yes                             |
 
 **How it works:** The returned object is a `Proxy`. When running on the client (detected via `typeof window !== "undefined"`), accessing a key defined only in `server` throws a `ClientAccessError`.
 
@@ -91,23 +91,27 @@ createEnv({
 })
 ```
 
-This is what [framework presets](/docs/framework-presets) configure for you.
+This is what [framework presets](/better-env/docs/framework-presets) configure for you.
 
 ## Redacted values
 
-When you use `Schema.Redacted(Schema.String)` (or the `redacted` helper), the value is wrapped in Effect's `Redacted` type during validation. This means if you accidentally log the env object, secrets appear as `<redacted>`.
-
-**better-env automatically unwraps `Redacted` values** when you access them through the proxy, so you always get the plain value:
+When you use `Schema.Redacted(Schema.String)` (or the `redacted` helper), the value is wrapped in Effect's `Redacted` type during validation. This means the value is safe to log, serialize, and spread — secrets never leak accidentally.
 
 ```ts
+import { Redacted } from "effect"
+
 const env = createEnv({
   server: {
-    API_SECRET: Schema.Redacted(Schema.String),
+    API_SECRET: redacted(Schema.String),
   },
 })
 
-// Type is `string`, not `Redacted<string>`
-const secret: string = env.API_SECRET
+// env.API_SECRET is Redacted<string> — safe to log, serialize, spread
+console.log(env.API_SECRET)     // <redacted>
+JSON.stringify(env)              // {"API_SECRET":"<redacted>"}
+
+// Explicitly unwrap when you need the plain value
+const secret: string = Redacted.value(env.API_SECRET)
 ```
 
 ## Empty string handling
@@ -141,6 +145,35 @@ createEnv({
 ```
 
 This is useful for testing or for frameworks like Vite where `import.meta.env` is the source.
+
+## Testing
+
+Combine `runtimeEnv` with `isServer` to write deterministic tests without touching real environment variables:
+
+```ts
+import { createEnv, requiredString, postgresUrl, port, withDefault } from "@ayronforge/better-env"
+import { expect, test } from "vitest"
+
+test("env parses correctly", () => {
+  const env = createEnv({
+    server: {
+      DATABASE_URL: postgresUrl,
+      PORT: withDefault(port, 3000),
+    },
+    runtimeEnv: {
+      DATABASE_URL: "postgresql://user:pass@localhost:5432/testdb",
+    },
+    isServer: true, // Force server mode so server vars are validated
+  })
+
+  expect(env.DATABASE_URL).toBe("postgresql://user:pass@localhost:5432/testdb")
+  expect(env.PORT).toBe(3000)
+})
+```
+
+<Callout type="tip">
+  Setting `isServer: true` ensures server-only variables are validated and accessible, even if your test runner runs in an environment where `typeof window !== "undefined"` (e.g. jsdom).
+</Callout>
 
 ## Validation error callback
 

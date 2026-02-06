@@ -6,8 +6,30 @@ import type { ResolverError, ResolverResult } from "./resolvers/types.ts";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnySchema = Schema.Schema<any, any, never>;
 type SchemaDict = Record<string, AnySchema>;
-type UnwrapRedacted<T> = T extends Redacted.Redacted<infer A> ? A : T;
-type InferEnv<T extends SchemaDict> = { [K in keyof T]: UnwrapRedacted<Schema.Schema.Type<T[K]>> };
+type InferEnv<T extends SchemaDict> = { [K in keyof T]: Schema.Schema.Type<T[K]> };
+
+type MaybeRedact<T> = T extends Redacted.Redacted<infer _> ? T : Redacted.Redacted<T>;
+
+type InferEnvAutoRedacted<
+  T extends SchemaDict,
+  ResolverKeys extends string,
+  Prefix extends string = "",
+> = {
+  [K in keyof T]: `${Prefix}${K & string}` extends ResolverKeys
+    ? MaybeRedact<Schema.Schema.Type<T[K]>>
+    : Schema.Schema.Type<T[K]>;
+};
+
+// Extract resolver keys from resolver array type (distributive via infer U)
+type ExtractResolverKeys<T extends readonly any[]> = // eslint-disable-line @typescript-eslint/no-explicit-any
+  T[number] extends infer U // eslint-disable-line @typescript-eslint/no-explicit-any
+    ? U extends Effect.Effect<ResolverResult<infer K>, any, any>
+      ? K
+      : never // eslint-disable-line @typescript-eslint/no-explicit-any
+    : never;
+
+// Extract string prefix for type-level matching (PrefixMap not supported, falls back to "")
+type PrefixStr<P> = P extends string ? P : "";
 
 type AnyEnv = Readonly<Record<string, unknown>>;
 
@@ -32,6 +54,18 @@ type EnvResult<
     InferEnv<TServer & TClient & TShared>
 >;
 
+type EnvResultAutoRedacted<
+  TExtends extends readonly AnyEnv[],
+  TServer extends SchemaDict,
+  TClient extends SchemaDict,
+  TShared extends SchemaDict,
+  ResolverKeys extends string,
+  Prefix extends string = "",
+> = Readonly<
+  Omit<MergeEnvs<TExtends>, KnownKeys<TServer> | KnownKeys<TClient> | KnownKeys<TShared>> &
+    InferEnvAutoRedacted<TServer & TClient & TShared, ResolverKeys, Prefix>
+>;
+
 interface PrefixMap {
   server?: string;
   client?: string;
@@ -53,6 +87,7 @@ interface EnvOptions<
   isServer?: boolean;
   emptyStringAsUndefined?: boolean;
   onValidationError?: (errors: string[]) => void;
+  _autoRedactKeys?: Set<string>;
 }
 
 function buildEnv<
@@ -99,7 +134,11 @@ function buildEnv<
       const detail = ParseResult.TreeFormatter.formatErrorSync(parsed.left);
       errors.push(`${envKey}: ${detail}`);
     } else {
-      result[key] = parsed.right;
+      let finalValue = parsed.right;
+      if (opts._autoRedactKeys?.has(envKey) && !Redacted.isRedacted(finalValue)) {
+        finalValue = Redacted.make(finalValue);
+      }
+      result[key] = finalValue;
     }
   }
 
@@ -126,8 +165,7 @@ function buildEnv<
       if (!isServer && prop in server && !(prop in client) && !(prop in shared)) {
         throw new ClientAccessError(prop);
       }
-      const value = Reflect.get(target, prop);
-      return Redacted.isRedacted(value) ? Redacted.value(value) : value;
+      return Reflect.get(target, prop);
     },
   }) as EnvResult<TExtends, TServer, TClient, TShared>;
 }
@@ -137,15 +175,46 @@ export function createEnv<
   TClient extends SchemaDict = {},
   TShared extends SchemaDict = {},
   const TExtends extends readonly AnyEnv[] = readonly [],
+  const TResolvers extends readonly Effect.Effect<ResolverResult<any>, ResolverError>[] =
+    readonly [],
 >(
   opts: EnvOptions<TServer, TClient, TShared, TExtends> & {
-    resolvers: readonly Effect.Effect<ResolverResult, ResolverError>[];
+    resolvers: TResolvers;
+    autoRedactResolver: false;
   },
 ): Effect.Effect<
   EnvResult<TExtends, TServer, TClient, TShared>,
   ResolverError | EnvValidationError
 >;
 
+// Overload: with resolvers (autoRedactResolver defaults to true) → auto-redact resolver keys
+export function createEnv<
+  TServer extends SchemaDict = {},
+  TClient extends SchemaDict = {},
+  TShared extends SchemaDict = {},
+  const TExtends extends readonly AnyEnv[] = readonly [],
+  const TResolvers extends readonly Effect.Effect<ResolverResult<any>, ResolverError>[] = // eslint-disable-line @typescript-eslint/no-explicit-any
+    readonly [],
+  const TPrefix extends string | PrefixMap | undefined = undefined,
+>(
+  opts: EnvOptions<TServer, TClient, TShared, TExtends> & {
+    resolvers: TResolvers;
+    autoRedactResolver?: true;
+    prefix?: TPrefix;
+  },
+): Effect.Effect<
+  EnvResultAutoRedacted<
+    TExtends,
+    TServer,
+    TClient,
+    TShared,
+    ExtractResolverKeys<TResolvers>,
+    PrefixStr<TPrefix>
+  >,
+  ResolverError | EnvValidationError
+>;
+
+// Overload: without resolvers → synchronous
 export function createEnv<
   TServer extends SchemaDict = {},
   TClient extends SchemaDict = {},
@@ -158,14 +227,34 @@ export function createEnv<
 export function createEnv(
   opts: EnvOptions<SchemaDict, SchemaDict, SchemaDict, readonly AnyEnv[]> & {
     resolvers?: readonly Effect.Effect<ResolverResult, ResolverError>[];
+    autoRedactResolver?: boolean;
   },
 ) {
   if (opts.resolvers?.length) {
+    const shouldAutoRedact = opts.autoRedactResolver !== false;
     return Effect.all(opts.resolvers, { concurrency: "unbounded" }).pipe(
-      Effect.map((results) => Object.assign({}, opts.runtimeEnv ?? process.env, ...results)),
-      Effect.flatMap((mergedEnv) =>
+      Effect.map((results) => {
+        const autoRedactKeys = new Set<string>();
+        if (shouldAutoRedact) {
+          for (const r of results) {
+            for (const [k, v] of Object.entries(r)) {
+              if (v !== undefined) autoRedactKeys.add(k);
+            }
+          }
+        }
+        return {
+          mergedEnv: Object.assign({}, opts.runtimeEnv ?? process.env, ...results),
+          autoRedactKeys,
+        };
+      }),
+      Effect.flatMap(({ mergedEnv, autoRedactKeys }) =>
         Effect.try({
-          try: () => buildEnv({ ...opts, runtimeEnv: mergedEnv }),
+          try: () =>
+            buildEnv({
+              ...opts,
+              runtimeEnv: mergedEnv,
+              _autoRedactKeys: shouldAutoRedact ? autoRedactKeys : undefined,
+            }),
           catch: (e) => (e instanceof EnvValidationError ? e : new EnvValidationError([String(e)])),
         }),
       ),

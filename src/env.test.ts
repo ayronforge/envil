@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { Effect, Schema } from "effect";
+import { Effect, Redacted, Schema } from "effect";
 
 import { createEnv } from "./env.ts";
 import { ClientAccessError, EnvValidationError } from "./errors.ts";
@@ -170,7 +170,7 @@ describe("createEnv", () => {
         runtimeEnv: { API_URL: "http://api" },
         isServer: false,
       });
-      expect(() => (env as Record<string, unknown>).SECRET).toThrow(
+      expect(() => env.SECRET).toThrow(
         'Attempted to access server-side env var "SECRET" on client',
       );
     });
@@ -271,13 +271,14 @@ describe("createEnv", () => {
   });
 
   describe("redacted values", () => {
-    test("proxy auto-unwraps Redacted values on access", () => {
+    test("redacted values return Redacted objects (not auto-unwrapped)", () => {
       const env = createEnv({
         server: { SECRET: redacted(Schema.String) },
         runtimeEnv: { SECRET: "my-secret" },
         isServer: true,
       });
-      expect(env.SECRET).toBe("my-secret");
+      expect(Redacted.isRedacted(env.SECRET)).toBe(true);
+      expect(Redacted.value(env.SECRET)).toBe("my-secret");
     });
 
     test("non-redacted values pass through unchanged", () => {
@@ -287,6 +288,40 @@ describe("createEnv", () => {
         isServer: true,
       });
       expect(env.NAME).toBe("plain");
+    });
+
+    test("JSON.stringify does not leak redacted values", () => {
+      const env = createEnv({
+        server: { SECRET: redacted(Schema.String), NAME: requiredString },
+        runtimeEnv: { SECRET: "my-secret", NAME: "plain" },
+        isServer: true,
+      });
+      const json = JSON.stringify(env);
+      expect(json).not.toContain("my-secret");
+      expect(json).toContain("plain");
+    });
+
+    test("spread preserves Redacted wrappers", () => {
+      const env = createEnv({
+        server: { SECRET: redacted(Schema.String), NAME: requiredString },
+        runtimeEnv: { SECRET: "my-secret", NAME: "plain" },
+        isServer: true,
+      });
+      const spread = { ...env };
+      expect(Redacted.isRedacted(spread.SECRET)).toBe(true);
+      expect(spread.NAME).toBe("plain");
+    });
+
+    test("Object.entries preserves Redacted wrappers", () => {
+      const env = createEnv({
+        server: { SECRET: redacted(Schema.String) },
+        runtimeEnv: { SECRET: "my-secret" },
+        isServer: true,
+      });
+      const entries = Object.entries(env);
+      const secretEntry = entries.find(([k]) => k === "SECRET");
+      expect(secretEntry).toBeDefined();
+      expect(Redacted.isRedacted(secretEntry![1])).toBe(true);
     });
   });
 
@@ -662,7 +697,9 @@ describe("createEnv", () => {
   });
 
   describe("resolvers", () => {
-    function fakeResolver(result: ResolverResult): Effect.Effect<ResolverResult, ResolverError> {
+    function fakeResolver<T extends Record<string, string | undefined>>(
+      result: T,
+    ): Effect.Effect<ResolverResult<Extract<keyof T, string>>, ResolverError> {
       return Effect.succeed(result);
     }
 
@@ -678,7 +715,9 @@ describe("createEnv", () => {
           isServer: true,
         }),
       );
-      expect(env.DB_PASS).toBe("secret123");
+      // Auto-redacted: DB_PASS should be Redacted
+      expect(Redacted.isRedacted(env.DB_PASS)).toBe(true);
+      expect(Redacted.value(env.DB_PASS)).toBe("secret123");
     });
 
     test("multiple resolvers merge (later overrides earlier)", async () => {
@@ -689,8 +728,8 @@ describe("createEnv", () => {
           isServer: true,
         }),
       );
-      expect(env.A).toBe("second");
-      expect(env.B).toBe("first-b");
+      expect(Redacted.value(env.A)).toBe("second");
+      expect(Redacted.value(env.B)).toBe("first-b");
     });
 
     test("resolver + runtimeEnv base merge", async () => {
@@ -702,8 +741,11 @@ describe("createEnv", () => {
           isServer: true,
         }),
       );
+      // DB_HOST from runtimeEnv is NOT auto-redacted
       expect(env.DB_HOST).toBe("localhost");
-      expect(env.DB_PASS).toBe("secret");
+      // DB_PASS from resolver IS auto-redacted
+      expect(Redacted.isRedacted(env.DB_PASS)).toBe(true);
+      expect(Redacted.value(env.DB_PASS)).toBe("secret");
     });
 
     test("resolver result overlays on top of runtimeEnv", async () => {
@@ -715,7 +757,7 @@ describe("createEnv", () => {
           isServer: true,
         }),
       );
-      expect(env.KEY).toBe("from-resolver");
+      expect(Redacted.value(env.KEY)).toBe("from-resolver");
     });
 
     test("resolver failure → ResolverError in error channel", async () => {
@@ -758,7 +800,8 @@ describe("createEnv", () => {
           isServer: true,
         }),
       );
-      expect(env.DB).toBe("value");
+      expect(Redacted.isRedacted(env.DB)).toBe(true);
+      expect(Redacted.value(env.DB)).toBe("value");
     });
 
     test("works with extends", async () => {
@@ -776,7 +819,8 @@ describe("createEnv", () => {
         }),
       );
       expect(env.BASE_KEY).toBe("base-value");
-      expect(env.RESOLVED_KEY).toBe("resolved-value");
+      expect(Redacted.isRedacted(env.RESOLVED_KEY)).toBe(true);
+      expect(Redacted.value(env.RESOLVED_KEY)).toBe("resolved-value");
     });
 
     test("works with redacted", async () => {
@@ -787,7 +831,9 @@ describe("createEnv", () => {
           isServer: true,
         }),
       );
-      expect(env.SECRET).toBe("my-secret");
+      // Already Redacted from schema, should not double-wrap
+      expect(Redacted.isRedacted(env.SECRET)).toBe(true);
+      expect(Redacted.value(env.SECRET)).toBe("my-secret");
     });
 
     test("works with withDefault", async () => {
@@ -799,6 +845,221 @@ describe("createEnv", () => {
         }),
       );
       expect(env.MODE).toBe("production");
+    });
+
+    test("resolver values are auto-redacted internally", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { DB_PASS: requiredString },
+          resolvers: [fakeResolver({ DB_PASS: "secret123" })],
+          isServer: true,
+        }),
+      );
+      // Value is Redacted — no auto-unwrap
+      expect(Redacted.isRedacted(env.DB_PASS)).toBe(true);
+      expect(Redacted.value(env.DB_PASS)).toBe("secret123");
+      // Internally the value is stored as Redacted
+      const raw = Object.getOwnPropertyDescriptor(env, "DB_PASS")?.value;
+      expect(Redacted.isRedacted(raw)).toBe(true);
+      expect(Redacted.value(raw as Redacted.Redacted<string>)).toBe("secret123");
+    });
+
+    test("explicit redacted() + resolver doesn't double-wrap", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { SECRET: redacted(Schema.String) },
+          resolvers: [fakeResolver({ SECRET: "my-secret" })],
+          isServer: true,
+        }),
+      );
+      expect(Redacted.isRedacted(env.SECRET)).toBe(true);
+      const raw = Object.getOwnPropertyDescriptor(env, "SECRET")?.value;
+      expect(Redacted.isRedacted(raw)).toBe(true);
+      // Unwrap once — should be the plain string, not another Redacted
+      const inner = Redacted.value(raw as Redacted.Redacted<string>);
+      expect(typeof inner).toBe("string");
+      expect(inner).toBe("my-secret");
+    });
+
+    test("non-resolver runtimeEnv values are NOT auto-redacted", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { DB_HOST: requiredString, DB_PASS: requiredString },
+          resolvers: [fakeResolver({ DB_PASS: "secret" })],
+          runtimeEnv: { DB_HOST: "localhost" },
+          isServer: true,
+        }),
+      );
+      expect(env.DB_HOST).toBe("localhost");
+      const raw = Object.getOwnPropertyDescriptor(env, "DB_HOST")?.value;
+      expect(Redacted.isRedacted(raw)).toBe(false);
+      expect(raw).toBe("localhost");
+    });
+
+    test("undefined resolver values don't trigger auto-redaction", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { A: requiredString, B: optionalString },
+          resolvers: [fakeResolver({ A: "value", B: undefined })],
+          runtimeEnv: {},
+          isServer: true,
+        }),
+      );
+      // B should not be auto-redacted since the resolver returned undefined for it
+      const rawB = Object.getOwnPropertyDescriptor(env, "B")?.value;
+      expect(Redacted.isRedacted(rawB)).toBe(false);
+    });
+
+    test("auto-redact works with prefix", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { DB: requiredString },
+          prefix: "MY_",
+          resolvers: [fakeResolver({ MY_DB: "value" })],
+          isServer: true,
+        }),
+      );
+      expect(Redacted.isRedacted(env.DB)).toBe(true);
+      expect(Redacted.value(env.DB)).toBe("value");
+      const raw = Object.getOwnPropertyDescriptor(env, "DB")?.value;
+      expect(Redacted.isRedacted(raw)).toBe(true);
+    });
+
+    test("auto-redact works with schema transforms (positiveNumber)", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { PORT: positiveNumber },
+          resolvers: [fakeResolver({ PORT: "3000" })],
+          isServer: true,
+        }),
+      );
+      expect(Redacted.isRedacted(env.PORT)).toBe(true);
+      expect(Redacted.value(env.PORT)).toBe(3000);
+      const raw = Object.getOwnPropertyDescriptor(env, "PORT")?.value;
+      expect(Redacted.isRedacted(raw)).toBe(true);
+      expect(Redacted.value(raw as Redacted.Redacted<number>)).toBe(3000);
+    });
+
+    test("autoRedactResolver: false disables auto-redaction", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { DB_PASS: requiredString },
+          resolvers: [fakeResolver({ DB_PASS: "secret123" })],
+          autoRedactResolver: false,
+          isServer: true,
+        }),
+      );
+      // With autoRedactResolver: false, value is plain string
+      expect(Redacted.isRedacted(env.DB_PASS)).toBe(false);
+      expect(env.DB_PASS).toBe("secret123");
+    });
+
+    test("autoRedactResolver: false with explicit redacted() still wraps", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { SECRET: redacted(Schema.String) },
+          resolvers: [fakeResolver({ SECRET: "my-secret" })],
+          autoRedactResolver: false,
+          isServer: true,
+        }),
+      );
+      // Explicit redacted() in schema still wraps
+      expect(Redacted.isRedacted(env.SECRET)).toBe(true);
+      expect(Redacted.value(env.SECRET)).toBe("my-secret");
+    });
+
+    test("JSON.stringify does not leak auto-redacted resolver values", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { DB_HOST: requiredString, DB_PASS: requiredString },
+          resolvers: [fakeResolver({ DB_PASS: "secret" })],
+          runtimeEnv: { DB_HOST: "localhost" },
+          isServer: true,
+        }),
+      );
+      const json = JSON.stringify(env);
+      expect(json).not.toContain("secret");
+      expect(json).toContain("localhost");
+    });
+
+    test("spread preserves Redacted wrappers for auto-redacted resolver values", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { DB_HOST: requiredString, DB_PASS: requiredString },
+          resolvers: [fakeResolver({ DB_PASS: "secret" })],
+          runtimeEnv: { DB_HOST: "localhost" },
+          isServer: true,
+        }),
+      );
+      const spread = { ...env };
+      expect(Redacted.isRedacted(spread.DB_PASS)).toBe(true);
+      expect(spread.DB_HOST).toBe("localhost");
+    });
+
+    test("prefix-aware: resolver keys are Redacted, non-resolver keys are plain", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { DB_HOST: requiredString, DB_PASS: requiredString },
+          prefix: "MY_",
+          resolvers: [fakeResolver({ MY_DB_PASS: "secret" })],
+          runtimeEnv: { MY_DB_HOST: "localhost" },
+          isServer: true,
+        }),
+      );
+      // DB_HOST comes from runtimeEnv → plain string
+      expect(env.DB_HOST).toBe("localhost");
+      expect(Redacted.isRedacted(env.DB_HOST)).toBe(false);
+      // DB_PASS comes from resolver → auto-redacted
+      expect(Redacted.isRedacted(env.DB_PASS)).toBe(true);
+      expect(Redacted.value(env.DB_PASS)).toBe("secret");
+    });
+
+    test("prefix-aware: multiple resolver keys with prefix", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { PORT: positiveNumber, API_KEY: requiredString, SECRET: requiredString },
+          prefix: "APP_",
+          resolvers: [fakeResolver({ APP_API_KEY: "key123", APP_SECRET: "s3cret" })],
+          runtimeEnv: { APP_PORT: "3000" },
+          isServer: true,
+        }),
+      );
+      // PORT from runtimeEnv → plain number
+      expect(env.PORT).toBe(3000);
+      expect(Redacted.isRedacted(env.PORT)).toBe(false);
+      // API_KEY and SECRET from resolver → auto-redacted
+      expect(Redacted.isRedacted(env.API_KEY)).toBe(true);
+      expect(Redacted.value(env.API_KEY)).toBe("key123");
+      expect(Redacted.isRedacted(env.SECRET)).toBe(true);
+      expect(Redacted.value(env.SECRET)).toBe("s3cret");
+    });
+
+    test("prefix-aware: no prefix means resolver keys match directly", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { DB_HOST: requiredString, DB_PASS: requiredString },
+          resolvers: [fakeResolver({ DB_PASS: "secret" })],
+          runtimeEnv: { DB_HOST: "localhost" },
+          isServer: true,
+        }),
+      );
+      expect(env.DB_HOST).toBe("localhost");
+      expect(Redacted.isRedacted(env.DB_HOST)).toBe(false);
+      expect(Redacted.isRedacted(env.DB_PASS)).toBe(true);
+      expect(Redacted.value(env.DB_PASS)).toBe("secret");
+    });
+
+    test("Object.values preserves Redacted wrappers for auto-redacted values", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { DB_PASS: requiredString },
+          resolvers: [fakeResolver({ DB_PASS: "secret" })],
+          isServer: true,
+        }),
+      );
+      const values = Object.values(env);
+      expect(values.some((v) => Redacted.isRedacted(v))).toBe(true);
+      expect(values.every((v) => typeof v !== "string" || v !== "secret")).toBe(true);
     });
   });
 });

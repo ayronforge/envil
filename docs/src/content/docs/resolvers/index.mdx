@@ -58,6 +58,57 @@ resolvers: [resolver1, resolver2]
 
 Later resolvers override earlier ones for the same key.
 
+## Auto-redaction
+
+By default, all values provided by resolvers are automatically wrapped in Effect's `Redacted` type. This means secrets fetched from cloud providers are safe from accidental leaks through logging, serialization, or spreading.
+
+```ts
+const env = await Effect.runPromise(
+  createEnv({
+    server: {
+      DB_HOST: requiredString,
+      DB_PASS: requiredString,
+    },
+    resolvers: [
+      fromAwsSecrets({
+        secrets: { DB_PASS: "prod/db-password" },
+      }),
+    ],
+    runtimeEnv: { DB_HOST: "localhost" },
+  }),
+)
+
+// DB_PASS from resolver → Redacted<string> (type-safe)
+console.log(env.DB_PASS)         // <redacted>
+JSON.stringify(env)               // {"DB_HOST":"localhost","DB_PASS":"<redacted>"}
+Redacted.value(env.DB_PASS)      // "actual-password"
+
+// DB_HOST from runtimeEnv → string (not redacted)
+console.log(env.DB_HOST)         // "localhost"
+```
+
+Types are inferred automatically: resolver-provided keys are typed as `Redacted<T>`, while non-resolver keys remain `T`.
+
+### Disabling auto-redaction
+
+Set `autoRedactResolver: false` to disable automatic wrapping:
+
+```ts
+const env = await Effect.runPromise(
+  createEnv({
+    server: { DB_PASS: requiredString },
+    resolvers: [fromAwsSecrets({ secrets: { DB_PASS: "prod/db-pass" } })],
+    autoRedactResolver: false,
+  }),
+)
+
+env.DB_PASS // string (not Redacted)
+```
+
+<Callout type="tip">
+  Even with `autoRedactResolver: false`, you can still use `redacted()` in your schema to explicitly mark individual keys as `Redacted`.
+</Callout>
+
 ## Available resolvers
 
 <TypeTable rows={[
@@ -72,16 +123,16 @@ Later resolvers override earlier ones for the same key.
 </Callout>
 
 <CardGroup>
-  <Card title="AWS Secrets Manager" href="/docs/resolvers/aws">
+  <Card title="AWS Secrets Manager" href="/better-env/docs/resolvers/aws">
     Batch-fetch secrets with JSON key extraction and automatic SDK initialization.
   </Card>
-  <Card title="GCP Secret Manager" href="/docs/resolvers/gcp">
+  <Card title="GCP Secret Manager" href="/better-env/docs/resolvers/gcp">
     Access secrets with full resource name support and automatic Uint8Array decoding.
   </Card>
-  <Card title="Azure Key Vault" href="/docs/resolvers/azure">
+  <Card title="Azure Key Vault" href="/better-env/docs/resolvers/azure">
     Fetch secrets with DefaultAzureCredential and managed identity support.
   </Card>
-  <Card title="1Password" href="/docs/resolvers/onepassword">
+  <Card title="1Password" href="/better-env/docs/resolvers/onepassword">
     Resolve secrets from 1Password vaults using the SDK's batch resolution.
   </Card>
 </CardGroup>

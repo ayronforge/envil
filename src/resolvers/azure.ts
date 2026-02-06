@@ -8,13 +8,16 @@ interface AzureKeyVaultClient {
   getSecret: (name: string) => Promise<{ value?: string }>;
 }
 
-interface AzureKeyVaultOptions {
-  secrets: Record<string, string>;
+interface AzureKeyVaultOptions<K extends string = string> {
+  secrets: Record<K, string>;
   client?: AzureKeyVaultClient;
   vaultUrl?: string;
   credential?: unknown;
 }
 
+export function fromAzureKeyVault<K extends string>(
+  opts: AzureKeyVaultOptions<K>,
+): Effect.Effect<ResolverResult<K>, ResolverError>;
 export function fromAzureKeyVault(
   opts: AzureKeyVaultOptions,
 ): Effect.Effect<ResolverResult, ResolverError> {
@@ -59,12 +62,12 @@ export function fromAzureKeyVault(
       ([envKey, secretName]) =>
         Effect.tryPromise(() => fetchClient.getSecret(secretName)).pipe(
           Effect.map((response) => ({ envKey, value: response.value })),
-          Effect.orElseSucceed(() => ({ envKey, value: undefined as string | undefined })),
+          Effect.orElseSucceed(() => ({ envKey, value: undefined })),
         ),
       { concurrency: "unbounded" },
     );
 
-    const result: ResolverResult = {};
+    const result: Record<string, string | undefined> = {};
     for (const { envKey, value } of results) {
       result[envKey] = value;
     }

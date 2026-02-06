@@ -1,0 +1,7 @@
+{
+  "redirects": [{ "source": "/", "destination": "/better-env", "permanent": false }],
+  "rewrites": [
+    { "source": "/better-env", "destination": "/" },
+    { "source": "/better-env/:path*", "destination": "/:path*" }
+  ]
+}

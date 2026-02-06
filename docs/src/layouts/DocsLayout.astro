@@ -23,7 +23,7 @@ const { title, description, headings, currentSlug } = Astro.props;
   <div class="docs-grid">
     <!-- Sidebar -->
     <aside class="docs-sidebar hidden lg:block border-r border-border py-6 px-4">
-      <Sidebar client:load sections={docsNav} currentSlug={currentSlug} />
+      <Sidebar client:load sections={docsNav} currentSlug={currentSlug} baseUrl={import.meta.env.BASE_URL} />
     </aside>
 
     <!-- Main content -->

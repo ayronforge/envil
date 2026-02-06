@@ -10,7 +10,8 @@ import Tabs from "@/components/docs/Tabs.astro";
 ## Prerequisites
 
 - **Node.js 18+** (or Bun / Deno)
-- **Effect** as a peer dependency
+- **ESM only** — this package does not ship CommonJS builds
+- [**effect**](https://effect.website) **^3.19.11** as a peer dependency
 
 ## Installation
 
@@ -102,11 +103,11 @@ PORT: Expected Port (1-65535), but got "abc"
 This crashes your app at startup — before any request is handled — so you catch issues immediately.
 
 <Callout type="tip" title="Framework presets">
-  Using Next.js, Vite, or Expo? Check out [Framework Presets](/docs/framework-presets) for pre-configured prefix rules so you don't have to configure `NEXT_PUBLIC_` or `VITE_` prefixes manually.
+  Using Next.js, Vite, or Expo? Check out [Framework Presets](/better-env/docs/framework-presets) for pre-configured prefix rules so you don't have to configure `NEXT_PUBLIC_` or `VITE_` prefixes manually.
 </Callout>
 
 ## Next steps
 
-- Learn about [Core Concepts](/docs/core-concepts) like client/server separation and the proxy model
-- Explore the [Built-in Schemas](/docs/schemas) for URLs, numbers, booleans, and more
-- Set up [Cloud Secret Resolution](/docs/resolvers) for production
+- Learn about [Core Concepts](/better-env/docs/core-concepts) like client/server separation and the proxy model
+- Explore the [Built-in Schemas](/better-env/docs/schemas) for URLs, numbers, booleans, and more
+- Set up [Cloud Secret Resolution](/better-env/docs/resolvers) for production

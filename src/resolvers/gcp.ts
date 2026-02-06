@@ -10,13 +10,16 @@ interface GcpSecretsClient {
   }) => Promise<{ payload?: { data?: Uint8Array | string } }>;
 }
 
-interface GcpSecretsOptions {
-  secrets: Record<string, string>;
+interface GcpSecretsOptions<K extends string = string> {
+  secrets: Record<K, string>;
   client?: GcpSecretsClient;
   projectId?: string;
   version?: string;
 }
 
+export function fromGcpSecrets<K extends string>(
+  opts: GcpSecretsOptions<K>,
+): Effect.Effect<ResolverResult<K>, ResolverError>;
 export function fromGcpSecrets(
   opts: GcpSecretsOptions,
 ): Effect.Effect<ResolverResult, ResolverError> {
@@ -59,11 +62,11 @@ export function fromGcpSecrets(
           const data = response.payload?.data;
           const value = data instanceof Uint8Array ? new TextDecoder().decode(data) : data;
           return { envKey, value };
-        }).pipe(Effect.orElseSucceed(() => ({ envKey, value: undefined as string | undefined }))),
+        }).pipe(Effect.orElseSucceed(() => ({ envKey, value: undefined }))),
       { concurrency: "unbounded" },
     );
 
-    const result: ResolverResult = {};
+    const result: Record<string, string | undefined> = {};
     for (const { envKey, value } of results) {
       result[envKey] = value;
     }

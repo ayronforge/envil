@@ -9,8 +9,8 @@ interface AwsSecretsClient {
   batchGetSecrets: (secretIds: string[]) => Promise<Map<string, string | undefined>>;
 }
 
-interface AwsSecretsOptions {
-  secrets: Record<string, string>;
+interface AwsSecretsOptions<K extends string = string> {
+  secrets: Record<K, string>;
   client?: AwsSecretsClient;
   region?: string;
 }
@@ -54,6 +54,9 @@ function createSdkClient(region?: string): Effect.Effect<AwsSecretsClient, Resol
   });
 }
 
+export function fromAwsSecrets<K extends string>(
+  opts: AwsSecretsOptions<K>,
+): Effect.Effect<ResolverResult<K>, ResolverError>;
 export function fromAwsSecrets(
   opts: AwsSecretsOptions,
 ): Effect.Effect<ResolverResult, ResolverError> {
@@ -92,8 +95,7 @@ export function fromAwsSecrets(
       }
     }
 
-    // Build result, extracting JSON keys where needed
-    const result: ResolverResult = {};
+    const result: Record<string, string | undefined> = {};
     for (const [secretId, entries] of secretIdToKeys) {
       const raw = secretValues.get(secretId);
       for (const { envKey, jsonKey } of entries) {

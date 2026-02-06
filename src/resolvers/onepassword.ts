@@ -4,8 +4,8 @@ import { ResolverError, type ResolverResult } from "./types.ts";
 
 export { ResolverError } from "./types.ts";
 
-interface OnePasswordOptions {
-  secrets: Record<string, string>;
+interface OnePasswordOptions<K extends string = string> {
+  secrets: Record<K, string>;
   client?: {
     secrets: {
       resolveAll: (refs: string[]) => Promise<string[]>;
@@ -14,6 +14,9 @@ interface OnePasswordOptions {
   serviceAccountToken?: string;
 }
 
+export function fromOnePassword<K extends string>(
+  opts: OnePasswordOptions<K>,
+): Effect.Effect<ResolverResult<K>, ResolverError>;
 export function fromOnePassword(
   opts: OnePasswordOptions,
 ): Effect.Effect<ResolverResult, ResolverError> {
@@ -37,7 +40,7 @@ export function fromOnePassword(
             auth: token,
             integrationName: "better-env",
             integrationVersion: "1.0.0",
-          })) as unknown as {
+          })) as {
             secrets: {
               resolveAll: (refs: string[]) => Promise<string[]>;
             };
@@ -60,7 +63,7 @@ export function fromOnePassword(
       Effect.orElseSucceed(() => null),
     );
 
-    const result: ResolverResult = {};
+    const result: Record<string, string | undefined> = {};
     if (resolved) {
       for (let i = 0; i < entries.length; i++) {
         result[entries[i]![0]] = resolved[i] ?? undefined;

@@ -14,10 +14,10 @@ const { title, bodyClass = "" } = Astro.props;
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <meta
             name="description"
-            content="Type-safe environment variables using Effect Schema. Validate, transform, and manage env vars with full TypeScript inference."
+            content="Type-safe environment variables powered by Effect Schema. Validate, secure, and manage env vars with full TypeScript inference — for web apps, AI agents, and everything in between."
         />
         <meta name="generator" content={Astro.generator} />
-        <link rel="icon" type="image/svg+xml" href="/icon-bg.svg" />
+        <link rel="icon" type="image/svg+xml" href={`${import.meta.env.BASE_URL}/icon-bg.svg`} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link

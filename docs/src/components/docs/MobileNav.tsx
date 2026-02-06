@@ -1,15 +1,18 @@
 import { Menu, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useState } from "react";
+
 import type { NavSection } from "@/data/docs-nav";
+
 import { Sidebar } from "./Sidebar";
 
 interface MobileNavProps {
   sections: NavSection[];
   currentSlug: string;
+  baseUrl: string;
 }
 
-export function MobileNav({ sections, currentSlug }: MobileNavProps) {
+export function MobileNav({ sections, currentSlug, baseUrl }: MobileNavProps) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -67,7 +70,7 @@ export function MobileNav({ sections, currentSlug }: MobileNavProps) {
                 </button>
               </div>
               <div className="p-4" onClick={() => setOpen(false)}>
-                <Sidebar sections={sections} currentSlug={currentSlug} />
+                <Sidebar sections={sections} currentSlug={currentSlug} baseUrl={baseUrl} />
               </div>
             </motion.div>
           </>

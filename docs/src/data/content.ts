@@ -2,9 +2,9 @@ export const site = {
   name: "better-env",
   fullName: "@ayronforge/better-env",
   version: "0.3.1",
-  tagline: "Type-safe environment variables powered by Effect Schema",
+  tagline: "Environment variables you can trust at runtime",
   description:
-    "Validate, transform, and manage your environment variables with full TypeScript inference. Built on Effect Schema for runtime safety and developer experience.",
+    "Validate, secure, and manage your environment variables with full TypeScript inference. From web apps to autonomous AI agents — your config is always correct, your secrets always protected. Built on Effect Schema.",
   github: "https://github.com/ayronforge/better-env",
   npm: "https://www.npmjs.com/package/@ayronforge/better-env",
   install: "bun add @ayronforge/better-env effect",
@@ -15,7 +15,7 @@ export const features = [
     name: "Effect Schema",
     headline: "Powered by Effect Schema",
     description:
-      "Use the full power of Effect Schema for validation, transformation, and branding. Every env var gets runtime type checking with detailed error messages.",
+      "Use the full power of Effect Schema for validation, transformation, and branding. Every env var gets runtime type checking with structured, parseable error messages.",
   },
   {
     name: "Type Inference",
@@ -27,7 +27,7 @@ export const features = [
     name: "Client Safety",
     headline: "Client/Server Separation",
     description:
-      "Define server-only and client-safe variables separately. Accessing server vars on the client throws at runtime — no secrets leaked.",
+      "Define server-only and client-safe variables separately. Accessing server vars on the client throws at runtime — no secrets leaked, even in agent-generated output.",
   },
   {
     name: "Presets",
@@ -39,13 +39,13 @@ export const features = [
     name: "Secret Managers",
     headline: "Secret Manager Integrations",
     description:
-      "Resolve env vars from AWS Secrets Manager, Azure Key Vault, GCP Secret Manager, or 1Password. Bring your secrets from any cloud provider.",
+      "Resolve env vars from AWS Secrets Manager, Azure Key Vault, GCP Secret Manager, or 1Password. Pull secrets from wherever your agents are deployed.",
   },
   {
     name: "Composable",
     headline: "Composable & Extensible",
     description:
-      "Compose multiple env configs with `extends`. Build shared base configs and layer project-specific vars on top.",
+      "Compose multiple env configs with `extends`. Build shared base configs and layer service-specific vars on top — ideal for multi-agent architectures.",
   },
 ];
 
@@ -152,19 +152,42 @@ const env = createEnv({
   },
 ];
 
-export const codeExample = `import { createEnv } from "@ayronforge/better-env"
+export const codeExample = `import { createEnv, redacted, url } from "@ayronforge/better-env"
 import { Schema } from "effect"
 
 export const env = createEnv({
   server: {
+    OPENAI_API_KEY: redacted(Schema.String),
     DATABASE_URL: Schema.String,
-    API_SECRET: Schema.Redacted(Schema.String),
-    PORT: Schema.NumberFromString,
+    VECTOR_STORE_URL: url,
   },
   client: {
-    NEXT_PUBLIC_APP_URL: Schema.String,
+    NEXT_PUBLIC_APP_URL: url,
   },
   shared: {
     NODE_ENV: Schema.Literal("development", "production", "test"),
   },
 })`;
+
+export const agentFeatures = [
+  {
+    headline: "Fail Before You Run",
+    description:
+      "Validation runs at startup, not at first use. Missing or malformed secrets crash immediately with a structured error — not halfway through a task.",
+  },
+  {
+    headline: "Secrets That Stay Secret",
+    description:
+      "{{redacted}} wraps sensitive values so they never appear in logs, traces, or agent output. Your API keys stay invisible even when agents serialize their state.",
+  },
+  {
+    headline: "Errors Agents Can Act On",
+    description:
+      "Every validation failure returns a typed, structured error with the exact variable name and reason. Agents can read what went wrong and correct course — no log parsing required.",
+  },
+  {
+    headline: "Modular Design",
+    description:
+      "Compose, layer, and override configs across services and environments. Base credentials, tool-specific keys, and deployment overrides — all validated, all typed, all composable.",
+  },
+];

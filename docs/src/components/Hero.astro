@@ -4,68 +4,105 @@ import { site } from "../data/content.ts";
 ---
 
 <section class="min-h-[calc(100vh-80px)] px-6 lg:px-12 flex items-center">
-  <div class="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-12 lg:gap-16 max-w-7xl mx-auto w-full py-16 lg:py-0">
+    <div
+        class="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-12 lg:gap-16 max-w-7xl mx-auto w-full py-16 lg:py-0"
+    >
+        <!-- Left: Marketing copy -->
+        <div class="flex flex-col justify-center">
+            <span
+                class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border border-primary/10 bg-primary/5 text-secondary mb-8 w-fit"
+            >
+                <span
+                    class="w-1.5 h-1.5 rounded-full bg-secondary animate-pulse"
+                ></span>
+                v{site.version}
+            </span>
 
-    <!-- Left: Marketing copy -->
-    <div class="flex flex-col justify-center">
-      <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border border-primary/10 bg-primary/5 text-secondary mb-8 w-fit">
-        <span class="w-1.5 h-1.5 rounded-full bg-secondary animate-pulse"></span>
-        v{site.version}
-      </span>
+            <h1
+                class="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-[1.08] tracking-tight mb-6"
+            >
+                Environment variables you can <span class="text-secondary"
+                    >trust at runtime</span
+                >
+            </h1>
 
-      <h1 class="text-4xl sm:text-5xl lg:text-6xl font-extrabold leading-[1.08] tracking-tight mb-6">
-        Type-safe env vars<br />powered by <span class="text-secondary">Effect Schema</span>
-      </h1>
+            <p class="text-muted text-lg leading-relaxed max-w-lg mb-10">
+                {site.description}
+            </p>
 
-      <p class="text-muted text-lg leading-relaxed max-w-lg mb-10">
-        {site.description}
-      </p>
+            <div class="flex flex-col sm:flex-row items-start gap-3 mb-8">
+                <a
+                    href={`${import.meta.env.BASE_URL}/docs/getting-started`}
+                    class="group inline-flex items-center px-6 py-3 rounded-xl bg-linear-to-r from-secondary to-tertiary text-white font-semibold text-sm shadow-[0_0_20px_rgba(234,107,62,0.25)] hover:shadow-[0_0_30px_rgba(234,107,62,0.4)] transition-all duration-300"
+                >
+                    Get Started
+                    <svg
+                        class="ml-2 w-4 h-4 transition-transform group-hover:translate-x-0.5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                        ><path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"
+                        ></path></svg
+                    >
+                </a>
+                <a
+                    href={site.npm}
+                    class="inline-flex items-center px-6 py-3 rounded-xl border border-primary/15 text-primary font-semibold text-sm hover:bg-primary/5 hover:border-primary/25 transition-all duration-300"
+                >
+                    View on npm
+                </a>
+            </div>
 
-      <div class="flex flex-col sm:flex-row items-start gap-3 mb-8">
-        <a
-          href="/docs/getting-started"
-          class="group inline-flex items-center px-6 py-3 rounded-xl bg-gradient-to-r from-secondary to-tertiary text-white font-semibold text-sm shadow-[0_0_20px_rgba(234,107,62,0.25)] hover:shadow-[0_0_30px_rgba(234,107,62,0.4)] transition-all duration-300"
-        >
-          Get Started
-          <svg class="ml-2 w-4 h-4 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" /></svg>
-        </a>
-        <a
-          href={site.npm}
-          class="inline-flex items-center px-6 py-3 rounded-xl border border-primary/15 text-primary font-semibold text-sm hover:bg-primary/5 hover:border-primary/25 transition-all duration-300"
-        >
-          View on npm
-        </a>
-      </div>
+            <!-- Install bar -->
+            <div
+                class="inline-flex items-center gap-3 border border-primary/10 bg-primary/[0.03] backdrop-blur-sm rounded-xl px-5 py-3 w-fit"
+            >
+                <span class="text-secondary text-sm select-none font-mono"
+                    >$</span
+                >
+                <code class="font-mono text-sm text-primary/70 select-all"
+                    >{site.install}</code
+                >
+                <CopyButton
+                    client:idle
+                    content={site.install}
+                    variant="ghost"
+                    className="text-muted hover:text-primary"
+                />
+            </div>
+        </div>
 
-      <!-- Install bar -->
-      <div class="inline-flex items-center gap-3 border border-primary/10 bg-primary/[0.03] backdrop-blur-sm rounded-xl px-5 py-3 w-fit">
-        <span class="text-secondary text-sm select-none font-mono">$</span>
-        <code class="font-mono text-sm text-primary/70 select-all">{site.install}</code>
-        <CopyButton client:idle content={site.install} variant="ghost" className="text-muted hover:text-primary" />
-      </div>
-    </div>
-
-    <!-- Right: Code card with perspective -->
-    <div class="flex items-center justify-center lg:justify-end">
-      <div class="code-card w-full max-w-lg">
-        <div class="rounded-2xl overflow-hidden bg-primary">
-          <div class="flex items-center gap-1.5 px-5 pt-4 pb-0">
-            <span class="w-2.5 h-2.5 rounded-full bg-white/10"></span>
-            <span class="w-2.5 h-2.5 rounded-full bg-white/10"></span>
-            <span class="w-2.5 h-2.5 rounded-full bg-white/10"></span>
-            <span class="text-[11px] text-white/20 ml-2 font-mono">env.ts</span>
-          </div>
-          <pre class="px-5 py-5 text-[13px] leading-relaxed overflow-x-auto"><code class="text-background"><span class="tok-kw">import</span> <span class="tok-punct">{"{"}</span> createEnv <span class="tok-punct">{"}"}</span> <span class="tok-kw">from</span> <span class="tok-str">"@ayronforge/better-env"</span>
+        <!-- Right: Code card with perspective -->
+        <div class="flex items-center justify-center lg:justify-end">
+            <div class="code-card w-full max-w-xl">
+                <div class="rounded-2xl overflow-hidden bg-primary">
+                    <div class="flex items-center gap-1.5 px-5 pt-4 pb-0">
+                        <span class="w-2.5 h-2.5 rounded-full bg-white/10"
+                        ></span>
+                        <span class="w-2.5 h-2.5 rounded-full bg-white/10"
+                        ></span>
+                        <span class="w-2.5 h-2.5 rounded-full bg-white/10"
+                        ></span>
+                        <span class="text-[11px] text-white/20 ml-2 font-mono"
+                            >env.ts</span
+                        >
+                    </div>
+                    <pre
+                        class="px-5 py-5 text-[13px] leading-relaxed overflow-x-auto"><code class="text-background"><span class="tok-kw">import</span> <span class="tok-punct">{"{"}</span> createEnv<span class="tok-punct">,</span> redacted<span class="tok-punct">,</span> url <span class="tok-punct">{"}"}</span> <span class="tok-kw">from</span> <span class="tok-str">"@ayronforge/better-env"</span>
 <span class="tok-kw">import</span> <span class="tok-punct">{"{"}</span> Schema <span class="tok-punct">{"}"}</span> <span class="tok-kw">from</span> <span class="tok-str">"effect"</span>
 
 <span class="tok-kw">export const</span> env <span class="tok-punct">=</span> <span class="tok-fn">createEnv</span><span class="tok-punct">({"{"}</span>
   <span class="tok-prop">server</span><span class="tok-punct">:</span> <span class="tok-punct">{"{"}</span>
+    <span class="tok-prop">OPENAI_API_KEY</span><span class="tok-punct">:</span> <span class="tok-fn">redacted</span><span class="tok-punct">(</span><span class="tok-fn">Schema.String</span><span class="tok-punct">),</span>
     <span class="tok-prop">DATABASE_URL</span><span class="tok-punct">:</span> <span class="tok-fn">Schema.String</span><span class="tok-punct">,</span>
-    <span class="tok-prop">API_SECRET</span><span class="tok-punct">:</span> <span class="tok-fn">Schema.Redacted</span><span class="tok-punct">(</span><span class="tok-fn">Schema.String</span><span class="tok-punct">),</span>
-    <span class="tok-prop">PORT</span><span class="tok-punct">:</span> <span class="tok-fn">Schema.NumberFromString</span><span class="tok-punct">,</span>
+    <span class="tok-prop">VECTOR_STORE_URL</span><span class="tok-punct">:</span> <span class="tok-fn">url</span><span class="tok-punct">,</span>
   <span class="tok-punct">{"}"},</span>
   <span class="tok-prop">client</span><span class="tok-punct">:</span> <span class="tok-punct">{"{"}</span>
-    <span class="tok-prop">NEXT_PUBLIC_APP_URL</span><span class="tok-punct">:</span> <span class="tok-fn">Schema.String</span><span class="tok-punct">,</span>
+    <span class="tok-prop">NEXT_PUBLIC_APP_URL</span><span class="tok-punct">:</span> <span class="tok-fn">url</span><span class="tok-punct">,</span>
   <span class="tok-punct">{"}"},</span>
   <span class="tok-prop">shared</span><span class="tok-punct">:</span> <span class="tok-punct">{"{"}</span>
     <span class="tok-prop">NODE_ENV</span><span class="tok-punct">:</span> <span class="tok-fn">Schema.Literal</span><span class="tok-punct">(</span>
@@ -73,21 +110,23 @@ import { site } from "../data/content.ts";
     <span class="tok-punct">),</span>
   <span class="tok-punct">{"}"},</span>
 <span class="tok-punct">{"}"})</span></code></pre>
+                </div>
+            </div>
         </div>
-      </div>
     </div>
-  </div>
 </section>
 
 <style>
-  .code-card {
-    transform: perspective(1200px) rotateY(-4deg);
-    transition: transform 0.4s ease;
-  }
-  .code-card:hover {
-    transform: perspective(1200px) rotateY(-2deg);
-  }
-  .code-card > div {
-    box-shadow: 0 0 60px rgba(234, 107, 62, 0.1), 0 20px 60px rgba(0, 0, 0, 0.15);
-  }
+    .code-card {
+        transform: perspective(1200px) rotateY(-4deg);
+        transition: transform 0.4s ease;
+    }
+    .code-card:hover {
+        transform: perspective(1200px) rotateY(-2deg);
+    }
+    .code-card > div {
+        box-shadow:
+            0 0 60px rgba(234, 107, 62, 0.1),
+            0 20px 60px rgba(0, 0, 0, 0.15);
+    }
 </style>

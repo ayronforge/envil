@@ -16,7 +16,7 @@ const crumbs = getBreadcrumbs(currentSlug);
       {i === crumbs.length - 1 ? (
         <span class="text-primary font-medium">{crumb.title}</span>
       ) : (
-        <a href={`/docs${crumb.slug ? `/${crumb.slug}` : ""}`} class="hover:text-primary transition-colors">
+        <a href={`${import.meta.env.BASE_URL}/docs${crumb.slug ? `/${crumb.slug}` : ""}`} class="hover:text-primary transition-colors">
           {crumb.title}
         </a>
       )}

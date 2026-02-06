@@ -3,9 +3,10 @@ import type { NavSection } from "@/data/docs-nav";
 interface SidebarProps {
   sections: NavSection[];
   currentSlug: string;
+  baseUrl: string;
 }
 
-export function Sidebar({ sections, currentSlug }: SidebarProps) {
+export function Sidebar({ sections, currentSlug, baseUrl }: SidebarProps) {
   return (
     <nav className="space-y-6 text-sm">
       {sections.map((section) => (
@@ -15,7 +16,7 @@ export function Sidebar({ sections, currentSlug }: SidebarProps) {
           </h4>
           <ul className="space-y-0.5">
             {section.items.map((item) => {
-              const href = item.slug === "" ? "/docs" : `/docs/${item.slug}`;
+              const href = item.slug === "" ? `${baseUrl}/docs` : `${baseUrl}/docs/${item.slug}`;
               const isActive = currentSlug === item.slug;
               return (
                 <li key={item.slug}>

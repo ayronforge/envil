@@ -71,9 +71,7 @@ export function getBreadcrumbs(currentSlug: string) {
   const flat = getFlatNavItems();
   const item = flat.find((i) => i.slug === currentSlug);
   if (!item) return [{ title: "Docs", slug: "" }];
-  const crumbs: { title: string; slug: string }[] = [
-    { title: "Docs", slug: "" },
-  ];
+  const crumbs: { title: string; slug: string }[] = [{ title: "Docs", slug: "" }];
   if (item.section !== "Getting Started" || item.slug !== "") {
     crumbs.push({ title: item.section, slug: "" });
   }
