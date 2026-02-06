@@ -1,0 +1,122 @@
+---
+title: Schema Helpers
+description: Utility functions for adding defaults, marking values as redacted, and parsing JSON environment variables.
+order: 5
+---
+
+import Callout from "@/components/docs/Callout.astro";
+
+better-env provides three helper functions for common patterns when defining environment variable schemas.
+
+```ts
+import { withDefault, redacted, json } from "@ayronforge/better-env"
+```
+
+## withDefault
+
+Adds a default value to a schema, making the variable optional. If the env var is missing, the default value is used instead.
+
+`withDefault` supports both data-first and pipe-style usage:
+
+### Data-first style
+
+```ts
+import { withDefault, port } from "@ayronforge/better-env"
+
+createEnv({
+  server: {
+    PORT: withDefault(port, 3000),
+    // If PORT is not set, defaults to 3000
+  },
+})
+```
+
+### Pipe style
+
+```ts
+import { withDefault, port } from "@ayronforge/better-env"
+
+createEnv({
+  server: {
+    PORT: port.pipe(withDefault(3000)),
+  },
+})
+```
+
+Both styles produce the same result. Use whichever reads better in your codebase.
+
+<Callout type="note">
+  `withDefault` wraps the schema in `Schema.UndefinedOr(...)` and applies a transform that substitutes `undefined` with the default value. The resulting type reflects the schema's output type — e.g., `withDefault(port, 3000)` produces `number`, not `number | undefined`.
+</Callout>
+
+## redacted
+
+Wraps a schema with Effect's `Redacted` type. This prevents accidental logging of sensitive values while still giving you the plain value when accessing the env object.
+
+```ts
+import { redacted } from "@ayronforge/better-env"
+import { Schema } from "effect"
+
+createEnv({
+  server: {
+    API_SECRET: redacted(Schema.String),
+    // Equivalent to: Schema.Redacted(Schema.String)
+  },
+})
+
+// Access the value — automatically unwrapped by the proxy
+const secret: string = env.API_SECRET
+```
+
+The `redacted` helper is a shorthand for `Schema.Redacted(schema)`. If you log the raw validated data (before proxy unwrapping), the value appears as `<redacted>` instead of the actual secret.
+
+## json
+
+Parses a JSON string env var and validates the parsed result against an inner schema:
+
+```ts
+import { json } from "@ayronforge/better-env"
+import { Schema } from "effect"
+
+createEnv({
+  server: {
+    // FEATURE_FLAGS='{"darkMode":true,"newUI":false}'
+    FEATURE_FLAGS: json(Schema.Struct({
+      darkMode: Schema.Boolean,
+      newUI: Schema.Boolean,
+    })),
+  },
+})
+```
+
+The `json` helper is equivalent to `Schema.parseJson(schema)`. It first parses the string as JSON, then validates the result against the provided schema.
+
+### Validation behavior
+
+If the env var is not valid JSON, or if the parsed JSON doesn't match the inner schema, validation fails:
+
+```
+FEATURE_FLAGS: Expected valid JSON, but got '{ invalid json'
+```
+
+## Composing helpers
+
+Helpers can be composed together:
+
+```ts
+import { withDefault, redacted, json } from "@ayronforge/better-env"
+import { Schema } from "effect"
+
+createEnv({
+  server: {
+    // Optional JSON config with a default
+    APP_CONFIG: withDefault(
+      json(Schema.Struct({ debug: Schema.Boolean })),
+      { debug: false },
+    ),
+
+    // Redacted string with a default
+    API_KEY: redacted(Schema.String).pipe(withDefault("dev-key")),
+  },
+})
+```

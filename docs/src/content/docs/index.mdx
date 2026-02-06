@@ -1,0 +1,71 @@
+---
+title: Introduction
+description: Type-safe environment variables powered by Effect Schema. Validate, transform, and manage env vars with full TypeScript inference.
+order: 1
+---
+
+import Card from "@/components/docs/Card.astro";
+import CardGroup from "@/components/docs/CardGroup.astro";
+import Callout from "@/components/docs/Callout.astro";
+
+`@ayronforge/better-env` is a type-safe environment variable library built on [Effect Schema](https://effect.website/docs/schema/introduction). It validates your env vars at startup, gives you full TypeScript inference, and prevents client-side access to server secrets.
+
+## Why better-env?
+
+Environment variables are stringly-typed by default. A missing `DATABASE_URL` or a malformed `PORT` shouldn't crash your app deep in a request handler — it should fail **immediately** at startup with a clear error message.
+
+**better-env** gives you:
+
+- **Runtime validation** — every env var is parsed through Effect Schema at startup
+- **Full type inference** — your `env` object is fully typed from your schema definitions, no manual annotations needed
+- **Client/server separation** — define `server`, `client`, and `shared` buckets; accessing a server variable on the client throws at runtime
+- **Framework presets** — pre-configured prefix rules for Next.js, Vite, and Expo
+- **Cloud secret resolution** — pull env vars from AWS Secrets Manager, GCP, Azure Key Vault, or 1Password
+- **Composable configs** — split env definitions across modules and merge them with `extends`
+
+## Quick example
+
+```ts
+import { createEnv, port, requiredString, boolean } from "@ayronforge/better-env"
+import { Schema } from "effect"
+
+export const env = createEnv({
+  server: {
+    DATABASE_URL: requiredString,
+    PORT: port,
+    DEBUG: boolean,
+  },
+  client: {
+    NEXT_PUBLIC_API_URL: requiredString,
+  },
+  shared: {
+    NODE_ENV: Schema.Literal("development", "production", "test"),
+  },
+})
+
+// Fully typed: env.DATABASE_URL is string, env.PORT is number
+console.log(env.DATABASE_URL)
+```
+
+If any variable is missing or invalid, you get a clear error at startup:
+
+```
+EnvValidationError: Invalid environment variables:
+DATABASE_URL: Expected a string with a length of at least 1, but got undefined
+PORT: Expected Port (1-65535), but got "not-a-number"
+```
+
+<CardGroup>
+  <Card title="Quickstart" href="/docs/getting-started">
+    Install better-env and create your first type-safe env config in minutes.
+  </Card>
+  <Card title="Core Concepts" href="/docs/core-concepts">
+    Learn about validation, client/server separation, and the proxy model.
+  </Card>
+  <Card title="Built-in Schemas" href="/docs/schemas">
+    Explore all the ready-to-use schemas for strings, numbers, URLs, and more.
+  </Card>
+  <Card title="Resolvers" href="/docs/resolvers">
+    Pull secrets from AWS, GCP, Azure, or 1Password at startup.
+  </Card>
+</CardGroup>

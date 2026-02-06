@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #0E1319;
+  --color-secondary: #EA6B3E;
+  --color-tertiary: #C6794B;
+  --color-background: #F1EDE4;
+  --color-muted: #8A8579;
+  --color-card: #FFFFFF;
+  --color-border: #E5DDD3;
+
+  --font-sans: "Space Grotesk", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-display-mono: "Space Mono", monospace;
+}
+
+[data-theme="dark"] {
+  --color-primary: #F1EDE4;
+  --color-background: #0E1319;
+  --color-card: #161B22;
+  --color-border: rgba(255, 255, 255, 0.08);
+}
+
+/* Glass cards */
+.glass-card {
+  background: rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(14, 19, 25, 0.06);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.glass-hover {
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+.glass-hover:hover {
+  border-color: rgba(234, 107, 62, 0.3);
+  box-shadow: 0 0 30px rgba(234, 107, 62, 0.08), 0 4px 20px rgba(0, 0, 0, 0.04);
+}
+
+/* Token colors for dark code blocks */
+.tok-kw { color: #EA6B3E; }
+.tok-str { color: #F1EDE4; }
+.tok-fn { color: #C6794B; }
+.tok-prop { color: rgba(241, 237, 228, 0.7); }
+.tok-punct { color: #8A8579; }
+
+pre, code {
+  font-family: "JetBrains Mono", monospace;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse { animation: none; }
+}

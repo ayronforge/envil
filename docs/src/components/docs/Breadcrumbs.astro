@@ -1,0 +1,25 @@
+---
+import { getBreadcrumbs } from "@/data/docs-nav";
+
+interface Props {
+  currentSlug: string;
+}
+
+const { currentSlug } = Astro.props;
+const crumbs = getBreadcrumbs(currentSlug);
+---
+
+<nav aria-label="Breadcrumb" class="flex items-center gap-1.5 text-sm text-muted mb-6">
+  {crumbs.map((crumb, i) => (
+    <>
+      {i > 0 && <span class="text-border">/</span>}
+      {i === crumbs.length - 1 ? (
+        <span class="text-primary font-medium">{crumb.title}</span>
+      ) : (
+        <a href={`/docs${crumb.slug ? `/${crumb.slug}` : ""}`} class="hover:text-primary transition-colors">
+          {crumb.title}
+        </a>
+      )}
+    </>
+  ))}
+</nav>

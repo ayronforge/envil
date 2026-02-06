@@ -1,0 +1,126 @@
+---
+title: AWS Secrets Manager
+description: Resolve environment variables from AWS Secrets Manager with batch fetching and JSON key extraction.
+order: 10
+---
+
+import TypeTable from "@/components/docs/TypeTable.astro";
+import Callout from "@/components/docs/Callout.astro";
+import Tabs from "@/components/docs/Tabs.astro";
+
+## Installation
+
+Install the AWS SDK peer dependency:
+
+<Tabs items={["npm", "pnpm", "bun", "yarn"]} persist="pkg-manager">
+  <div>
+    ```bash
+    npm install @aws-sdk/client-secrets-manager
+    ```
+  </div>
+  <div>
+    ```bash
+    pnpm add @aws-sdk/client-secrets-manager
+    ```
+  </div>
+  <div>
+    ```bash
+    bun add @aws-sdk/client-secrets-manager
+    ```
+  </div>
+  <div>
+    ```bash
+    yarn add @aws-sdk/client-secrets-manager
+    ```
+  </div>
+</Tabs>
+
+## Basic usage
+
+```ts
+import { createEnv, requiredString } from "@ayronforge/better-env"
+import { fromAwsSecrets } from "@ayronforge/better-env/aws"
+import { Effect } from "effect"
+
+const envEffect = createEnv({
+  server: {
+    DATABASE_URL: requiredString,
+    API_KEY: requiredString,
+  },
+  resolvers: [
+    fromAwsSecrets({
+      secrets: {
+        DATABASE_URL: "prod/database-url",
+        API_KEY: "prod/api-key",
+      },
+      region: "us-east-1",
+    }),
+  ],
+})
+
+const env = await Effect.runPromise(envEffect)
+```
+
+## Options
+
+<TypeTable rows={[
+  { name: "secrets", type: "Record<string, string>", required: true, description: "Map of env var names to AWS secret IDs. Supports #jsonKey syntax for JSON extraction." },
+  { name: "client", type: "AwsSecretsClient", description: "Custom client instance. If omitted, the SDK is lazily imported and initialized." },
+  { name: "region", type: "string", description: "AWS region for the Secrets Manager client." },
+]} />
+
+## JSON key extraction
+
+If a secret stores a JSON object, you can extract a specific field using the `#key` syntax:
+
+```ts
+fromAwsSecrets({
+  secrets: {
+    // Secret "prod/database" contains: {"url": "postgres://...", "pool": "10"}
+    DATABASE_URL: "prod/database#url",
+    DB_POOL_SIZE: "prod/database#pool",
+  },
+})
+```
+
+This fetches the `prod/database` secret once and extracts the `url` and `pool` fields separately.
+
+## Batch optimization
+
+The resolver automatically groups secrets by ID and uses `BatchGetSecretValue` for multiple secrets (in batches of 20). For a single secret, it uses `GetSecretValue` directly.
+
+This means mapping multiple env vars to the same secret ID (with different JSON keys) results in only one API call:
+
+```ts
+fromAwsSecrets({
+  secrets: {
+    DB_HOST: "prod/database#host",
+    DB_PORT: "prod/database#port",
+    DB_NAME: "prod/database#name",
+    // Only 1 API call for all 3 env vars
+  },
+})
+```
+
+## Custom client
+
+You can provide your own client for testing or custom configuration:
+
+```ts
+fromAwsSecrets({
+  secrets: { API_KEY: "test-secret" },
+  client: {
+    getSecret: async (secretId) => {
+      // Return mock value for testing
+      return "mock-api-key"
+    },
+    batchGetSecrets: async (secretIds) => {
+      return new Map(secretIds.map((id) => [id, "mock-value"]))
+    },
+  },
+})
+```
+
+<Callout type="tip">
+  The custom client interface has two methods: `getSecret` for single lookups and `batchGetSecrets` for batch operations. This lets you mock the resolver in tests without installing the AWS SDK.
+</Callout>

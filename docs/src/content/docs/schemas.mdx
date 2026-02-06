@@ -1,0 +1,172 @@
+---
+title: Built-in Schemas
+description: Reference for all built-in schemas — strings, numbers, URLs, booleans, and parsed types.
+order: 4
+---
+
+import TypeTable from "@/components/docs/TypeTable.astro";
+import Callout from "@/components/docs/Callout.astro";
+
+better-env ships with a set of ready-to-use schemas for common environment variable patterns. All schemas are exported from the main package.
+
+```ts
+import { requiredString, port, boolean, url } from "@ayronforge/better-env"
+```
+
+## String schemas
+
+<TypeTable rows={[
+  { name: "requiredString", type: "string", description: "Non-empty string. Fails if the value is undefined or empty." },
+  { name: "optionalString", type: "string | undefined", description: "Optional string. Allows undefined values." },
+]} />
+
+```ts
+import { requiredString, optionalString } from "@ayronforge/better-env"
+
+createEnv({
+  server: {
+    API_KEY: requiredString,       // must be present and non-empty
+    OPTIONAL_FLAG: optionalString,  // can be undefined
+  },
+})
+```
+
+## Number schemas
+
+<TypeTable rows={[
+  { name: "positiveNumber", type: "number", description: "Positive number parsed from string. Must be > 0." },
+  { name: "integer", type: "number", description: "Integer parsed from string. No decimals allowed." },
+  { name: "nonNegativeNumber", type: "number", description: "Non-negative number parsed from string. Must be >= 0." },
+  { name: "port", type: "number", description: "Port number (1–65535), parsed from string." },
+]} />
+
+```ts
+import { port, positiveNumber, integer } from "@ayronforge/better-env"
+
+createEnv({
+  server: {
+    PORT: port,                    // 1-65535
+    MAX_RETRIES: integer,          // whole number
+    RATE_LIMIT: positiveNumber,    // > 0
+  },
+})
+```
+
+## Boolean schema
+
+<TypeTable rows={[
+  { name: "boolean", type: "boolean", description: "Parses 'true', 'false', '1', '0' (case-insensitive) into a boolean." },
+]} />
+
+```ts
+import { boolean } from "@ayronforge/better-env"
+
+createEnv({
+  server: {
+    DEBUG: boolean,       // "true" → true, "0" → false
+    VERBOSE: boolean,
+  },
+})
+```
+
+## URL schemas
+
+<TypeTable rows={[
+  { name: "url", type: "string", description: "Valid HTTP or HTTPS URL." },
+  { name: "postgresUrl", type: "string", description: "PostgreSQL connection URL (postgres:// or postgresql://)." },
+  { name: "redisUrl", type: "string", description: "Redis connection URL (redis:// or rediss://)." },
+  { name: "mongoUrl", type: "string", description: "MongoDB connection URL (mongodb:// or mongodb+srv://)." },
+  { name: "mysqlUrl", type: "string", description: "MySQL connection URL (mysql:// or mysqls://)." },
+  { name: "commaSeparatedUrls", type: "string[]", description: "Comma-separated list of valid HTTP/HTTPS URLs." },
+]} />
+
+```ts
+import { url, postgresUrl, redisUrl } from "@ayronforge/better-env"
+
+createEnv({
+  server: {
+    DATABASE_URL: postgresUrl,     // postgresql://user:pass@host:5432/db
+    REDIS_URL: redisUrl,           // redis://localhost:6379/0
+    WEBHOOK_URL: url,              // https://example.com/webhook
+  },
+})
+```
+
+## Comma-separated schemas
+
+<TypeTable rows={[
+  { name: "commaSeparated", type: "string[]", description: "Splits a comma-separated string into a trimmed string array." },
+  { name: "commaSeparatedNumbers", type: "number[]", description: "Splits a comma-separated string into a number array. Throws if any item isn't a valid number." },
+]} />
+
+```ts
+import { commaSeparated, commaSeparatedNumbers } from "@ayronforge/better-env"
+
+createEnv({
+  server: {
+    ALLOWED_ORIGINS: commaSeparated,        // "a.com, b.com" → ["a.com", "b.com"]
+    RETRY_DELAYS: commaSeparatedNumbers,    // "100,200,500" → [100, 200, 500]
+  },
+})
+```
+
+## Parameterized schemas
+
+### `stringEnum`
+
+Creates a schema that accepts only the specified literal values:
+
+```ts
+import { stringEnum } from "@ayronforge/better-env"
+
+createEnv({
+  shared: {
+    LOG_LEVEL: stringEnum(["debug", "info", "warn", "error"]),
+    // Type: "debug" | "info" | "warn" | "error"
+  },
+})
+```
+
+### `json`
+
+Parses a JSON string and validates the result against an inner schema:
+
+```ts
+import { json } from "@ayronforge/better-env"
+import { Schema } from "effect"
+
+createEnv({
+  server: {
+    // JSON_CONFIG='{"retries":3,"timeout":5000}'
+    JSON_CONFIG: json(Schema.Struct({
+      retries: Schema.Number,
+      timeout: Schema.Number,
+    })),
+  },
+})
+```
+
+## Using Effect Schema directly
+
+Any Effect Schema works as a validator. The built-in schemas are just convenience wrappers:
+
+```ts
+import { Schema } from "effect"
+
+createEnv({
+  server: {
+    PORT: Schema.NumberFromString,
+    NODE_ENV: Schema.Literal("development", "production", "test"),
+    API_KEY: Schema.String.pipe(Schema.minLength(32)),
+    CUSTOM: Schema.transform(
+      Schema.String,
+      Schema.Number,
+      { decode: (s) => parseInt(s, 16), encode: (n) => n.toString(16) },
+    ),
+  },
+})
+```
+
+<Callout type="tip">
+  If you need a schema that doesn't exist as a built-in, just use Effect Schema directly. better-env accepts any `Schema.Schema<any, any, never>`.
+</Callout>

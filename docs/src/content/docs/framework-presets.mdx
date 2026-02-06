@@ -1,0 +1,118 @@
+---
+title: Framework Presets
+description: Pre-configured prefix settings for Next.js, Vite, and Expo.
+order: 6
+---
+
+import TypeTable from "@/components/docs/TypeTable.astro";
+import Callout from "@/components/docs/Callout.astro";
+
+Framework presets provide pre-configured `prefix` settings for popular frameworks. They handle the client-side prefix convention so you don't have to configure it manually.
+
+```ts
+import { nextjs, vite, expo } from "@ayronforge/better-env/presets"
+```
+
+## Available presets
+
+<TypeTable rows={[
+  { name: "nextjs", type: "{ prefix: { client: \"NEXT_PUBLIC_\" } }", description: "Next.js — client variables must start with NEXT_PUBLIC_" },
+  { name: "vite", type: "{ prefix: { client: \"VITE_\" } }", description: "Vite — client variables must start with VITE_" },
+  { name: "expo", type: "{ prefix: { client: \"EXPO_PUBLIC_\" } }", description: "Expo — client variables must start with EXPO_PUBLIC_" },
+]} />
+
+## Usage
+
+Spread the preset into your `createEnv` call:
+
+### Next.js
+
+```ts
+import { createEnv, requiredString } from "@ayronforge/better-env"
+import { nextjs } from "@ayronforge/better-env/presets"
+import { Schema } from "effect"
+
+export const env = createEnv({
+  ...nextjs,
+  server: {
+    DATABASE_URL: requiredString,
+  },
+  client: {
+    NEXT_PUBLIC_API_URL: requiredString,
+    // Reads NEXT_PUBLIC_API_URL from env (prefix auto-applied)
+  },
+})
+```
+
+### Vite
+
+```ts
+import { createEnv, requiredString } from "@ayronforge/better-env"
+import { vite } from "@ayronforge/better-env/presets"
+
+export const env = createEnv({
+  ...vite,
+  server: {
+    SECRET_KEY: requiredString,
+  },
+  client: {
+    APP_URL: requiredString,
+    // Reads VITE_APP_URL from env
+  },
+  runtimeEnv: import.meta.env,  // Vite uses import.meta.env
+})
+```
+
+<Callout type="tip" title="Vite runtime env">
+  Vite doesn't expose environment variables on `process.env` by default. Pass `runtimeEnv: import.meta.env` to read from Vite's env source.
+</Callout>
+
+### Expo
+
+```ts
+import { createEnv, requiredString } from "@ayronforge/better-env"
+import { expo } from "@ayronforge/better-env/presets"
+
+export const env = createEnv({
+  ...expo,
+  client: {
+    API_URL: requiredString,
+    // Reads EXPO_PUBLIC_API_URL from env
+  },
+})
+```
+
+## How presets work
+
+Presets are plain objects with a `prefix` property. For example, the Next.js preset is:
+
+```ts
+export const nextjs = { prefix: { client: "NEXT_PUBLIC_" } } as const
+```
+
+When you spread `...nextjs` into `createEnv`, it sets the `prefix` option to `{ client: "NEXT_PUBLIC_" }`. This means:
+
+- **Server variables** have no prefix (read as-is)
+- **Client variables** are prefixed with `NEXT_PUBLIC_`
+- **Shared variables** have no prefix
+
+## Creating custom presets
+
+You can create your own preset for any prefix convention:
+
+```ts
+const myPreset = {
+  prefix: {
+    client: "PUBLIC_",
+    server: "SERVER_",
+    shared: "SHARED_",
+  },
+} as const
+
+createEnv({
+  ...myPreset,
+  server: { DB_URL: requiredString },    // reads SERVER_DB_URL
+  client: { API_URL: requiredString },   // reads PUBLIC_API_URL
+  shared: { NODE_ENV: requiredString },  // reads SHARED_NODE_ENV
+})
+```

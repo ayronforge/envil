@@ -1,0 +1,110 @@
+---
+title: Azure Key Vault
+description: Resolve environment variables from Azure Key Vault with managed identity support.
+order: 12
+---
+
+import TypeTable from "@/components/docs/TypeTable.astro";
+import Callout from "@/components/docs/Callout.astro";
+import Tabs from "@/components/docs/Tabs.astro";
+
+## Installation
+
+Install the Azure SDK peer dependencies:
+
+<Tabs items={["npm", "pnpm", "bun", "yarn"]} persist="pkg-manager">
+  <div>
+    ```bash
+    npm install @azure/keyvault-secrets @azure/identity
+    ```
+  </div>
+  <div>
+    ```bash
+    pnpm add @azure/keyvault-secrets @azure/identity
+    ```
+  </div>
+  <div>
+    ```bash
+    bun add @azure/keyvault-secrets @azure/identity
+    ```
+  </div>
+  <div>
+    ```bash
+    yarn add @azure/keyvault-secrets @azure/identity
+    ```
+  </div>
+</Tabs>
+
+## Basic usage
+
+```ts
+import { createEnv, requiredString } from "@ayronforge/better-env"
+import { fromAzureKeyVault } from "@ayronforge/better-env/azure"
+import { Effect } from "effect"
+
+const envEffect = createEnv({
+  server: {
+    DATABASE_URL: requiredString,
+    API_KEY: requiredString,
+  },
+  resolvers: [
+    fromAzureKeyVault({
+      secrets: {
+        DATABASE_URL: "database-url",
+        API_KEY: "api-key",
+      },
+      vaultUrl: "https://my-vault.vault.azure.net",
+    }),
+  ],
+})
+
+const env = await Effect.runPromise(envEffect)
+```
+
+## Options
+
+<TypeTable rows={[
+  { name: "secrets", type: "Record<string, string>", required: true, description: "Map of env var names to Azure Key Vault secret names." },
+  { name: "client", type: "AzureKeyVaultClient", description: "Custom client instance. If omitted, the SDK is lazily imported." },
+  { name: "vaultUrl", type: "string", description: "Azure Key Vault URL. Required if no custom client is provided." },
+  { name: "credential", type: "unknown", description: "Azure credential. Defaults to DefaultAzureCredential." },
+]} />
+
+<Callout type="warning">
+  Either `client` or `vaultUrl` must be provided. If neither is set, the resolver fails with a `ResolverError`.
+</Callout>
+
+## Default credentials
+
+By default, the resolver uses `DefaultAzureCredential` from `@azure/identity`, which supports:
+
+- Managed identity (Azure VMs, App Service, Functions)
+- Azure CLI credentials (local development)
+- Environment variables (`AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`)
+
+You can provide a custom credential:
+
+```ts
+import { ClientSecretCredential } from "@azure/identity"
+
+fromAzureKeyVault({
+  secrets: { API_KEY: "api-key" },
+  vaultUrl: "https://my-vault.vault.azure.net",
+  credential: new ClientSecretCredential(tenantId, clientId, clientSecret),
+})
+```
+
+## Custom client
+
+Provide your own client for testing:
+
+```ts
+fromAzureKeyVault({
+  secrets: { API_KEY: "test-secret" },
+  client: {
+    getSecret: async (name) => {
+      return { value: "mock-api-key" }
+    },
+  },
+})
+```

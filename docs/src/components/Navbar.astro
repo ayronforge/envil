@@ -1,0 +1,19 @@
+---
+import { site } from "../data/content.ts";
+---
+
+<nav class="flex items-center justify-between px-6 lg:px-12 py-6">
+    <img src="/logo.svg" alt="ayron forge" class="h-7" />
+    <div class="flex items-center gap-4">
+        <a
+            href="/docs"
+            class="text-sm text-muted hover:text-primary transition-colors"
+            >Docs</a
+        >
+        <a
+            href={site.github}
+            class="text-sm text-muted hover:text-primary transition-colors"
+            >GitHub</a
+        >
+    </div>
+</nav>

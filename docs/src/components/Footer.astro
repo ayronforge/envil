@@ -1,0 +1,19 @@
+---
+import { SocialIcon } from "./social-icon.tsx";
+import { site } from "../data/content.ts";
+---
+
+<footer class="border-t border-primary/10 py-12 px-6">
+  <div class="max-w-6xl mx-auto flex flex-col items-center gap-4">
+    <div class="flex items-center gap-4">
+      <span class="text-sm text-muted">MIT License</span>
+      <a href={site.github} class="hover:opacity-70 transition-opacity">
+        <SocialIcon client:idle icon="github" color="black" className="size-5" />
+      </a>
+      <a href={site.npm} class="hover:opacity-70 transition-opacity">
+        <SocialIcon client:idle icon="npm" color="black" className="size-5" />
+      </a>
+    </div>
+    <span class="text-xs text-muted/60">forged by AyronForge</span>
+  </div>
+</footer>

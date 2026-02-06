@@ -1,0 +1,104 @@
+---
+interface Props {
+  items: string[];
+  persist?: string;
+}
+
+const { items, persist } = Astro.props;
+---
+
+<tabs-switcher data-persist={persist} data-items={JSON.stringify(items)}>
+  <div class="flex border-b border-border mb-0" data-tab-list>
+    {items.map((item, i) => (
+      <button
+        data-tab={i}
+        class:list={[
+          "tab-btn px-4 py-2 text-sm font-medium transition-colors cursor-pointer",
+          i === 0 ? "text-secondary border-b-2 border-secondary -mb-px" : "text-muted hover:text-primary",
+        ]}
+      >
+        {item}
+      </button>
+    ))}
+  </div>
+  <div class="pt-4" data-tab-panels>
+    <slot />
+  </div>
+</tabs-switcher>
+
+<script>
+  class TabsSwitcher extends HTMLElement {
+    private _activate!: (index: number, sync?: boolean) => void;
+    private _persist: string | undefined;
+    private _items: string[] = [];
+    private _onStorage = (e: StorageEvent) => {
+      if (e.key === this._persist && e.newValue) {
+        const idx = this._items.indexOf(e.newValue);
+        if (idx !== -1) this._activate(idx, false);
+      }
+    };
+
+    connectedCallback() {
+      this._persist = this.dataset.persist;
+      this._items = JSON.parse(this.dataset.items || "[]");
+      const buttons = this.querySelectorAll<HTMLButtonElement>("[data-tab]");
+      const panelsContainer = this.querySelector("[data-tab-panels]");
+
+      if (!panelsContainer) return;
+
+      const panels = Array.from(panelsContainer.children) as HTMLElement[];
+
+      let active = 0;
+      if (this._persist) {
+        const stored = localStorage.getItem(this._persist);
+        if (stored) {
+          const idx = this._items.indexOf(stored);
+          if (idx !== -1) active = idx;
+        }
+      }
+
+      this._activate = (index: number, sync = true) => {
+        active = index;
+        panels.forEach((p, i) => (p.style.display = i === index ? "" : "none"));
+        buttons.forEach((b, i) => {
+          if (i === index) {
+            b.className =
+              "tab-btn px-4 py-2 text-sm font-medium transition-colors cursor-pointer text-secondary border-b-2 border-secondary -mb-px";
+          } else {
+            b.className =
+              "tab-btn px-4 py-2 text-sm font-medium transition-colors cursor-pointer text-muted hover:text-primary";
+          }
+        });
+        if (this._persist && sync) {
+          localStorage.setItem(this._persist, this._items[index]);
+          // Sync other tabs-switcher instances on the same page
+          document.querySelectorAll<TabsSwitcher>(`tabs-switcher[data-persist="${this._persist}"]`).forEach((el) => {
+            if (el !== this) {
+              const idx = (JSON.parse(el.dataset.items || "[]") as string[]).indexOf(this._items[index]);
+              if (idx !== -1) el._activate(idx, false);
+            }
+          });
+        }
+      };
+
+      buttons.forEach((btn, i) => {
+        btn.addEventListener("click", () => this._activate(i));
+      });
+
+      // Sync across browser tabs
+      if (this._persist) {
+        window.addEventListener("storage", this._onStorage);
+      }
+
+      this._activate(active, false);
+    }
+
+    disconnectedCallback() {
+      if (this._persist) {
+        window.removeEventListener("storage", this._onStorage);
+      }
+    }
+  }
+
+  customElements.define("tabs-switcher", TabsSwitcher);
+</script>

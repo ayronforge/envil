@@ -1,0 +1,224 @@
+---
+title: API Reference
+description: Complete API reference for @ayronforge/better-env — all functions, schemas, errors, and types.
+order: 14
+---
+
+import TypeTable from "@/components/docs/TypeTable.astro";
+
+## createEnv
+
+The main function for creating a type-safe environment object.
+
+### Without resolvers
+
+```ts
+function createEnv<TServer, TClient, TShared, TExtends>(
+  opts: EnvOptions<TServer, TClient, TShared, TExtends>
+): EnvResult<TExtends, TServer, TClient, TShared>
+```
+
+Returns a fully typed, readonly environment object immediately.
+
+### With resolvers
+
+```ts
+function createEnv<TServer, TClient, TShared, TExtends>(
+  opts: EnvOptions<TServer, TClient, TShared, TExtends> & {
+    resolvers: readonly Effect.Effect<ResolverResult, ResolverError>[]
+  }
+): Effect.Effect<EnvResult<TExtends, TServer, TClient, TShared>, ResolverError | EnvValidationError>
+```
+
+Returns an `Effect` that resolves secrets, validates all variables, and produces the env object.
+
+### Options
+
+<TypeTable rows={[
+  { name: "server", type: "Record<string, Schema>", description: "Server-only environment variable schemas. Not validated on client." },
+  { name: "client", type: "Record<string, Schema>", description: "Client-safe environment variable schemas. Validated everywhere." },
+  { name: "shared", type: "Record<string, Schema>", description: "Shared environment variable schemas. Validated and accessible everywhere." },
+  { name: "extends", type: "readonly AnyEnv[]", description: "Array of existing env objects to merge into this one." },
+  { name: "prefix", type: "string | PrefixMap", description: "Prefix applied to env var names when reading from the environment." },
+  { name: "runtimeEnv", type: "Record<string, string | undefined>", description: "Override process.env with a custom environment source." },
+  { name: "isServer", type: "boolean", description: "Override server detection. Defaults to typeof window === 'undefined'." },
+  { name: "emptyStringAsUndefined", type: "boolean", description: "Treat empty string values as undefined." },
+  { name: "onValidationError", type: "(errors: string[]) => void", description: "Callback fired before EnvValidationError is thrown." },
+  { name: "resolvers", type: "readonly Effect.Effect<ResolverResult, ResolverError>[]", description: "Array of resolver Effects. When present, createEnv returns an Effect." },
+]} />
+
+### PrefixMap
+
+```ts
+interface PrefixMap {
+  server?: string
+  client?: string
+  shared?: string
+}
+```
+
+---
+
+## Schemas
+
+All schemas are exported from `@ayronforge/better-env`.
+
+### String schemas
+
+<TypeTable rows={[
+  { name: "requiredString", type: "Schema<string, string>", description: "Non-empty string (minLength: 1)." },
+  { name: "optionalString", type: "Schema<string | undefined, string | undefined>", description: "Optional string. Allows undefined." },
+]} />
+
+### Number schemas
+
+<TypeTable rows={[
+  { name: "positiveNumber", type: "Schema<number, string>", description: "Positive number parsed from string (> 0)." },
+  { name: "integer", type: "Schema<number, string>", description: "Integer parsed from string." },
+  { name: "nonNegativeNumber", type: "Schema<number, string>", description: "Non-negative number parsed from string (>= 0)." },
+  { name: "port", type: "Schema<number, string>", description: "Port number 1–65535, parsed from string." },
+]} />
+
+### Boolean schema
+
+<TypeTable rows={[
+  { name: "boolean", type: "Schema<boolean, string>", description: "Parses 'true', 'false', '1', '0' into boolean." },
+]} />
+
+### URL schemas
+
+<TypeTable rows={[
+  { name: "url", type: "Schema<string, string>", description: "Valid HTTP or HTTPS URL." },
+  { name: "postgresUrl", type: "Schema<string, string>", description: "PostgreSQL connection URL." },
+  { name: "redisUrl", type: "Schema<string, string>", description: "Redis connection URL." },
+  { name: "mongoUrl", type: "Schema<string, string>", description: "MongoDB connection URL." },
+  { name: "mysqlUrl", type: "Schema<string, string>", description: "MySQL connection URL." },
+  { name: "commaSeparatedUrls", type: "Schema<string[], string>", description: "Comma-separated HTTP/HTTPS URLs." },
+]} />
+
+### Collection schemas
+
+<TypeTable rows={[
+  { name: "commaSeparated", type: "Schema<string[], string>", description: "Comma-separated string to trimmed string array." },
+  { name: "commaSeparatedNumbers", type: "Schema<number[], string>", description: "Comma-separated string to number array." },
+]} />
+
+### Parameterized schemas
+
+<TypeTable rows={[
+  { name: "stringEnum(values)", type: "(values: string[]) => Schema<string, string>", description: "Creates a literal union schema from the provided values." },
+  { name: "json(schema)", type: "(schema: Schema) => Schema<T, string>", description: "Parses JSON string and validates against the inner schema." },
+]} />
+
+---
+
+## Helpers
+
+<TypeTable rows={[
+  { name: "withDefault(schema, value)", type: "(schema: S, default: T) => Schema", description: "Makes a schema optional with a default value. Supports data-first and pipe style." },
+  { name: "redacted(schema)", type: "(schema: S) => Schema<Redacted<T>>", description: "Wraps schema output in Effect Redacted. Auto-unwrapped on access." },
+]} />
+
+---
+
+## Error classes
+
+### EnvValidationError
+
+```ts
+class EnvValidationError extends Error {
+  readonly _tag: "EnvValidationError"
+  readonly errors: ReadonlyArray<string>
+}
+```
+
+Thrown when environment variable validation fails. Contains all validation error messages.
+
+### ClientAccessError
+
+```ts
+class ClientAccessError extends Error {
+  readonly _tag: "ClientAccessError"
+  readonly variableName: string
+}
+```
+
+Thrown when client code accesses a server-only variable.
+
+### ResolverError
+
+```ts
+class ResolverError extends Data.TaggedError("ResolverError")<{
+  readonly resolver: string
+  readonly message: string
+  readonly cause?: unknown
+}>
+```
+
+Effect tagged error for resolver failures.
+
+---
+
+## Presets
+
+Exported from `@ayronforge/better-env/presets`.
+
+<TypeTable rows={[
+  { name: "nextjs", type: "{ prefix: { client: \"NEXT_PUBLIC_\" } }", description: "Next.js client prefix preset." },
+  { name: "vite", type: "{ prefix: { client: \"VITE_\" } }", description: "Vite client prefix preset." },
+  { name: "expo", type: "{ prefix: { client: \"EXPO_PUBLIC_\" } }", description: "Expo client prefix preset." },
+]} />
+
+---
+
+## Resolvers
+
+### fromAwsSecrets
+
+```ts
+import { fromAwsSecrets } from "@ayronforge/better-env/aws"
+```
+
+<TypeTable rows={[
+  { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → secret IDs. Supports #jsonKey syntax." },
+  { name: "client", type: "AwsSecretsClient", description: "Custom client instance." },
+  { name: "region", type: "string", description: "AWS region." },
+]} />
+
+### fromGcpSecrets
+
+```ts
+import { fromGcpSecrets } from "@ayronforge/better-env/gcp"
+```
+
+<TypeTable rows={[
+  { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → secret names or full resource paths." },
+  { name: "client", type: "GcpSecretsClient", description: "Custom client instance." },
+  { name: "projectId", type: "string", description: "GCP project ID." },
+  { name: "version", type: "string", default: '"latest"', description: "Secret version." },
+]} />
+
+### fromAzureKeyVault
+
+```ts
+import { fromAzureKeyVault } from "@ayronforge/better-env/azure"
+```
+
+<TypeTable rows={[
+  { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → Key Vault secret names." },
+  { name: "client", type: "AzureKeyVaultClient", description: "Custom client instance." },
+  { name: "vaultUrl", type: "string", description: "Azure Key Vault URL. Required if no client." },
+  { name: "credential", type: "unknown", description: "Azure credential. Defaults to DefaultAzureCredential." },
+]} />
+
+### fromOnePassword
+
+```ts
+import { fromOnePassword } from "@ayronforge/better-env/1password"
+```
+
+<TypeTable rows={[
+  { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → 1Password secret references (op:// URIs)." },
+  { name: "client", type: "{ secrets: { resolveAll } }", description: "Custom 1Password client." },
+  { name: "serviceAccountToken", type: "string", description: "1Password service account token." },
+]} />

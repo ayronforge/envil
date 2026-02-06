@@ -1,0 +1,148 @@
+---
+title: Error Handling
+description: Understand the error classes thrown by better-env and how to handle them.
+order: 8
+---
+
+import TypeTable from "@/components/docs/TypeTable.astro";
+import Callout from "@/components/docs/Callout.astro";
+
+better-env uses three distinct error types to signal different failure modes. All error classes are exported from the main package.
+
+```ts
+import { EnvValidationError, ClientAccessError } from "@ayronforge/better-env"
+```
+
+## EnvValidationError
+
+Thrown when one or more environment variables fail schema validation.
+
+<TypeTable rows={[
+  { name: "_tag", type: '"EnvValidationError"', description: "Discriminant tag for pattern matching." },
+  { name: "errors", type: "ReadonlyArray<string>", description: "Array of human-readable validation error messages." },
+  { name: "message", type: "string", description: "Formatted error message with all failures." },
+]} />
+
+### Example
+
+```ts
+import { createEnv, requiredString, port, EnvValidationError } from "@ayronforge/better-env"
+
+try {
+  const env = createEnv({
+    server: {
+      DATABASE_URL: requiredString,
+      PORT: port,
+    },
+  })
+} catch (e) {
+  if (e instanceof EnvValidationError) {
+    console.error("Validation failed:")
+    for (const error of e.errors) {
+      console.error(`  - ${error}`)
+    }
+    // Output:
+    //   - DATABASE_URL: Expected a string with a length of at least 1, but got undefined
+    //   - PORT: Expected Port (1-65535), but got "abc"
+  }
+}
+```
+
+<Callout type="note">
+  `EnvValidationError` collects **all** validation failures, not just the first one. This lets you fix all issues in a single pass rather than playing whack-a-mole.
+</Callout>
+
+### onValidationError callback
+
+You can hook into validation errors before the exception is thrown:
+
+```ts
+createEnv({
+  onValidationError: (errors) => {
+    // errors is string[] — same as EnvValidationError.errors
+    logger.error("Environment validation failed", { errors })
+  },
+  server: {
+    DATABASE_URL: requiredString,
+  },
+})
+```
+
+The callback fires **before** the error is thrown. The `EnvValidationError` is still thrown after the callback completes.
+
+## ClientAccessError
+
+Thrown when client-side code attempts to access a server-only environment variable.
+
+<TypeTable rows={[
+  { name: "_tag", type: '"ClientAccessError"', description: "Discriminant tag for pattern matching." },
+  { name: "variableName", type: "string", description: "The name of the server variable that was accessed." },
+  { name: "message", type: "string", description: "Descriptive error message." },
+]} />
+
+### Example
+
+```ts
+import { createEnv, requiredString, ClientAccessError } from "@ayronforge/better-env"
+
+const env = createEnv({
+  server: {
+    DATABASE_URL: requiredString,
+  },
+  client: {
+    NEXT_PUBLIC_API_URL: requiredString,
+  },
+  isServer: false, // simulate client-side
+})
+
+try {
+  env.DATABASE_URL // throws on client
+} catch (e) {
+  if (e instanceof ClientAccessError) {
+    console.error(e.variableName) // "DATABASE_URL"
+    // "Attempted to access server-side env var "DATABASE_URL" on client"
+  }
+}
+```
+
+## ResolverError
+
+Thrown when a [resolver](/docs/resolvers) fails to initialize or fetch secrets. This is an Effect tagged error, used in the Effect error channel.
+
+<TypeTable rows={[
+  { name: "_tag", type: '"ResolverError"', description: "Discriminant tag for Effect error handling." },
+  { name: "resolver", type: "string", description: "Name of the resolver that failed (e.g., \"aws\", \"gcp\")." },
+  { name: "message", type: "string", description: "Human-readable error message." },
+  { name: "cause", type: "unknown", description: "The underlying error, if any." },
+]} />
+
+`ResolverError` is a `Data.TaggedError` from Effect, meaning you can use it with Effect's error handling:
+
+```ts
+import { Effect } from "effect"
+import { createEnv, requiredString } from "@ayronforge/better-env"
+import { fromAwsSecrets, ResolverError } from "@ayronforge/better-env/aws"
+
+const envEffect = createEnv({
+  server: {
+    DATABASE_URL: requiredString,
+  },
+  resolvers: [
+    fromAwsSecrets({
+      secrets: { DATABASE_URL: "prod/db-url" },
+    }),
+  ],
+})
+
+// Handle resolver errors specifically
+const program = envEffect.pipe(
+  Effect.catchTag("ResolverError", (err) => {
+    console.error(`Resolver "${err.resolver}" failed: ${err.message}`)
+    return Effect.fail(err)
+  }),
+)
+```
+
+<Callout type="warning">
+  When using resolvers, `createEnv` returns an `Effect.Effect` instead of a plain object. You must run it with `Effect.runPromise` or `Effect.runSync` (or use it within an Effect pipeline).
+</Callout>

@@ -1,0 +1,112 @@
+---
+title: Quickstart
+description: Install better-env and create your first type-safe environment configuration in minutes.
+order: 2
+---
+
+import Callout from "@/components/docs/Callout.astro";
+import Tabs from "@/components/docs/Tabs.astro";
+
+## Prerequisites
+
+- **Node.js 18+** (or Bun / Deno)
+- **Effect** as a peer dependency
+
+## Installation
+
+<Tabs items={["npm", "pnpm", "bun", "yarn"]} persist="pkg-manager">
+  <div>
+    ```bash
+    npm install @ayronforge/better-env effect
+    ```
+  </div>
+  <div>
+    ```bash
+    pnpm add @ayronforge/better-env effect
+    ```
+  </div>
+  <div>
+    ```bash
+    bun add @ayronforge/better-env effect
+    ```
+  </div>
+  <div>
+    ```bash
+    yarn add @ayronforge/better-env effect
+    ```
+  </div>
+</Tabs>
+
+## Step 1: Create your env config
+
+Create a file called `env.ts` (or `env.mjs`) at the root of your project:
+
+```ts
+// env.ts
+import { createEnv, requiredString, port } from "@ayronforge/better-env"
+import { Schema } from "effect"
+
+export const env = createEnv({
+  server: {
+    DATABASE_URL: requiredString,
+    API_SECRET: Schema.Redacted(Schema.String),
+    PORT: port,
+  },
+  client: {
+    NEXT_PUBLIC_APP_URL: requiredString,
+  },
+  shared: {
+    NODE_ENV: Schema.Literal("development", "production", "test"),
+  },
+})
+```
+
+## Step 2: Use your env
+
+Import the `env` object anywhere in your app. It's fully typed:
+
+```ts
+import { env } from "./env"
+
+// TypeScript knows:
+// env.DATABASE_URL  → string
+// env.API_SECRET    → string (auto-unwrapped from Redacted)
+// env.PORT          → number
+// env.NODE_ENV      → "development" | "production" | "test"
+
+console.log(`Server running on port ${env.PORT}`)
+```
+
+## Step 3: Set your environment variables
+
+Create a `.env` file or set variables in your hosting provider:
+
+```bash
+DATABASE_URL=postgresql://user:pass@localhost:5432/mydb
+API_SECRET=super-secret-key
+PORT=3000
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NODE_ENV=development
+```
+
+## What happens on invalid env?
+
+If any variable is missing or fails validation, `createEnv` throws an `EnvValidationError` immediately:
+
+```
+EnvValidationError: Invalid environment variables:
+DATABASE_URL: Expected a string with a length of at least 1, but got undefined
+PORT: Expected Port (1-65535), but got "abc"
+```
+
+This crashes your app at startup — before any request is handled — so you catch issues immediately.
+
+<Callout type="tip" title="Framework presets">
+  Using Next.js, Vite, or Expo? Check out [Framework Presets](/docs/framework-presets) for pre-configured prefix rules so you don't have to configure `NEXT_PUBLIC_` or `VITE_` prefixes manually.
+</Callout>
+
+## Next steps
+
+- Learn about [Core Concepts](/docs/core-concepts) like client/server separation and the proxy model
+- Explore the [Built-in Schemas](/docs/schemas) for URLs, numbers, booleans, and more
+- Set up [Cloud Secret Resolution](/docs/resolvers) for production

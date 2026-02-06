@@ -1,0 +1,120 @@
+---
+title: Environment Composition
+description: Split env configs across modules and merge them with extends.
+order: 7
+---
+
+import Callout from "@/components/docs/Callout.astro";
+
+As your application grows, you may want to split environment variable definitions across modules — a database config, an auth config, a feature flags config, etc. The `extends` option lets you compose these into a single typed env object.
+
+## Why compose?
+
+Instead of one massive `createEnv` call, you can:
+
+- Define env vars close to the code that uses them
+- Reuse common configs across packages in a monorepo
+- Keep each module's env requirements self-contained
+
+## Using extends
+
+The `extends` option takes an array of existing env objects and merges them into the new one:
+
+```ts
+// db.env.ts
+import { createEnv, requiredString, port } from "@ayronforge/better-env"
+
+export const dbEnv = createEnv({
+  server: {
+    DATABASE_URL: requiredString,
+    DB_PORT: port,
+  },
+})
+
+// auth.env.ts
+import { createEnv, requiredString } from "@ayronforge/better-env"
+
+export const authEnv = createEnv({
+  server: {
+    JWT_SECRET: requiredString,
+    SESSION_TTL: requiredString,
+  },
+})
+
+// env.ts — the combined env
+import { createEnv, requiredString } from "@ayronforge/better-env"
+import { dbEnv } from "./db.env"
+import { authEnv } from "./auth.env"
+
+export const env = createEnv({
+  extends: [dbEnv, authEnv],
+  server: {
+    APP_NAME: requiredString,
+  },
+})
+
+// env has: DATABASE_URL, DB_PORT, JWT_SECRET, SESSION_TTL, APP_NAME
+```
+
+## Merge semantics
+
+When multiple configs define the same key, the **last definition wins**:
+
+1. Extended envs are merged in array order (first to last)
+2. Keys from the current `createEnv` call override extended keys
+
+```ts
+const base = createEnv({
+  server: { PORT: port },  // PORT = 3000
+})
+
+const app = createEnv({
+  extends: [base],
+  server: { PORT: port },  // This PORT overrides the one from base
+})
+```
+
+<Callout type="note">
+  Each env in `extends` is validated independently when it's created. The `extends` mechanism only merges the final validated values — it does not re-validate them.
+</Callout>
+
+## Full multi-module example
+
+```ts
+// packages/shared/env.ts
+import { createEnv } from "@ayronforge/better-env"
+import { Schema } from "effect"
+
+export const sharedEnv = createEnv({
+  shared: {
+    NODE_ENV: Schema.Literal("development", "production", "test"),
+  },
+})
+
+// packages/api/env.ts
+import { createEnv, requiredString, port } from "@ayronforge/better-env"
+import { sharedEnv } from "@shared/env"
+
+export const apiEnv = createEnv({
+  extends: [sharedEnv],
+  server: {
+    DATABASE_URL: requiredString,
+    PORT: port,
+  },
+})
+
+// packages/web/env.ts
+import { createEnv, requiredString } from "@ayronforge/better-env"
+import { nextjs } from "@ayronforge/better-env/presets"
+import { sharedEnv } from "@shared/env"
+
+export const webEnv = createEnv({
+  ...nextjs,
+  extends: [sharedEnv],
+  client: {
+    API_URL: requiredString,
+  },
+})
+```
+
+Each package gets a fully typed env with only the variables it needs, while sharing common definitions through `extends`.

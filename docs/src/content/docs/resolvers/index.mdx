@@ -1,0 +1,87 @@
+---
+title: Resolvers Overview
+description: Resolve environment variables from cloud secret managers at startup.
+order: 9
+---
+
+import Card from "@/components/docs/Card.astro";
+import CardGroup from "@/components/docs/CardGroup.astro";
+import TypeTable from "@/components/docs/TypeTable.astro";
+import Callout from "@/components/docs/Callout.astro";
+
+Resolvers let you pull environment variable values from cloud secret managers instead of (or in addition to) `process.env`. This is useful in production environments where secrets are stored in services like AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, or 1Password.
+
+## How resolvers work
+
+When you pass a `resolvers` array to `createEnv`, the return type changes from a plain object to an `Effect.Effect`:
+
+```ts
+import { createEnv, requiredString } from "@ayronforge/better-env"
+import { fromAwsSecrets } from "@ayronforge/better-env/aws"
+import { Effect } from "effect"
+
+// With resolvers → returns Effect
+const envEffect = createEnv({
+  server: {
+    DATABASE_URL: requiredString,
+    API_KEY: requiredString,
+  },
+  resolvers: [
+    fromAwsSecrets({
+      secrets: {
+        DATABASE_URL: "prod/database-url",
+        API_KEY: "prod/api-key",
+      },
+    }),
+  ],
+})
+
+// Run the Effect to get the env object
+const env = await Effect.runPromise(envEffect)
+```
+
+### Resolution flow
+
+1. All resolvers run **concurrently** (unbounded concurrency)
+2. Results are merged: `process.env` is the base, resolver results override
+3. The merged env is passed through schema validation
+4. If any resolver fails, a `ResolverError` is propagated through the Effect error channel
+
+### Merge behavior
+
+Resolver results are merged left-to-right on top of `process.env` (or `runtimeEnv`):
+
+```ts
+// Final env = { ...process.env, ...resolver1Results, ...resolver2Results }
+resolvers: [resolver1, resolver2]
+```
+
+Later resolvers override earlier ones for the same key.
+
+## Available resolvers
+
+<TypeTable rows={[
+  { name: "fromAwsSecrets", type: "@ayronforge/better-env/aws", description: "AWS Secrets Manager. Peer dep: @aws-sdk/client-secrets-manager" },
+  { name: "fromGcpSecrets", type: "@ayronforge/better-env/gcp", description: "GCP Secret Manager. Peer dep: @google-cloud/secret-manager" },
+  { name: "fromAzureKeyVault", type: "@ayronforge/better-env/azure", description: "Azure Key Vault. Peer deps: @azure/keyvault-secrets, @azure/identity" },
+  { name: "fromOnePassword", type: "@ayronforge/better-env/1password", description: "1Password. Peer dep: @1password/sdk" },
+]} />
+
+<Callout type="note">
+  Each resolver dynamically imports its cloud SDK only when needed. You must install the peer dependency for the resolver you use.
+</Callout>
+
+<CardGroup>
+  <Card title="AWS Secrets Manager" href="/docs/resolvers/aws">
+    Batch-fetch secrets with JSON key extraction and automatic SDK initialization.
+  </Card>
+  <Card title="GCP Secret Manager" href="/docs/resolvers/gcp">
+    Access secrets with full resource name support and automatic Uint8Array decoding.
+  </Card>
+  <Card title="Azure Key Vault" href="/docs/resolvers/azure">
+    Fetch secrets with DefaultAzureCredential and managed identity support.
+  </Card>
+  <Card title="1Password" href="/docs/resolvers/onepassword">
+    Resolve secrets from 1Password vaults using the SDK's batch resolution.
+  </Card>
+</CardGroup>

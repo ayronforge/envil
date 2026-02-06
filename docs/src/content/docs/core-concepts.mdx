@@ -1,0 +1,163 @@
+---
+title: Core Concepts
+description: Understand how better-env validates variables, separates client/server access, and uses a proxy for runtime safety.
+order: 3
+---
+
+import Callout from "@/components/docs/Callout.astro";
+
+## Validation flow
+
+When you call `createEnv()`, the following happens:
+
+1. **Environment source** — reads from `process.env` (or your `runtimeEnv` override)
+2. **Empty string handling** — if `emptyStringAsUndefined` is enabled, empty strings become `undefined`
+3. **Prefix resolution** — prepends the configured prefix to each key when reading the env
+4. **Schema parsing** — each variable is decoded through its Effect Schema
+5. **Error collection** — all validation errors are collected (not fail-fast) and thrown together
+6. **Proxy creation** — the validated result is wrapped in a Proxy that enforces client/server access rules
+
+If any variable fails validation, `createEnv` throws an `EnvValidationError` containing all failures at once, so you can fix them all in one pass.
+
+## Client/server separation
+
+The `server`, `client`, and `shared` buckets control where variables can be accessed:
+
+| Bucket   | Validated on server? | Validated on client? | Accessible on client? |
+|----------|---------------------|---------------------|-----------------------|
+| `server` | Yes                 | No                  | No — throws `ClientAccessError` |
+| `client` | Yes                 | Yes                 | Yes |
+| `shared` | Yes                 | Yes                 | Yes |
+
+**How it works:** The returned object is a `Proxy`. When running on the client (detected via `typeof window !== "undefined"`), accessing a key defined only in `server` throws a `ClientAccessError`.
+
+```ts
+const env = createEnv({
+  server: {
+    DATABASE_URL: requiredString,  // Only accessible on server
+  },
+  client: {
+    NEXT_PUBLIC_API_URL: requiredString,  // Accessible everywhere
+  },
+})
+
+// On the client:
+env.NEXT_PUBLIC_API_URL // ✅ works
+env.DATABASE_URL        // ❌ throws ClientAccessError
+```
+
+<Callout type="warning">
+  Server-only variables are **not validated** on the client to avoid requiring their values to be bundled. They are simply blocked from access.
+</Callout>
+
+### Overriding server detection
+
+By default, `isServer` is `typeof window === "undefined"`. You can override this:
+
+```ts
+const env = createEnv({
+  isServer: process.env.NEXT_RUNTIME !== "edge",
+  // ...
+})
+```
+
+## Prefix handling
+
+Prefixes map your schema keys to actual environment variable names. There are two formats:
+
+### String prefix
+
+Applies the same prefix to all buckets:
+
+```ts
+createEnv({
+  prefix: "MYAPP_",
+  server: { DB_URL: requiredString },  // reads MYAPP_DB_URL from env
+})
+```
+
+### Prefix map
+
+Different prefixes per bucket:
+
+```ts
+createEnv({
+  prefix: {
+    client: "NEXT_PUBLIC_",
+    server: "",  // no prefix
+  },
+  server: { DB_URL: requiredString },           // reads DB_URL
+  client: { APP_URL: requiredString },           // reads NEXT_PUBLIC_APP_URL
+})
+```
+
+This is what [framework presets](/docs/framework-presets) configure for you.
+
+## Redacted values
+
+When you use `Schema.Redacted(Schema.String)` (or the `redacted` helper), the value is wrapped in Effect's `Redacted` type during validation. This means if you accidentally log the env object, secrets appear as `<redacted>`.
+
+**better-env automatically unwraps `Redacted` values** when you access them through the proxy, so you always get the plain value:
+
+```ts
+const env = createEnv({
+  server: {
+    API_SECRET: Schema.Redacted(Schema.String),
+  },
+})
+
+// Type is `string`, not `Redacted<string>`
+const secret: string = env.API_SECRET
+```
+
+## Empty string handling
+
+Some hosting providers set environment variables to empty strings instead of leaving them undefined. Enable `emptyStringAsUndefined` to treat them as missing:
+
+```ts
+createEnv({
+  emptyStringAsUndefined: true,
+  server: {
+    OPTIONAL_VAR: Schema.optional(Schema.String),
+  },
+})
+```
+
+## Runtime env override
+
+By default, `createEnv` reads from `process.env`. You can provide a custom source:
+
+```ts
+createEnv({
+  runtimeEnv: {
+    DATABASE_URL: "postgresql://...",
+    PORT: "3000",
+  },
+  server: {
+    DATABASE_URL: requiredString,
+    PORT: port,
+  },
+})
+```
+
+This is useful for testing or for frameworks like Vite where `import.meta.env` is the source.
+
+## Validation error callback
+
+You can hook into validation errors before the exception is thrown:
+
+```ts
+createEnv({
+  onValidationError: (errors) => {
+    // Log to your error tracking service
+    Sentry.captureMessage("Env validation failed", { extra: { errors } })
+  },
+  server: {
+    DATABASE_URL: requiredString,
+  },
+})
+```
+
+<Callout type="note">
+  The `onValidationError` callback fires **before** the `EnvValidationError` is thrown. The error is still thrown after the callback runs.
+</Callout>
