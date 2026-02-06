@@ -1,10 +1,26 @@
 ---
 interface Props {
     title: string;
+    description?: string;
+    ogImage?: string;
     bodyClass?: string;
+    canonical?: string;
 }
 
-const { title, bodyClass = "" } = Astro.props;
+const {
+    title,
+    description = "Type-safe environment variables powered by Effect Schema. Validate, secure, and manage env vars with full TypeScript inference — for web apps, AI agents, and everything in between.",
+    ogImage,
+    bodyClass = "",
+    canonical,
+} = Astro.props;
+
+const siteUrl = Astro.site?.origin ?? "https://ayronforge.com";
+const base = import.meta.env.BASE_URL;
+const canonicalUrl = canonical ?? new URL(Astro.url.pathname, siteUrl).href;
+const ogImageUrl = ogImage
+    ? new URL(`${base}${ogImage}`, siteUrl).href
+    : new URL(`${base}/og/home.png`, siteUrl).href;
 ---
 
 <!doctype html>
@@ -12,19 +28,65 @@ const { title, bodyClass = "" } = Astro.props;
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <meta
-            name="description"
-            content="Type-safe environment variables powered by Effect Schema. Validate, secure, and manage env vars with full TypeScript inference — for web apps, AI agents, and everything in between."
-        />
+        <meta name="description" content={description} />
         <meta name="generator" content={Astro.generator} />
-        <link rel="icon" type="image/svg+xml" href={`${import.meta.env.BASE_URL}/icon-bg.svg`} />
+        <meta name="robots" content="index, follow" />
+        <meta name="theme-color" content="#0E1319" media="(prefers-color-scheme: dark)" />
+        <meta name="theme-color" content="#F1EDE4" media="(prefers-color-scheme: light)" />
+
+        <!-- Canonical -->
+        <link rel="canonical" href={canonicalUrl} />
+
+        <!-- Open Graph -->
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content={canonicalUrl} />
+        <meta property="og:title" content={title} />
+        <meta property="og:description" content={description} />
+        <meta property="og:image" content={ogImageUrl} />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:image:type" content="image/png" />
+        <meta property="og:site_name" content="better-env" />
+        <meta property="og:locale" content="en_US" />
+
+        <!-- Twitter Card -->
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={title} />
+        <meta name="twitter:description" content={description} />
+        <meta name="twitter:image" content={ogImageUrl} />
+
+        <!-- Favicons -->
+        <link rel="icon" type="image/svg+xml" href={`${base}/icon-bg.svg`} />
+        <link rel="apple-touch-icon" href={`${base}/icon-bg.svg`} />
+
+        <!-- Fonts -->
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
         <link
             href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap"
             rel="stylesheet"
         />
+
         <title>{title}</title>
+
+        <!-- Structured Data -->
+        <script
+            type="application/ld+json"
+            set:html={JSON.stringify({
+                "@context": "https://schema.org",
+                "@type": "SoftwareSourceCode",
+                name: "better-env",
+                alternateName: "@ayronforge/better-env",
+                description,
+                url: `${siteUrl}${base}`,
+                codeRepository: "https://github.com/ayronforge/better-env",
+                programmingLanguage: "TypeScript",
+                runtimePlatform: "Node.js",
+                license: "https://opensource.org/licenses/MIT",
+                applicationCategory: "DeveloperApplication",
+            })}
+        />
+
         <script is:inline>
             (function () {
                 var t = localStorage.getItem("theme");

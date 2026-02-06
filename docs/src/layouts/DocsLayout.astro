@@ -17,7 +17,12 @@ interface Props {
 const { title, description, headings, currentSlug } = Astro.props;
 ---
 
-<Layout title={`${title} — better-env`} bodyClass="bg-background text-primary font-sans antialiased">
+<Layout
+  title={`${title} — better-env`}
+  description={description}
+  ogImage={`/og/${currentSlug ? `docs/${currentSlug}` : "docs"}.png`}
+  bodyClass="bg-background text-primary font-sans antialiased"
+>
   <DocsHeader currentSlug={currentSlug} />
 
   <div class="docs-grid">

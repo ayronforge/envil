@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://ayronforge.com/better-env/sitemap-index.xml
