@@ -27,7 +27,9 @@ export function fromGcpSecrets(
           getSecret: async (name: string) => {
             const [response] = await sdkClient.accessSecretVersion({ name });
             const data = response.payload?.data;
-            return data instanceof Uint8Array ? new TextDecoder().decode(data) : data ?? undefined;
+            return data instanceof Uint8Array
+              ? new TextDecoder().decode(data)
+              : (data ?? undefined);
           },
         };
       },

@@ -12,9 +12,7 @@ mock.module("@google-cloud/secret-manager", () => ({
       const secretName = parts.length >= 4 ? parts[3] : name;
       const value = secretStore.get(secretName!);
       if (value === undefined) return Promise.reject(new Error(`Secret "${name}" not found`));
-      return Promise.resolve([
-        { payload: { data: new TextEncoder().encode(value) } },
-      ]);
+      return Promise.resolve([{ payload: { data: new TextEncoder().encode(value) } }]);
     }
   },
 }));

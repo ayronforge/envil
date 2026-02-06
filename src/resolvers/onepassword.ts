@@ -22,8 +22,7 @@ export function fromOnePassword(
     if (!token) {
       return yield* new ResolverError({
         resolver: "1password",
-        message:
-          "serviceAccountToken (or OP_SERVICE_ACCOUNT_TOKEN env var) must be provided",
+        message: "serviceAccountToken (or OP_SERVICE_ACCOUNT_TOKEN env var) must be provided",
       });
     }
 

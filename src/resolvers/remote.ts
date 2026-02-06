@@ -23,9 +23,9 @@ export function fromRemoteSecrets(
     const secretValues = new Map<string, string | undefined>();
 
     if (client.getSecrets && secretIds.length > 1) {
-      const batchResult = yield* Effect.tryPromise(() =>
-        client.getSecrets!(secretIds),
-      ).pipe(Effect.orElseSucceed(() => new Map<string, string | undefined>()));
+      const batchResult = yield* Effect.tryPromise(() => client.getSecrets!(secretIds)).pipe(
+        Effect.orElseSucceed(() => new Map<string, string | undefined>()),
+      );
       for (const [id, value] of batchResult) {
         secretValues.set(id, value);
       }

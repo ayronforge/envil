@@ -80,9 +80,7 @@ describe("fromAwsSecrets", () => {
   });
 
   test("returns undefined for missing secrets (single)", async () => {
-    const result = await Effect.runPromise(
-      fromAwsSecrets({ secrets: { MISSING: "nonexistent" } }),
-    );
+    const result = await Effect.runPromise(fromAwsSecrets({ secrets: { MISSING: "nonexistent" } }));
 
     expect(result.MISSING).toBeUndefined();
   });

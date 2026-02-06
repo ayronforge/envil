@@ -84,9 +84,9 @@ export function fromAwsSecrets(
       );
       secretValues.set(uniqueSecretIds[0]!, value);
     } else {
-      const batchResult = yield* Effect.tryPromise(() =>
-        client.getSecrets(uniqueSecretIds),
-      ).pipe(Effect.orElseSucceed(() => new Map<string, string | undefined>()));
+      const batchResult = yield* Effect.tryPromise(() => client.getSecrets(uniqueSecretIds)).pipe(
+        Effect.orElseSucceed(() => new Map<string, string | undefined>()),
+      );
       for (const [id, value] of batchResult) {
         secretValues.set(id, value);
       }
