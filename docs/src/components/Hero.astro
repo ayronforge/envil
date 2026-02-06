@@ -1,4 +1,5 @@
 ---
+import { ArrowRight } from "lucide-react";
 import { CopyButton } from "./copy-button.tsx";
 import { site } from "../data/content.ts";
 ---
@@ -36,18 +37,7 @@ import { site } from "../data/content.ts";
                     class="group inline-flex items-center px-6 py-3 rounded-xl bg-linear-to-r from-secondary to-tertiary text-white font-semibold text-sm shadow-[0_0_20px_rgba(234,107,62,0.25)] hover:shadow-[0_0_30px_rgba(234,107,62,0.4)] transition-all duration-300"
                 >
                     Get Started
-                    <svg
-                        class="ml-2 w-4 h-4 transition-transform group-hover:translate-x-0.5"
-                        fill="none"
-                        viewBox="0 0 24 24"
-                        stroke="currentColor"
-                        stroke-width="2.5"
-                        ><path
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                            d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"
-                        ></path></svg
-                    >
+                    <ArrowRight className="ml-2 w-4 h-4 transition-transform group-hover:translate-x-0.5" strokeWidth={2.5} />
                 </a>
                 <a
                     href={site.npm}

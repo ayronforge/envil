@@ -1,12 +1,9 @@
 ---
-import { Effect } from "effect";
 import { presets } from "../data/content.ts";
 import { getIcon } from "../lib/utils.ts";
 import CodeBlock from "./CodeBlock.astro";
 
-const icons = await Effect.runPromise(
-  Effect.all(presets.map((p) => getIcon(p.icon, "black")))
-);
+const icons = await Promise.all(presets.map((p) => getIcon(p.icon, "black")));
 ---
 
 <section class="relative pb-28 px-6 lg:px-12">
