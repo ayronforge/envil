@@ -7,3 +7,8 @@ export class ResolverError extends Data.TaggedError("ResolverError")<{
   readonly message: string;
   readonly cause?: unknown;
 }> {}
+
+export interface SecretClient {
+  getSecret: (secretId: string) => Promise<string | undefined>;
+  getSecrets?: (secretIds: string[]) => Promise<Map<string, string | undefined>>;
+}

@@ -65,7 +65,6 @@ const env = await Effect.runPromise(envEffect)
 
 <TypeTable rows={[
   { name: "secrets", type: "Record<string, string>", required: true, description: "Map of env var names to AWS secret IDs. Supports #jsonKey syntax for JSON extraction." },
-  { name: "client", type: "AwsSecretsClient", description: "Custom client instance. If omitted, the SDK is lazily imported and initialized." },
   { name: "region", type: "string", description: "AWS region for the Secrets Manager client." },
 ]} />
 
@@ -84,43 +83,3 @@ fromAwsSecrets({
 ```
 
 This fetches the `prod/database` secret once and extracts the `url` and `pool` fields separately.
-
-## Batch optimization
-
-The resolver automatically groups secrets by ID and uses `BatchGetSecretValue` for multiple secrets (in batches of 20). For a single secret, it uses `GetSecretValue` directly.
-
-This means mapping multiple env vars to the same secret ID (with different JSON keys) results in only one API call:
-
-```ts
-fromAwsSecrets({
-  secrets: {
-    DB_HOST: "prod/database#host",
-    DB_PORT: "prod/database#port",
-    DB_NAME: "prod/database#name",
-    // Only 1 API call for all 3 env vars
-  },
-})
-```
-
-## Custom client
-
-You can provide your own client for testing or custom configuration:
-
-```ts
-fromAwsSecrets({
-  secrets: { API_KEY: "test-secret" },
-  client: {
-    getSecret: async (secretId) => {
-      // Return mock value for testing
-      return "mock-api-key"
-    },
-    batchGetSecrets: async (secretIds) => {
-      return new Map(secretIds.map((id) => [id, "mock-value"]))
-    },
-  },
-})
-```
-
-<Callout type="tip">
-  The custom client interface has two methods: `getSecret` for single lookups and `batchGetSecrets` for batch operations. This lets you mock the resolver in tests without installing the AWS SDK.
-</Callout>

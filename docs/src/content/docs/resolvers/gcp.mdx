@@ -65,7 +65,6 @@ const env = await Effect.runPromise(envEffect)
 
 <TypeTable rows={[
   { name: "secrets", type: "Record<string, string>", required: true, description: "Map of env var names to GCP secret names (or full resource paths)." },
-  { name: "client", type: "GcpSecretsClient", description: "Custom client instance. If omitted, the SDK is lazily imported and initialized." },
   { name: "projectId", type: "string", description: "GCP project ID. Required when using short secret names." },
   { name: "version", type: "string", default: '"latest"', description: "Secret version to access." },
 ]} />
@@ -100,24 +99,3 @@ fromGcpSecrets({
   version: "3",  // Access version 3 specifically
 })
 ```
-
-## Custom client
-
-Provide your own client for testing:
-
-```ts
-fromGcpSecrets({
-  secrets: { API_KEY: "test-secret" },
-  client: {
-    accessSecretVersion: async (request) => {
-      return {
-        payload: { data: "mock-api-key" },
-      }
-    },
-  },
-})
-```
-
-<Callout type="note">
-  The GCP resolver handles both `Uint8Array` and `string` payloads automatically. If the secret data is a `Uint8Array`, it's decoded with `TextDecoder`.
-</Callout>

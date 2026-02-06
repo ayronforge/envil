@@ -1,29 +1,33 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { Effect, Exit } from "effect";
 
-import { fromOnePassword } from "./onepassword.ts";
+const secretStore = new Map<string, string>();
 
-function mockClient(responses: Record<string, string>) {
-  return {
+mock.module("@1password/sdk", () => ({
+  createClient: async (_opts: any) => ({
     secrets: {
       resolveAll: async (refs: string[]) => {
         return refs.map((ref) => {
-          const value = responses[ref];
+          const value = secretStore.get(ref);
           if (value === undefined) throw new Error(`Secret "${ref}" not found`);
           return value;
         });
       },
     },
-  };
-}
+  }),
+}));
+
+const { fromOnePassword } = await import("./onepassword.ts");
 
 describe("fromOnePassword", () => {
+  beforeEach(() => {
+    secretStore.clear();
+  });
+
   test("resolves secrets via batch resolution", async () => {
-    const client = mockClient({
-      "op://vault/item/password": "s3cret",
-      "op://vault/item/api-key": "key123",
-    });
+    secretStore.set("op://vault/item/password", "s3cret");
+    secretStore.set("op://vault/item/api-key", "key123");
 
     const result = await Effect.runPromise(
       fromOnePassword({
@@ -31,7 +35,7 @@ describe("fromOnePassword", () => {
           DB_PASSWORD: "op://vault/item/password",
           API_KEY: "op://vault/item/api-key",
         },
-        client,
+        serviceAccountToken: "test-token",
       }),
     );
 
@@ -40,18 +44,12 @@ describe("fromOnePassword", () => {
   });
 
   test("returns all undefined on batch failure", async () => {
-    const client = {
-      secrets: {
-        resolveAll: async (_refs: string[]) => {
-          throw new Error("Service unavailable");
-        },
-      },
-    };
+    // secretStore is empty, so resolveAll will throw
 
     const result = await Effect.runPromise(
       fromOnePassword({
         secrets: { A: "op://vault/item/a", B: "op://vault/item/b" },
-        client,
+        serviceAccountToken: "test-token",
       }),
     );
 
@@ -59,7 +57,7 @@ describe("fromOnePassword", () => {
     expect(result.B).toBeUndefined();
   });
 
-  test("fails with ResolverError if neither client nor token is provided", async () => {
+  test("fails with ResolverError if neither token nor env var is provided", async () => {
     const originalEnv = process.env.OP_SERVICE_ACCOUNT_TOKEN;
     delete process.env.OP_SERVICE_ACCOUNT_TOKEN;
 

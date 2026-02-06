@@ -1,50 +1,47 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { Effect } from "effect";
 
-import { fromGcpSecrets } from "./gcp.ts";
+const secretStore = new Map<string, string>();
 
-function mockClient(secrets: Record<string, string | undefined>) {
-  return {
-    accessSecretVersion: async (request: { name: string }) => {
-      // Extract the secret name from the full path
-      const parts = request.name.split("/");
-      // Full path: projects/{project}/secrets/{name}/versions/{version}
-      const secretName = parts.length >= 4 ? parts[3] : request.name;
-      const value = secrets[secretName!];
-      if (value === undefined) throw new Error(`Secret "${request.name}" not found`);
-      return { payload: { data: new TextEncoder().encode(value) as Uint8Array | string } };
-    },
-  };
-}
+mock.module("@google-cloud/secret-manager", () => ({
+  SecretManagerServiceClient: class {
+    accessSecretVersion({ name }: { name: string }) {
+      // Extract secret name from the full resource path
+      const parts = name.split("/");
+      const secretName = parts.length >= 4 ? parts[3] : name;
+      const value = secretStore.get(secretName!);
+      if (value === undefined) return Promise.reject(new Error(`Secret "${name}" not found`));
+      return Promise.resolve([
+        { payload: { data: new TextEncoder().encode(value) } },
+      ]);
+    }
+  },
+}));
+
+const { fromGcpSecrets } = await import("./gcp.ts");
 
 describe("fromGcpSecrets", () => {
+  beforeEach(() => {
+    secretStore.clear();
+  });
+
   test("resolves secrets using short names", async () => {
-    const client = mockClient({ "my-secret": "secret-value" });
+    secretStore.set("my-secret", "secret-value");
 
     const result = await Effect.runPromise(
-      fromGcpSecrets({ secrets: { DB_PASSWORD: "my-secret" }, client, projectId: "my-project" }),
+      fromGcpSecrets({ secrets: { DB_PASSWORD: "my-secret" }, projectId: "my-project" }),
     );
 
     expect(result.DB_PASSWORD).toBe("secret-value");
   });
 
   test("resolves secrets using full resource path", async () => {
-    const client = {
-      accessSecretVersion: async (request: { name: string }) => {
-        if (request.name === "projects/my-project/secrets/my-secret/versions/latest") {
-          return {
-            payload: { data: new TextEncoder().encode("secret-value") as Uint8Array | string },
-          };
-        }
-        throw new Error("Not found");
-      },
-    };
+    secretStore.set("my-secret", "secret-value");
 
     const result = await Effect.runPromise(
       fromGcpSecrets({
         secrets: { DB_PASSWORD: "projects/my-project/secrets/my-secret/versions/latest" },
-        client,
       }),
     );
 
@@ -52,15 +49,12 @@ describe("fromGcpSecrets", () => {
   });
 
   test("resolves multiple secrets concurrently", async () => {
-    const client = mockClient({
-      "secret-a": "value-a",
-      "secret-b": "value-b",
-    });
+    secretStore.set("secret-a", "value-a");
+    secretStore.set("secret-b", "value-b");
 
     const result = await Effect.runPromise(
       fromGcpSecrets({
         secrets: { A: "secret-a", B: "secret-b" },
-        client,
         projectId: "my-project",
       }),
     );
@@ -70,12 +64,11 @@ describe("fromGcpSecrets", () => {
   });
 
   test("returns undefined for missing secrets", async () => {
-    const client = mockClient({ existing: "value" });
+    secretStore.set("existing", "value");
 
     const result = await Effect.runPromise(
       fromGcpSecrets({
         secrets: { EXISTING: "existing", MISSING: "nonexistent" },
-        client,
         projectId: "my-project",
       }),
     );
@@ -84,15 +77,11 @@ describe("fromGcpSecrets", () => {
     expect(result.MISSING).toBeUndefined();
   });
 
-  test("handles string data (not Uint8Array)", async () => {
-    const client = {
-      accessSecretVersion: async (_request: { name: string }) => ({
-        payload: { data: "plain-string-value" as Uint8Array | string },
-      }),
-    };
+  test("handles string data directly", async () => {
+    secretStore.set("my-secret", "plain-string-value");
 
     const result = await Effect.runPromise(
-      fromGcpSecrets({ secrets: { SECRET: "my-secret" }, client, projectId: "my-project" }),
+      fromGcpSecrets({ secrets: { SECRET: "my-secret" }, projectId: "my-project" }),
     );
 
     expect(result.SECRET).toBe("plain-string-value");

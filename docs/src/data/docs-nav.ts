@@ -40,6 +40,7 @@ export const docsNav: NavSection[] = [
       { title: "GCP Secret Manager", slug: "resolvers/gcp" },
       { title: "Azure Key Vault", slug: "resolvers/azure" },
       { title: "1Password", slug: "resolvers/onepassword" },
+      { title: "Custom / Remote", slug: "resolvers/remote" },
     ],
   },
   {

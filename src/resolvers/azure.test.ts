@@ -1,41 +1,53 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { Effect, Exit } from "effect";
 
-import { fromAzureKeyVault } from "./azure.ts";
+const secretStore = new Map<string, string>();
 
-function mockClient(secrets: Record<string, string | undefined>) {
-  return {
-    getSecret: async (name: string) => {
-      const value = secrets[name];
-      if (value === undefined) throw new Error(`Secret "${name}" not found`);
-      return { value };
-    },
-  };
-}
+mock.module("@azure/keyvault-secrets", () => ({
+  SecretClient: class {
+    constructor(_vaultUrl: string, _credential: unknown) {}
+    getSecret(name: string) {
+      const value = secretStore.get(name);
+      if (value === undefined) return Promise.reject(new Error(`Secret "${name}" not found`));
+      return Promise.resolve({ value });
+    }
+  },
+}));
+
+mock.module("@azure/identity", () => ({
+  DefaultAzureCredential: class {},
+}));
+
+const { fromAzureKeyVault } = await import("./azure.ts");
 
 describe("fromAzureKeyVault", () => {
+  beforeEach(() => {
+    secretStore.clear();
+  });
+
   test("resolves a single secret", async () => {
-    const client = mockClient({ "my-secret": "secret-value" });
+    secretStore.set("my-secret", "secret-value");
 
     const result = await Effect.runPromise(
-      fromAzureKeyVault({ secrets: { DB_PASSWORD: "my-secret" }, client }),
+      fromAzureKeyVault({
+        secrets: { DB_PASSWORD: "my-secret" },
+        vaultUrl: "https://test-vault.vault.azure.net",
+      }),
     );
 
     expect(result.DB_PASSWORD).toBe("secret-value");
   });
 
   test("resolves multiple secrets concurrently", async () => {
-    const client = mockClient({
-      "secret-a": "value-a",
-      "secret-b": "value-b",
-      "secret-c": "value-c",
-    });
+    secretStore.set("secret-a", "value-a");
+    secretStore.set("secret-b", "value-b");
+    secretStore.set("secret-c", "value-c");
 
     const result = await Effect.runPromise(
       fromAzureKeyVault({
         secrets: { A: "secret-a", B: "secret-b", C: "secret-c" },
-        client,
+        vaultUrl: "https://test-vault.vault.azure.net",
       }),
     );
 
@@ -45,12 +57,12 @@ describe("fromAzureKeyVault", () => {
   });
 
   test("returns undefined for missing secrets", async () => {
-    const client = mockClient({ existing: "value" });
+    secretStore.set("existing", "value");
 
     const result = await Effect.runPromise(
       fromAzureKeyVault({
         secrets: { EXISTING: "existing", MISSING: "nonexistent" },
-        client,
+        vaultUrl: "https://test-vault.vault.azure.net",
       }),
     );
 
@@ -58,8 +70,10 @@ describe("fromAzureKeyVault", () => {
     expect(result.MISSING).toBeUndefined();
   });
 
-  test("fails with ResolverError if neither client nor vaultUrl is provided", async () => {
-    const exit = await Effect.runPromiseExit(fromAzureKeyVault({ secrets: { A: "secret" } }));
+  test("fails with ResolverError if vaultUrl is empty", async () => {
+    const exit = await Effect.runPromiseExit(
+      fromAzureKeyVault({ secrets: { A: "secret" }, vaultUrl: "" as any }),
+    );
 
     expect(Exit.isFailure(exit)).toBe(true);
   });

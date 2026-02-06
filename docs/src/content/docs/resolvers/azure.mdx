@@ -65,14 +65,9 @@ const env = await Effect.runPromise(envEffect)
 
 <TypeTable rows={[
   { name: "secrets", type: "Record<string, string>", required: true, description: "Map of env var names to Azure Key Vault secret names." },
-  { name: "client", type: "AzureKeyVaultClient", description: "Custom client instance. If omitted, the SDK is lazily imported." },
-  { name: "vaultUrl", type: "string", description: "Azure Key Vault URL. Required if no custom client is provided." },
+  { name: "vaultUrl", type: "string", required: true, description: "Azure Key Vault URL." },
   { name: "credential", type: "unknown", description: "Azure credential. Defaults to DefaultAzureCredential." },
 ]} />
-
-<Callout type="warning">
-  Either `client` or `vaultUrl` must be provided. If neither is set, the resolver fails with a `ResolverError`.
-</Callout>
 
 ## Default credentials
 
@@ -91,20 +86,5 @@ fromAzureKeyVault({
   secrets: { API_KEY: "api-key" },
   vaultUrl: "https://my-vault.vault.azure.net",
   credential: new ClientSecretCredential(tenantId, clientId, clientSecret),
-})
-```
-
-## Custom client
-
-Provide your own client for testing:
-
-```ts
-fromAzureKeyVault({
-  secrets: { API_KEY: "test-secret" },
-  client: {
-    getSecret: async (name) => {
-      return { value: "mock-api-key" }
-    },
-  },
 })
 ```

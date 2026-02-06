@@ -1,7 +1,7 @@
 ---
 title: API Reference
 description: Complete API reference for @ayronforge/better-env — all functions, schemas, errors, and types.
-order: 14
+order: 15
 ---
 
 import TypeTable from "@/components/docs/TypeTable.astro";
@@ -182,7 +182,6 @@ import { fromAwsSecrets } from "@ayronforge/better-env/aws"
 
 <TypeTable rows={[
   { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → secret IDs. Supports #jsonKey syntax." },
-  { name: "client", type: "AwsSecretsClient", description: "Custom client instance." },
   { name: "region", type: "string", description: "AWS region." },
 ]} />
 
@@ -194,7 +193,6 @@ import { fromGcpSecrets } from "@ayronforge/better-env/gcp"
 
 <TypeTable rows={[
   { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → secret names or full resource paths." },
-  { name: "client", type: "GcpSecretsClient", description: "Custom client instance." },
   { name: "projectId", type: "string", description: "GCP project ID." },
   { name: "version", type: "string", default: '"latest"', description: "Secret version." },
 ]} />
@@ -207,8 +205,7 @@ import { fromAzureKeyVault } from "@ayronforge/better-env/azure"
 
 <TypeTable rows={[
   { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → Key Vault secret names." },
-  { name: "client", type: "AzureKeyVaultClient", description: "Custom client instance." },
-  { name: "vaultUrl", type: "string", description: "Azure Key Vault URL. Required if no client." },
+  { name: "vaultUrl", type: "string", required: true, description: "Azure Key Vault URL." },
   { name: "credential", type: "unknown", description: "Azure credential. Defaults to DefaultAzureCredential." },
 ]} />
 
@@ -220,6 +217,34 @@ import { fromOnePassword } from "@ayronforge/better-env/1password"
 
 <TypeTable rows={[
   { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → 1Password secret references (op:// URIs)." },
-  { name: "client", type: "{ secrets: { resolveAll } }", description: "Custom 1Password client." },
   { name: "serviceAccountToken", type: "string", description: "1Password service account token." },
 ]} />
+
+### fromRemoteSecrets
+
+```ts
+import { fromRemoteSecrets } from "@ayronforge/better-env"
+```
+
+<TypeTable rows={[
+  { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → secret identifiers passed to the client." },
+  { name: "client", type: "SecretClient", required: true, description: "Custom client implementing the SecretClient interface." },
+]} />
+
+---
+
+## SecretClient
+
+The client interface for `fromRemoteSecrets` and custom integrations.
+
+```ts
+import type { SecretClient } from "@ayronforge/better-env"
+
+interface SecretClient {
+  getSecret: (secretId: string) => Promise<string | undefined>
+  getSecrets?: (secretIds: string[]) => Promise<Map<string, string | undefined>>
+}
+```
+
+- `getSecret` — required. Fetches a single secret by ID.
+- `getSecrets` — optional. When provided and there are multiple secrets, enables batch fetching.

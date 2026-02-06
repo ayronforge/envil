@@ -4,18 +4,18 @@ import { ResolverError, type ResolverResult } from "./types.ts";
 
 export { ResolverError } from "./types.ts";
 
-interface AwsSecretsClient {
-  getSecret: (secretId: string) => Promise<string | undefined>;
-  batchGetSecrets: (secretIds: string[]) => Promise<Map<string, string | undefined>>;
-}
-
 interface AwsSecretsOptions<K extends string = string> {
   secrets: Record<K, string>;
-  client?: AwsSecretsClient;
   region?: string;
 }
 
-function createSdkClient(region?: string): Effect.Effect<AwsSecretsClient, ResolverError> {
+function createSdkClient(region?: string): Effect.Effect<
+  {
+    getSecret: (secretId: string) => Promise<string | undefined>;
+    getSecrets: (secretIds: string[]) => Promise<Map<string, string | undefined>>;
+  },
+  ResolverError
+> {
   return Effect.tryPromise({
     try: async () => {
       const sdk = await import("@aws-sdk/client-secrets-manager");
@@ -27,7 +27,7 @@ function createSdkClient(region?: string): Effect.Effect<AwsSecretsClient, Resol
           );
           return response.SecretString ?? undefined;
         },
-        batchGetSecrets: async (secretIds: string[]) => {
+        getSecrets: async (secretIds: string[]) => {
           const result = new Map<string, string | undefined>();
           for (let i = 0; i < secretIds.length; i += 20) {
             const batch = secretIds.slice(i, i + 20);
@@ -43,7 +43,7 @@ function createSdkClient(region?: string): Effect.Effect<AwsSecretsClient, Resol
           }
           return result;
         },
-      } satisfies AwsSecretsClient;
+      };
     },
     catch: (cause) =>
       new ResolverError({
@@ -61,7 +61,7 @@ export function fromAwsSecrets(
   opts: AwsSecretsOptions,
 ): Effect.Effect<ResolverResult, ResolverError> {
   return Effect.gen(function* () {
-    const client = opts.client ?? (yield* createSdkClient(opts.region));
+    const client = yield* createSdkClient(opts.region);
 
     // Group env keys by secret ID to minimize API calls
     const secretIdToKeys = new Map<string, { envKey: string; jsonKey?: string }[]>();
@@ -85,7 +85,7 @@ export function fromAwsSecrets(
       secretValues.set(uniqueSecretIds[0]!, value);
     } else {
       const batchResult = yield* Effect.tryPromise(() =>
-        client.batchGetSecrets(uniqueSecretIds),
+        client.getSecrets(uniqueSecretIds),
       ).pipe(Effect.orElseSucceed(() => new Map<string, string | undefined>()));
       for (const [id, value] of batchResult) {
         secretValues.set(id, value);

@@ -1,45 +1,65 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 
 import { Effect } from "effect";
 
-import { fromAwsSecrets } from "./aws.ts";
+const secretStore = new Map<string, string>();
 
-function mockClient(secrets: Record<string, string | undefined>) {
-  return {
-    getSecret: async (secretId: string) => {
-      const value = secrets[secretId];
-      if (value === undefined) throw new Error("Secret not found");
-      return value;
-    },
-    batchGetSecrets: async (secretIds: string[]) => {
-      const result = new Map<string, string | undefined>();
-      for (const id of secretIds) {
-        result.set(id, secrets[id]);
+mock.module("@aws-sdk/client-secrets-manager", () => ({
+  SecretsManagerClient: class {
+    send(command: any) {
+      if (command._isBatch) {
+        const ids: string[] = command.input.SecretIdList;
+        const values = ids
+          .filter((id) => secretStore.has(id))
+          .map((id) => ({ Name: id, SecretString: secretStore.get(id) }));
+        return Promise.resolve({ SecretValues: values });
       }
-      return result;
-    },
-  };
-}
+      const id: string = command.input.SecretId;
+      if (!secretStore.has(id)) {
+        return Promise.reject(new Error("Secret not found"));
+      }
+      return Promise.resolve({ SecretString: secretStore.get(id) });
+    }
+  },
+  GetSecretValueCommand: class {
+    _isBatch = false;
+    input: any;
+    constructor(input: any) {
+      this.input = input;
+    }
+  },
+  BatchGetSecretValueCommand: class {
+    _isBatch = true;
+    input: any;
+    constructor(input: any) {
+      this.input = input;
+    }
+  },
+}));
+
+const { fromAwsSecrets } = await import("./aws.ts");
 
 describe("fromAwsSecrets", () => {
+  beforeEach(() => {
+    secretStore.clear();
+  });
+
   test("resolves a single secret", async () => {
-    const client = mockClient({ "my-secret": "secret-value" });
+    secretStore.set("my-secret", "secret-value");
 
     const result = await Effect.runPromise(
-      fromAwsSecrets({ secrets: { DB_PASSWORD: "my-secret" }, client }),
+      fromAwsSecrets({ secrets: { DB_PASSWORD: "my-secret" } }),
     );
 
     expect(result.DB_PASSWORD).toBe("secret-value");
   });
 
   test("resolves multiple secrets via batch", async () => {
-    const client = mockClient({
-      "secret-a": "value-a",
-      "secret-b": "value-b",
-    });
+    secretStore.set("secret-a", "value-a");
+    secretStore.set("secret-b", "value-b");
 
     const result = await Effect.runPromise(
-      fromAwsSecrets({ secrets: { A: "secret-a", B: "secret-b" }, client }),
+      fromAwsSecrets({ secrets: { A: "secret-a", B: "secret-b" } }),
     );
 
     expect(result.A).toBe("value-a");
@@ -47,14 +67,11 @@ describe("fromAwsSecrets", () => {
   });
 
   test("extracts JSON key with # syntax", async () => {
-    const client = mockClient({
-      "my-json-secret": JSON.stringify({ username: "admin", password: "s3cret" }),
-    });
+    secretStore.set("my-json-secret", JSON.stringify({ username: "admin", password: "s3cret" }));
 
     const result = await Effect.runPromise(
       fromAwsSecrets({
         secrets: { DB_USER: "my-json-secret#username", DB_PASS: "my-json-secret#password" },
-        client,
       }),
     );
 
@@ -63,20 +80,18 @@ describe("fromAwsSecrets", () => {
   });
 
   test("returns undefined for missing secrets (single)", async () => {
-    const client = mockClient({});
-
     const result = await Effect.runPromise(
-      fromAwsSecrets({ secrets: { MISSING: "nonexistent" }, client }),
+      fromAwsSecrets({ secrets: { MISSING: "nonexistent" } }),
     );
 
     expect(result.MISSING).toBeUndefined();
   });
 
   test("returns undefined for missing secrets (batch)", async () => {
-    const client = mockClient({ "secret-a": "value-a" });
+    secretStore.set("secret-a", "value-a");
 
     const result = await Effect.runPromise(
-      fromAwsSecrets({ secrets: { A: "secret-a", B: "secret-b" }, client }),
+      fromAwsSecrets({ secrets: { A: "secret-a", B: "secret-b" } }),
     );
 
     expect(result.A).toBe("value-a");
@@ -84,22 +99,20 @@ describe("fromAwsSecrets", () => {
   });
 
   test("returns undefined for missing JSON key", async () => {
-    const client = mockClient({
-      "my-secret": JSON.stringify({ username: "admin" }),
-    });
+    secretStore.set("my-secret", JSON.stringify({ username: "admin" }));
 
     const result = await Effect.runPromise(
-      fromAwsSecrets({ secrets: { MISSING_KEY: "my-secret#nonexistent" }, client }),
+      fromAwsSecrets({ secrets: { MISSING_KEY: "my-secret#nonexistent" } }),
     );
 
     expect(result.MISSING_KEY).toBeUndefined();
   });
 
   test("returns undefined for invalid JSON when using # syntax", async () => {
-    const client = mockClient({ "my-secret": "not-json" });
+    secretStore.set("my-secret", "not-json");
 
     const result = await Effect.runPromise(
-      fromAwsSecrets({ secrets: { BAD_JSON: "my-secret#key" }, client }),
+      fromAwsSecrets({ secrets: { BAD_JSON: "my-secret#key" } }),
     );
 
     expect(result.BAD_JSON).toBeUndefined();
