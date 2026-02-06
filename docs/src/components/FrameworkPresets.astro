@@ -3,7 +3,8 @@ import { presets } from "../data/content.ts";
 import { getIcon } from "../lib/utils.ts";
 import CodeBlock from "./CodeBlock.astro";
 
-const icons = await Promise.all(presets.map((p) => getIcon(p.icon, "black")));
+const iconsBlack = await Promise.all(presets.map((p) => getIcon(p.icon, "black")));
+const iconsWhite = await Promise.all(presets.map((p) => getIcon(p.icon, "white")));
 ---
 
 <section class="relative pb-28 px-6 lg:px-12">
@@ -18,7 +19,8 @@ const icons = await Promise.all(presets.map((p) => getIcon(p.icon, "black")));
         <div class="glass-card glass-hover rounded-2xl p-5 flex flex-col">
           <div class="flex items-center gap-3 mb-4">
             <span class="w-8 h-8 rounded-lg bg-secondary/10 border border-secondary/10 flex items-center justify-center">
-              <img src={icons[i]} alt={preset.name} class="w-4 h-4" />
+              <img src={iconsBlack[i]} alt={preset.name} class="w-4 h-4" data-theme-visible="light" />
+              <img src={iconsWhite[i]} alt={preset.name} class="w-4 h-4" data-theme-visible="dark" />
             </span>
             <h3 class="text-primary font-semibold">{preset.name}</h3>
             <span class="ml-auto text-[10px] font-mono text-muted px-2 py-0.5 rounded-md bg-primary/5 border border-primary/5">{preset.prefix}</span>

@@ -38,6 +38,16 @@
   box-shadow: 0 0 30px rgba(234, 107, 62, 0.08), 0 4px 20px rgba(0, 0, 0, 0.04);
 }
 
+[data-theme="dark"] .glass-card {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .glass-hover:hover {
+  border-color: rgba(234, 107, 62, 0.4);
+  box-shadow: 0 0 30px rgba(234, 107, 62, 0.12), 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
 /* Token colors for dark code blocks */
 .tok-kw { color: #EA6B3E; }
 .tok-str { color: #F1EDE4; }
@@ -47,6 +57,17 @@
 
 pre, code {
   font-family: "JetBrains Mono", monospace;
+}
+
+/* Theme-aware element visibility */
+[data-theme-visible="dark"] {
+  display: none;
+}
+[data-theme="dark"] [data-theme-visible="dark"] {
+  display: initial;
+}
+[data-theme="dark"] [data-theme-visible="light"] {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

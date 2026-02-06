@@ -24,6 +24,9 @@ const deviconUrl = (slug: string, variant: string) =>
 export async function getIcon(slug: string, color: "white" | "black" = "black"): Promise<string> {
   const candidates = [
     `https://cdn.simpleicons.org/${slug}/${color}`,
+    ...(color === "white"
+      ? [deviconUrl(slug, "plain-white"), deviconUrl(slug, "original-white")]
+      : []),
     deviconUrl(slug, "plain"),
     deviconUrl(slug, "original"),
     deviconUrl(slug, "plain-wordmark"),

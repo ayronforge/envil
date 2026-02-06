@@ -11,7 +11,7 @@ const { code, filename } = Astro.props;
 const highlighted = highlightCode(code);
 ---
 
-<div class="code-block relative bg-primary rounded-xl overflow-hidden">
+<div class="code-block relative bg-[#0E1319] rounded-xl overflow-hidden">
   {filename && (
     <div class="flex items-center px-4 pt-3 pb-0">
       <span class="text-[10px] text-white/30 font-mono">{filename}</span>
@@ -20,5 +20,5 @@ const highlighted = highlightCode(code);
   <div class="absolute top-2 right-2 z-10">
     <CopyButton client:idle content={code} variant="ghost" size="sm" className="text-white/30 hover:text-white/70" />
   </div>
-  <pre class="px-4 py-3 text-[11px] leading-relaxed overflow-x-auto"><code class="text-background/80" set:html={highlighted} /></pre>
+  <pre class="px-4 py-3 text-[11px] leading-relaxed overflow-x-auto"><code class="text-[#F1EDE4]/80" set:html={highlighted} /></pre>
 </div>

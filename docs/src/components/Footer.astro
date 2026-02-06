@@ -8,10 +8,12 @@ import { site } from "../data/content.ts";
     <div class="flex items-center gap-4">
       <span class="text-sm text-muted">MIT License</span>
       <a href={site.github} class="hover:opacity-70 transition-opacity">
-        <SocialIcon client:idle icon="github" color="black" className="size-5" />
+        <span data-theme-visible="light"><SocialIcon client:idle icon="github" color="black" className="size-5" /></span>
+        <span data-theme-visible="dark"><SocialIcon client:idle icon="github" color="white" className="size-5" /></span>
       </a>
       <a href={site.npm} class="hover:opacity-70 transition-opacity">
-        <SocialIcon client:idle icon="npm" color="black" className="size-5" />
+        <span data-theme-visible="light"><SocialIcon client:idle icon="npm" color="black" className="size-5" /></span>
+        <span data-theme-visible="dark"><SocialIcon client:idle icon="npm" color="white" className="size-5" /></span>
       </a>
     </div>
     <span class="text-xs text-muted/60">forged by AyronForge</span>

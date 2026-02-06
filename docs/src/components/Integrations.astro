@@ -3,8 +3,11 @@ import { secretManagers } from "../data/content.ts";
 import { getIcon } from "../lib/utils.ts";
 import CodeBlock from "./CodeBlock.astro";
 
-const icons = await Promise.all(
+const iconsBlack = await Promise.all(
     secretManagers.map((sm) => getIcon(sm.icon, "black")),
+);
+const iconsWhite = await Promise.all(
+    secretManagers.map((sm) => getIcon(sm.icon, "white")),
 );
 ---
 
@@ -26,9 +29,16 @@ const icons = await Promise.all(
                     <div class="glass-card glass-hover rounded-2xl p-5 flex flex-col">
                         <div class="flex items-center gap-3 mb-4">
                             <img
-                                src={icons[i]}
+                                src={iconsBlack[i]}
                                 alt={sm.name}
                                 class="w-5 h-5 shrink-0"
+                                data-theme-visible="light"
+                            />
+                            <img
+                                src={iconsWhite[i]}
+                                alt={sm.name}
+                                class="w-5 h-5 shrink-0"
+                                data-theme-visible="dark"
                             />
                             <h3 class="text-primary font-semibold text-sm">
                                 {sm.name}

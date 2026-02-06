@@ -1,9 +1,13 @@
 ---
 import { site } from "../data/content.ts";
+import { ThemeToggle } from "./docs/ThemeToggle";
 ---
 
 <nav class="flex items-center justify-between px-6 lg:px-12 py-6">
-    <img src={`${import.meta.env.BASE_URL}/logo.svg`} alt="ayron forge" class="h-7" />
+    <a href={import.meta.env.BASE_URL}>
+        <img src={`${import.meta.env.BASE_URL}/logo.svg`} alt="ayron forge" class="h-7" data-theme-visible="light" />
+        <img src={`${import.meta.env.BASE_URL}/logo-light.svg`} alt="ayron forge" class="h-7" data-theme-visible="dark" />
+    </a>
     <div class="flex items-center gap-4">
         <a
             href={`${import.meta.env.BASE_URL}/docs`}
@@ -15,5 +19,6 @@ import { site } from "../data/content.ts";
             class="text-sm text-muted hover:text-primary transition-colors"
             >GitHub</a
         >
+        <ThemeToggle client:load />
     </div>
 </nav>
