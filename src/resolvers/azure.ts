@@ -34,8 +34,7 @@ export function fromAzureKeyVault(
         try: async () => {
           const kvModule = await import("@azure/keyvault-secrets");
           const idModule = await import("@azure/identity");
-          const credential = (opts.credential ??
-            new idModule.DefaultAzureCredential()) as import("@azure/identity").TokenCredential;
+          const credential = opts.credential ?? new idModule.DefaultAzureCredential();
           const sdkClient = new kvModule.SecretClient(vaultUrl, credential);
           return {
             getSecret: async (name: string) => {
