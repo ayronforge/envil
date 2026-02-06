@@ -1,6 +1,6 @@
 {
   "name": "@ayronforge/better-env",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "Type-safe environment variable validation using Effect Schema",
   "keywords": [
     "effect",
