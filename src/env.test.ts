@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 import { createEnv } from "./env.ts";
 import { ClientAccessError, EnvValidationError } from "./errors.ts";
+import { ResolverError, type ResolverResult } from "./resolvers/types.ts";
 import {
   commaSeparated,
   optionalString,
@@ -182,7 +183,7 @@ describe("createEnv", () => {
         isServer: false,
       });
       try {
-        (env as Record<string, unknown>).SECRET;
+        env.SECRET;
         expect.unreachable("should have thrown");
       } catch (e) {
         expect(e).toBeInstanceOf(ClientAccessError);
@@ -449,6 +450,162 @@ describe("createEnv", () => {
     });
   });
 
+  describe("emptyStringAsUndefined", () => {
+    test("empty string is treated as undefined when flag is true", () => {
+      expect(() =>
+        createEnv({
+          server: { NAME: requiredString },
+          runtimeEnv: { NAME: "" },
+          isServer: true,
+          emptyStringAsUndefined: true,
+        }),
+      ).toThrow("Invalid environment variables");
+    });
+
+    test("empty string is kept as empty string when flag is false", () => {
+      const env = createEnv({
+        server: { NAME: Schema.String },
+        runtimeEnv: { NAME: "" },
+        isServer: true,
+        emptyStringAsUndefined: false,
+      });
+      expect(env.NAME).toBe("");
+    });
+
+    test("empty string is kept as empty string when flag is omitted", () => {
+      const env = createEnv({
+        server: { NAME: Schema.String },
+        runtimeEnv: { NAME: "" },
+        isServer: true,
+      });
+      expect(env.NAME).toBe("");
+    });
+
+    test("works with withDefault (empty string triggers default)", () => {
+      const env = createEnv({
+        server: { MODE: withDefault(Schema.String, "production") },
+        runtimeEnv: { MODE: "" },
+        isServer: true,
+        emptyStringAsUndefined: true,
+      });
+      expect(env.MODE).toBe("production");
+    });
+
+    test("non-empty strings are unaffected", () => {
+      const env = createEnv({
+        server: { NAME: requiredString },
+        runtimeEnv: { NAME: "hello" },
+        isServer: true,
+        emptyStringAsUndefined: true,
+      });
+      expect(env.NAME).toBe("hello");
+    });
+
+    test("undefined values are unaffected", () => {
+      const env = createEnv({
+        server: { OPT: optionalString },
+        runtimeEnv: {},
+        isServer: true,
+        emptyStringAsUndefined: true,
+      });
+      expect(env.OPT).toBeUndefined();
+    });
+  });
+
+  describe("extends", () => {
+    test("merges values from a single extended env", () => {
+      const baseEnv = createEnv({
+        server: { DB_URL: requiredString },
+        runtimeEnv: { DB_URL: "postgres://localhost" },
+        isServer: true,
+      });
+      const env = createEnv({
+        extends: [baseEnv],
+        server: { API_KEY: requiredString },
+        runtimeEnv: { API_KEY: "key123" },
+        isServer: true,
+      });
+      expect(env.DB_URL).toBe("postgres://localhost");
+      expect(env.API_KEY).toBe("key123");
+    });
+
+    test("new schemas override extended values for same key", () => {
+      const baseEnv = createEnv({
+        server: { MODE: requiredString },
+        runtimeEnv: { MODE: "development" },
+        isServer: true,
+      });
+      const env = createEnv({
+        extends: [baseEnv],
+        server: { MODE: requiredString },
+        runtimeEnv: { MODE: "production" },
+        isServer: true,
+      });
+      expect(env.MODE).toBe("production");
+    });
+
+    test("multiple extends merge left-to-right (later overrides earlier)", () => {
+      const env1 = createEnv({
+        server: { A: requiredString },
+        runtimeEnv: { A: "from-env1" },
+        isServer: true,
+      });
+      const env2 = createEnv({
+        server: { A: requiredString, B: requiredString },
+        runtimeEnv: { A: "from-env2", B: "b-value" },
+        isServer: true,
+      });
+      const env = createEnv({
+        extends: [env1, env2],
+        server: { C: requiredString },
+        runtimeEnv: { C: "c-value" },
+        isServer: true,
+      });
+      expect(env.A).toBe("from-env2");
+      expect(env.B).toBe("b-value");
+      expect(env.C).toBe("c-value");
+    });
+
+    test("extended values are not re-validated", () => {
+      const baseEnv = createEnv({
+        server: { DB_URL: requiredString },
+        runtimeEnv: { DB_URL: "postgres://localhost" },
+        isServer: true,
+      });
+      // No runtimeEnv entry for DB_URL, but it comes from extends
+      const env = createEnv({
+        extends: [baseEnv],
+        runtimeEnv: {},
+        isServer: true,
+      });
+      expect(env.DB_URL).toBe("postgres://localhost");
+    });
+
+    test("empty extends array works", () => {
+      const env = createEnv({
+        extends: [],
+        server: { A: requiredString },
+        runtimeEnv: { A: "val" },
+        isServer: true,
+      });
+      expect(env.A).toBe("val");
+    });
+
+    test("works with only extends, no new schemas", () => {
+      const baseEnv = createEnv({
+        server: { DB_URL: requiredString },
+        runtimeEnv: { DB_URL: "postgres://localhost" },
+        isServer: true,
+      });
+      const env = createEnv({
+        extends: [baseEnv],
+        runtimeEnv: {},
+        isServer: true,
+      });
+      expect(env.DB_URL).toBe("postgres://localhost");
+    });
+  });
+
   describe("prefix as object", () => {
     test("client keys use client prefix", () => {
       const env = createEnv({
@@ -501,6 +658,147 @@ describe("createEnv", () => {
       });
       expect(env.DB).toBe("value");
       expect(env.API_URL).toBe("http://api");
+    });
+  });
+
+  describe("resolvers", () => {
+    function fakeResolver(result: ResolverResult): Effect.Effect<ResolverResult, ResolverError> {
+      return Effect.succeed(result);
+    }
+
+    function failingResolver(message: string): Effect.Effect<ResolverResult, ResolverError> {
+      return Effect.fail(new ResolverError({ resolver: "test", message }));
+    }
+
+    test("resolver result flows into env validation", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { DB_PASS: requiredString },
+          resolvers: [fakeResolver({ DB_PASS: "secret123" })],
+          isServer: true,
+        }),
+      );
+      expect(env.DB_PASS).toBe("secret123");
+    });
+
+    test("multiple resolvers merge (later overrides earlier)", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { A: requiredString, B: requiredString },
+          resolvers: [fakeResolver({ A: "first", B: "first-b" }), fakeResolver({ A: "second" })],
+          isServer: true,
+        }),
+      );
+      expect(env.A).toBe("second");
+      expect(env.B).toBe("first-b");
+    });
+
+    test("resolver + runtimeEnv base merge", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { DB_HOST: requiredString, DB_PASS: requiredString },
+          resolvers: [fakeResolver({ DB_PASS: "secret" })],
+          runtimeEnv: { DB_HOST: "localhost" },
+          isServer: true,
+        }),
+      );
+      expect(env.DB_HOST).toBe("localhost");
+      expect(env.DB_PASS).toBe("secret");
+    });
+
+    test("resolver result overlays on top of runtimeEnv", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { KEY: requiredString },
+          resolvers: [fakeResolver({ KEY: "from-resolver" })],
+          runtimeEnv: { KEY: "from-runtime" },
+          isServer: true,
+        }),
+      );
+      expect(env.KEY).toBe("from-resolver");
+    });
+
+    test("resolver failure → ResolverError in error channel", async () => {
+      const result = await Effect.runPromiseExit(
+        createEnv({
+          server: { A: requiredString },
+          resolvers: [failingResolver("boom")],
+          isServer: true,
+        }),
+      );
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        const error = (result.cause as { _tag: string; error: unknown }).error;
+        expect(error).toBeInstanceOf(ResolverError);
+        expect((error as ResolverError).message).toBe("boom");
+      }
+    });
+
+    test("resolver OK but validation fails → EnvValidationError in error channel", async () => {
+      const result = await Effect.runPromiseExit(
+        createEnv({
+          server: { A: requiredString, B: requiredString },
+          resolvers: [fakeResolver({ A: "value" })],
+          isServer: true,
+        }),
+      );
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        const error = (result.cause as { _tag: string; error: unknown }).error;
+        expect(error).toBeInstanceOf(EnvValidationError);
+      }
+    });
+
+    test("works with prefix", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { DB: requiredString },
+          prefix: "MY_",
+          resolvers: [fakeResolver({ MY_DB: "value" })],
+          isServer: true,
+        }),
+      );
+      expect(env.DB).toBe("value");
+    });
+
+    test("works with extends", async () => {
+      const baseEnv = createEnv({
+        server: { BASE_KEY: requiredString },
+        runtimeEnv: { BASE_KEY: "base-value" },
+        isServer: true,
+      });
+      const env = await Effect.runPromise(
+        createEnv({
+          extends: [baseEnv],
+          server: { RESOLVED_KEY: requiredString },
+          resolvers: [fakeResolver({ RESOLVED_KEY: "resolved-value" })],
+          isServer: true,
+        }),
+      );
+      expect(env.BASE_KEY).toBe("base-value");
+      expect(env.RESOLVED_KEY).toBe("resolved-value");
+    });
+
+    test("works with redacted", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { SECRET: redacted(Schema.String) },
+          resolvers: [fakeResolver({ SECRET: "my-secret" })],
+          isServer: true,
+        }),
+      );
+      expect(env.SECRET).toBe("my-secret");
+    });
+
+    test("works with withDefault", async () => {
+      const env = await Effect.runPromise(
+        createEnv({
+          server: { MODE: withDefault(Schema.String, "production") },
+          resolvers: [fakeResolver({})],
+          isServer: true,
+        }),
+      );
+      expect(env.MODE).toBe("production");
     });
   });
 });

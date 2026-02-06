@@ -25,6 +25,9 @@ Never deploy with invalid environment variables again. **better-env** validates 
 - **Prefix support** — namespace your env vars with a uniform string (e.g. `APP_`) or per-category object (e.g. `{ client: "NEXT_PUBLIC_" }`), with built-in framework presets
 - **Validation callbacks** — hook into validation errors with `onValidationError` for custom logging or monitoring
 - **Custom runtime env** — inject a custom env source for testing or non-Node runtimes via `runtimeEnv`
+- **Composable envs** — use `extends` to compose multiple env objects together, building modular configurations
+- **Empty string handling** — treat empty strings as undefined with `emptyStringAsUndefined`
+- **Secret manager resolvers** — fetch secrets from AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, and 1Password at startup
 - **Effect Schema** — leverage the full power of Effect's schema system for transforms, filters, and composition
 
 ## Installation
@@ -233,6 +236,56 @@ const env = createEnv({
 
 The callback is invoked before the error is thrown. If you want to throw a custom error, throw from the callback.
 
+### Composing envs with `extends`
+
+Split your env configuration across modules and compose them together:
+
+```ts
+// src/env/db.ts
+export const dbEnv = createEnv({
+  server: {
+    DATABASE_URL: postgresUrl,
+    DB_POOL_SIZE: withDefault(positiveNumber, 10),
+  },
+});
+
+// src/env/auth.ts
+export const authEnv = createEnv({
+  server: {
+    JWT_SECRET: redacted(requiredString),
+    SESSION_TTL: withDefault(positiveNumber, 3600),
+  },
+});
+
+// src/env/index.ts
+export const env = createEnv({
+  extends: [dbEnv, authEnv],
+  server: {
+    PORT: withDefault(port, 3000),
+  },
+});
+
+env.DATABASE_URL; // string — from dbEnv
+env.JWT_SECRET;   // string — from authEnv
+env.PORT;         // number — from this env
+```
+
+Extended values are not re-validated — they are merged as-is. When keys overlap, later entries in the `extends` array take precedence, and keys defined in the current env's schemas always win.
+
+### Empty string handling
+
+Some deployment platforms set env vars to empty strings instead of leaving them unset. Enable `emptyStringAsUndefined` to normalize this:
+
+```ts
+const env = createEnv({
+  server: {
+    MODE: withDefault(requiredString, "production"),
+  },
+  emptyStringAsUndefined: true,
+  // MODE="" is treated as undefined → falls back to "production"
+});
+```
+
 ### Testing
 
 Inject a custom env source to make your tests deterministic:
@@ -313,6 +366,113 @@ requiredString.pipe(withDefault("x"), redacted);
 ```
 
 You can also use **any Effect Schema** directly — `better-env` accepts any `Schema<A, string, never>`.
+
+## Resolvers (Secret Managers)
+
+Resolvers fetch secrets from external providers and merge them into the env before validation. **Using resolvers makes `createEnv` return an `Effect`** instead of a plain object, since fetching secrets is an asynchronous, fallible operation.
+
+```ts
+import { createEnv, requiredString, redacted } from "@ayronforge/better-env";
+import { fromAwsSecrets } from "@ayronforge/better-env/aws";
+import { Effect } from "effect";
+
+const env = await Effect.runPromise(
+  createEnv({
+    server: {
+      DB_HOST: requiredString,
+      DB_PASS: redacted(requiredString),
+    },
+    resolvers: [
+      fromAwsSecrets({
+        secrets: {
+          DB_PASS: "prod/db-password",
+        },
+      }),
+    ],
+    runtimeEnv: { DB_HOST: "localhost" },
+  }),
+);
+
+env.DB_HOST; // "localhost" — from runtimeEnv
+env.DB_PASS; // string — fetched from AWS Secrets Manager
+```
+
+Resolver results are merged on top of `runtimeEnv` (or `process.env`), so resolved values override local ones for the same key. Multiple resolvers run concurrently and merge left-to-right (later resolvers override earlier ones).
+
+The return type is `Effect<Env, ResolverError | EnvValidationError>` — resolver failures surface as `ResolverError`, and schema validation failures surface as `EnvValidationError`, both in the Effect error channel.
+
+### Available resolvers
+
+| Resolver | Import | Provider SDK (peer dep) |
+|---|---|---|
+| `fromAwsSecrets` | `@ayronforge/better-env/aws` | `@aws-sdk/client-secrets-manager` |
+| `fromGcpSecrets` | `@ayronforge/better-env/gcp` | `@google-cloud/secret-manager` |
+| `fromAzureKeyVault` | `@ayronforge/better-env/azure` | `@azure/keyvault-secrets` + `@azure/identity` |
+| `fromOnePassword` | `@ayronforge/better-env/1password` | `@1password/sdk` |
+
+All provider SDKs are **optional peer dependencies** — install only the ones you use.
+
+### AWS Secrets Manager
+
+```ts
+import { fromAwsSecrets } from "@ayronforge/better-env/aws";
+
+fromAwsSecrets({
+  secrets: {
+    DB_PASS: "prod/db-password",           // plain secret
+    DB_USER: "prod/db-credentials#username", // JSON secret — extracts the "username" key
+  },
+  region: "us-east-1", // optional, defaults to SDK default
+});
+```
+
+Use `#key` syntax to extract a specific field from a JSON-valued secret. Secrets are batch-fetched in groups of 20 for efficiency.
+
+### GCP Secret Manager
+
+```ts
+import { fromGcpSecrets } from "@ayronforge/better-env/gcp";
+
+fromGcpSecrets({
+  secrets: {
+    DB_PASS: "db-password",
+    // or use a full resource name:
+    API_KEY: "projects/my-project/secrets/api-key/versions/2",
+  },
+  projectId: "my-project", // required when using short secret names
+  version: "latest",       // optional, defaults to "latest"
+});
+```
+
+### Azure Key Vault
+
+```ts
+import { fromAzureKeyVault } from "@ayronforge/better-env/azure";
+
+fromAzureKeyVault({
+  secrets: {
+    DB_PASS: "db-password",    // maps env key → Key Vault secret name
+    API_KEY: "my-api-key",
+  },
+  vaultUrl: "https://my-vault.vault.azure.net",
+  // Uses DefaultAzureCredential by default
+});
+```
+
+### 1Password
+
+```ts
+import { fromOnePassword } from "@ayronforge/better-env/1password";
+
+fromOnePassword({
+  secrets: {
+    DB_PASS: "op://vault/item/field",
+    API_KEY: "op://vault/another-item/credential",
+  },
+  // Uses OP_SERVICE_ACCOUNT_TOKEN env var by default, or:
+  serviceAccountToken: "ops_...",
+});
+```
 
 ## Acknowledgements
 
