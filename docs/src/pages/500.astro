@@ -1,0 +1,30 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Navbar from "../components/Navbar.astro";
+import Footer from "../components/Footer.astro";
+---
+
+<Layout
+  title="500 — Server Error"
+  bodyClass="bg-background text-primary font-sans antialiased"
+>
+  <div class="min-h-screen flex flex-col">
+    <Navbar />
+    <main class="flex-1 flex items-center justify-center px-6">
+      <div class="text-center">
+        <p class="font-display text-8xl md:text-9xl font-bold text-secondary">500</p>
+        <h1 class="mt-4 font-display text-2xl md:text-3xl font-semibold text-primary">Something went wrong</h1>
+        <p class="mt-3 text-muted max-w-md mx-auto">An unexpected error occurred. Please try again later.</p>
+        <div class="mt-8">
+          <a
+            href={import.meta.env.BASE_URL}
+            class="text-secondary hover:text-secondary/80 font-medium transition-colors"
+          >
+            Back to Home
+          </a>
+        </div>
+      </div>
+    </main>
+    <Footer />
+  </div>
+</Layout>
