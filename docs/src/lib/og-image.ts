@@ -26,8 +26,8 @@ export async function generateOgImage(
 ) {
   const fonts = await loadFonts();
 
-  const svg = await satori(
-    {
+  // satori supports object notation but types expect ReactNode
+  const element = {
       type: "div",
       props: {
         style: {
@@ -211,7 +211,10 @@ export async function generateOgImage(
           },
         ],
       },
-    },
+    } as const;
+
+  const svg = await satori(
+    element as unknown as React.ReactNode,
     {
       width: 1200,
       height: 630,
