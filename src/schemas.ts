@@ -2,21 +2,21 @@ import { Function, Schema } from "effect";
 
 export const withDefault: {
   <S extends Schema.Schema.Any>(
-    defaultValue: Schema.Schema.Type<S>,
+    defaultValue: NonNullable<Schema.Schema.Type<S>>,
   ): (
     schema: S,
-  ) => Schema.transform<Schema.UndefinedOr<S>, Schema.SchemaClass<Schema.Schema.Type<S>>>;
+  ) => Schema.transform<Schema.UndefinedOr<S>, Schema.SchemaClass<NonNullable<Schema.Schema.Type<S>>>>;
   <S extends Schema.Schema.Any>(
     schema: S,
-    defaultValue: Schema.Schema.Type<S>,
-  ): Schema.transform<Schema.UndefinedOr<S>, Schema.SchemaClass<Schema.Schema.Type<S>>>;
+    defaultValue: NonNullable<Schema.Schema.Type<S>>,
+  ): Schema.transform<Schema.UndefinedOr<S>, Schema.SchemaClass<NonNullable<Schema.Schema.Type<S>>>>;
 } = Function.dual(
   2,
-  <S extends Schema.Schema.Any>(schema: S, defaultValue: Schema.Schema.Type<S>) =>
+  <S extends Schema.Schema.Any>(schema: S, defaultValue: NonNullable<Schema.Schema.Type<S>>) =>
     Schema.transform(Schema.UndefinedOr(schema), Schema.typeSchema(schema), {
       decode: (value) => value ?? defaultValue,
       encode: (value) => value,
-    }),
+    }) as Schema.transform<Schema.UndefinedOr<S>, Schema.SchemaClass<NonNullable<Schema.Schema.Type<S>>>>,
 );
 
 export const redacted = <S extends Schema.Schema.Any>(schema: S) => Schema.Redacted(schema);

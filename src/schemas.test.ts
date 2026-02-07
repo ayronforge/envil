@@ -52,6 +52,13 @@ describe("withDefault", () => {
     expect(() => decode(schema, 123)).toThrow();
   });
 
+  test("narrows output type to exclude undefined", () => {
+    const schema = optionalString.pipe(withDefault("x"));
+    type Out = Schema.Schema.Type<typeof schema>;
+    const _assert: [Out] extends [string] ? ([string] extends [Out] ? true : never) : never = true;
+    expect(_assert).toBe(true);
+  });
+
   test("works piped: Schema.String.pipe(withDefault('fallback'))", () => {
     const piped = Schema.String.pipe(withDefault("fallback"));
     expect(decode(piped, undefined)).toBe("fallback");
