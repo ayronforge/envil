@@ -7,6 +7,10 @@ Typesafe environment variables using [Effect Schema](https://effect.website/docs
 
 Never deploy with invalid environment variables again. **better-env** validates all your env vars at startup, gives you full TypeScript autocompletion, and keeps server secrets out of client bundles — powered by the [Effect](https://effect.website) ecosystem.
 
+## Documentation
+
+For schemas, helpers, prefix support, framework presets, composable envs, resolvers, and more — visit the **[documentation](https://ayronforge.com/better-env)**.
+
 ## Highlights
 
 - **Full type inference** — env vars are fully typed from your schemas, no manual annotations needed
@@ -71,10 +75,6 @@ EnvValidationError: Invalid environment variables:
 DATABASE_URL: Expected a valid PostgreSQL connection URL
 API_SECRET: Expected a string with at least 1 character(s), actual ""
 ```
-
-## Documentation
-
-For schemas, helpers, prefix support, framework presets, composable envs, resolvers, and more — visit the **[documentation](https://ayronforge.com/better-env)**.
 
 ## Acknowledgements
 
