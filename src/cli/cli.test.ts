@@ -1,12 +1,14 @@
-import { Schema } from "effect";
 import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { Schema } from "effect";
+
 import { runCli } from "../cli.ts";
 import { buildEnvExample } from "../introspect.ts";
 import * as S from "../schemas.ts";
+
 import { decodeDotenvText } from "./dotenv-codec.ts";
 import { generateEnvTs } from "./generate-env-ts.ts";
 import { inferModel } from "./infer.ts";
@@ -125,7 +127,8 @@ describe("envil cli", () => {
     });
 
     test("round-trip is stable: .env.example -> env.ts -> .env.example -> env.ts", () => {
-      const input = "# @server\n# @type port\nPORT=3000\n\n# @client\nNEXT_PUBLIC_API_URL=https://example.com\n";
+      const input =
+        "# @server\n# @type port\nPORT=3000\n\n# @client\nNEXT_PUBLIC_API_URL=https://example.com\n";
       const prefix = { server: "", client: "", shared: "" };
 
       const dotenv1 = decodeDotenvText(input);
@@ -261,7 +264,13 @@ describe("envil cli", () => {
       await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
       const io = createBufferedIO(tempDir);
       const code = await runCli(
-        ["add", "env", `--input=${path.join(tempDir, ".env.example")}`, "--output", path.join(tempDir, "env.ts")],
+        [
+          "add",
+          "env",
+          `--input=${path.join(tempDir, ".env.example")}`,
+          "--output",
+          path.join(tempDir, "env.ts"),
+        ],
         io.io,
       );
       expect(code).toBe(0);
@@ -273,10 +282,7 @@ describe("envil cli", () => {
       await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
       await writeFile(path.join(tempDir, "env.ts"), "existing\n", "utf8");
       const io = createBufferedIO(tempDir);
-      const code = await runCli(
-        ["add", "env", "--output", "env.ts", "--force=false"],
-        io.io,
-      );
+      const code = await runCli(["add", "env", "--output", "env.ts", "--force=false"], io.io);
       expect(code).toBe(1);
       expect(io.stderr.join("")).toContain("already exists");
       await rm(tempDir, { recursive: true, force: true });
@@ -331,11 +337,7 @@ describe("envil cli", () => {
 
     test("document prefix used as fallback", async () => {
       const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-resolve-"));
-      await writeFile(
-        path.join(tempDir, ".env.example"),
-        "# @client DOC_\nKEY=value\n",
-        "utf8",
-      );
+      await writeFile(path.join(tempDir, ".env.example"), "# @client DOC_\nKEY=value\n", "utf8");
       const io = createBufferedIO(tempDir);
       await runCli(["add", "env", "--output", "env.ts"], io.io);
       const content = await readFile(path.join(tempDir, "env.ts"), "utf8");
@@ -345,16 +347,9 @@ describe("envil cli", () => {
 
     test("explicit prefix overrides document prefix", async () => {
       const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-resolve-"));
-      await writeFile(
-        path.join(tempDir, ".env.example"),
-        "# @client DOC_\nKEY=value\n",
-        "utf8",
-      );
+      await writeFile(path.join(tempDir, ".env.example"), "# @client DOC_\nKEY=value\n", "utf8");
       const io = createBufferedIO(tempDir);
-      await runCli(
-        ["add", "env", "--client-prefix", "CLI_", "--output", "env.ts"],
-        io.io,
-      );
+      await runCli(["add", "env", "--client-prefix", "CLI_", "--output", "env.ts"], io.io);
       const content = await readFile(path.join(tempDir, "env.ts"), "utf8");
       expect(content).toContain('client: "CLI_"');
       await rm(tempDir, { recursive: true, force: true });
@@ -389,10 +384,7 @@ describe("envil cli", () => {
         const tempDir = await mkdtemp(path.join(os.tmpdir(), `envil-fw-${framework}-`));
         await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
         const io = createBufferedIO(tempDir);
-        await runCli(
-          ["add", "env", "--framework", framework, "--output", "env.ts"],
-          io.io,
-        );
+        await runCli(["add", "env", "--framework", framework, "--output", "env.ts"], io.io);
         const content = await readFile(path.join(tempDir, "env.ts"), "utf8");
         expect(content).toContain(`client: "${expectedPrefix}"`);
         await rm(tempDir, { recursive: true, force: true });
@@ -407,21 +399,36 @@ describe("envil cli", () => {
 
 function baseSchema(kind: SchemaKind, enumValues?: readonly string[]): Schema.Schema.Any {
   switch (kind) {
-    case "boolean": return S.boolean;
-    case "integer": return S.integer;
-    case "number": return S.number;
-    case "port": return S.port;
-    case "url": return S.url;
-    case "postgresUrl": return S.postgresUrl;
-    case "redisUrl": return S.redisUrl;
-    case "mongoUrl": return S.mongoUrl;
-    case "mysqlUrl": return S.mysqlUrl;
-    case "commaSeparated": return S.commaSeparated;
-    case "commaSeparatedNumbers": return S.commaSeparatedNumbers;
-    case "commaSeparatedUrls": return S.commaSeparatedUrls;
-    case "json": return S.json(Schema.Unknown);
-    case "stringEnum": return S.stringEnum(enumValues as [string, ...string[]]);
-    default: return S.requiredString;
+    case "boolean":
+      return S.boolean;
+    case "integer":
+      return S.integer;
+    case "number":
+      return S.number;
+    case "port":
+      return S.port;
+    case "url":
+      return S.url;
+    case "postgresUrl":
+      return S.postgresUrl;
+    case "redisUrl":
+      return S.redisUrl;
+    case "mongoUrl":
+      return S.mongoUrl;
+    case "mysqlUrl":
+      return S.mysqlUrl;
+    case "commaSeparated":
+      return S.commaSeparated;
+    case "commaSeparatedNumbers":
+      return S.commaSeparatedNumbers;
+    case "commaSeparatedUrls":
+      return S.commaSeparatedUrls;
+    case "json":
+      return S.json(Schema.Unknown);
+    case "stringEnum":
+      return S.stringEnum(enumValues as [string, ...string[]]);
+    default:
+      return S.requiredString;
   }
 }
 
@@ -433,7 +440,10 @@ function variableToSchema(v: InferredVariable): Schema.Schema.Any {
   return schema;
 }
 
-function modelToDefinition(model: { prefix: { server: string; client: string; shared: string }; variables: ReadonlyArray<InferredVariable> }) {
+function modelToDefinition(model: {
+  prefix: { server: string; client: string; shared: string };
+  variables: ReadonlyArray<InferredVariable>;
+}) {
   const definition: Record<string, unknown> = {
     prefix: model.prefix,
     server: {} as Record<string, Schema.Schema.Any>,

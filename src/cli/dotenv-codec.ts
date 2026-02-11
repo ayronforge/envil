@@ -1,9 +1,6 @@
 import { Schema } from "effect";
 
-import {
-  parseBooleanDirective,
-  toEnvValueLiteral,
-} from "./literals.ts";
+import { parseBooleanDirective, toEnvValueLiteral } from "./literals.ts";
 import {
   BUCKETS,
   SCHEMA_KINDS,
@@ -247,9 +244,14 @@ function parseDirectiveToken(
     if (value === "enum" || value.startsWith("enum ")) {
       const raw = value.slice(4).trim();
       if (raw.length === 0) {
-        throw new Error(`Directive "@type enum" requires comma-separated values at line ${lineNumber}`);
+        throw new Error(
+          `Directive "@type enum" requires comma-separated values at line ${lineNumber}`,
+        );
       }
-      const stringEnumValues = raw.split(",").map((v) => v.trim()).filter(Boolean);
+      const stringEnumValues = raw
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean);
       if (stringEnumValues.length === 0) {
         throw new Error(`Directive "@type enum" requires at least one value at line ${lineNumber}`);
       }

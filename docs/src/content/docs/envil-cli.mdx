@@ -23,15 +23,15 @@ envil add env [options]
 
 **Options:**
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--input <path>` | Input `.env.example` path | `.env.example` |
-| `--output <path>` | Output `env.ts` path | `src/env.ts` if `src/` exists, else `env.ts` |
-| `--framework <name>` | Prefix preset: `nextjs`, `vite`, `expo`, `nuxt`, `sveltekit`, `astro` | |
-| `--client-prefix <value>` | Client prefix override | |
-| `--server-prefix <value>` | Server prefix override | |
-| `--shared-prefix <value>` | Shared prefix override | |
-| `--force` | Overwrite output file if it exists | |
+| Flag                      | Description                                                           | Default                                      |
+| ------------------------- | --------------------------------------------------------------------- | -------------------------------------------- |
+| `--input <path>`          | Input `.env.example` path                                             | `.env.example`                               |
+| `--output <path>`         | Output `env.ts` path                                                  | `src/env.ts` if `src/` exists, else `env.ts` |
+| `--framework <name>`      | Prefix preset: `nextjs`, `vite`, `expo`, `nuxt`, `sveltekit`, `astro` |                                              |
+| `--client-prefix <value>` | Client prefix override                                                |                                              |
+| `--server-prefix <value>` | Server prefix override                                                |                                              |
+| `--shared-prefix <value>` | Shared prefix override                                                |                                              |
+| `--force`                 | Overwrite output file if it exists                                    |                                              |
 
 ### How inference works
 
@@ -78,22 +78,22 @@ export const env = createEnv(envDefinition);
 
 ### Inference rules
 
-| Value pattern | Inferred schema |
-|---|---|
-| `true`, `false`, `1`, `0` | `boolean` |
-| Integer on a `*PORT*` key (1-65535) | `port` |
-| Integer | `integer` |
-| Decimal number | `number` |
-| `http://` or `https://` URL | `url` |
-| `postgres://` or `postgresql://` | `postgresUrl` |
-| `redis://` or `rediss://` | `redisUrl` |
-| `mongodb://` or `mongodb+srv://` | `mongoUrl` |
-| `mysql://` or `mysqls://` | `mysqlUrl` |
-| Comma-separated values | `commaSeparated` |
-| Comma-separated numbers | `commaSeparatedNumbers` |
-| Comma-separated URLs | `commaSeparatedUrls` |
-| JSON object or array | `json` |
-| Anything else | `requiredString` |
+| Value pattern                       | Inferred schema         |
+| ----------------------------------- | ----------------------- |
+| `true`, `false`, `1`, `0`           | `boolean`               |
+| Integer on a `*PORT*` key (1-65535) | `port`                  |
+| Integer                             | `integer`               |
+| Decimal number                      | `number`                |
+| `http://` or `https://` URL         | `url`                   |
+| `postgres://` or `postgresql://`    | `postgresUrl`           |
+| `redis://` or `rediss://`           | `redisUrl`              |
+| `mongodb://` or `mongodb+srv://`    | `mongoUrl`              |
+| `mysql://` or `mysqls://`           | `mysqlUrl`              |
+| Comma-separated values              | `commaSeparated`        |
+| Comma-separated numbers             | `commaSeparatedNumbers` |
+| Comma-separated URLs                | `commaSeparatedUrls`    |
+| JSON object or array                | `json`                  |
+| Anything else                       | `requiredString`        |
 
 You can override inference using [directives](/envil/docs/directives).
 
@@ -107,11 +107,11 @@ envil add example [options]
 
 **Options:**
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--input <path>` | Input `env.ts` path | `env.ts`, then `src/env.ts` fallback |
-| `--output <path>` | Output `.env.example` path | `.env.example` |
-| `--force` | Overwrite output file if it exists | |
+| Flag              | Description                        | Default                              |
+| ----------------- | ---------------------------------- | ------------------------------------ |
+| `--input <path>`  | Input `env.ts` path                | `env.ts`, then `src/env.ts` fallback |
+| `--output <path>` | Output `.env.example` path         | `.env.example`                       |
+| `--force`         | Overwrite output file if it exists |                                      |
 
 <Callout type="note">
   Your `env.ts` must export an `envDefinition` object with `prefix`, `server`, `client`, and `shared` fields. The generated code from `envil add env` already follows this convention.

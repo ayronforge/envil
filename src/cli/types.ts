@@ -69,4 +69,3 @@ export interface InferredModel {
   readonly variables: ReadonlyArray<InferredVariable>;
   readonly runtimeEnv: Readonly<Record<string, string | undefined>>;
 }
-

@@ -19,51 +19,51 @@ function variable(overrides: Partial<InferredVariable> = {}): InferredVariable {
   };
 }
 
-function model(
-  variables: InferredVariable[],
-  prefix = EMPTY_PREFIX,
-): InferredModel {
+function model(variables: InferredVariable[], prefix = EMPTY_PREFIX): InferredModel {
   return { prefix, variables, runtimeEnv: {} };
 }
 
 describe("generate-env-ts", () => {
   test("generates deterministic imports, order, and wrapper composition", () => {
     const source = generateEnvTs(
-      model([
-        variable({
-          schemaKey: "PORT",
-          runtimeKey: "PORT",
-          kind: "port",
-          hasDefault: true,
-          defaultValue: 3000,
-          redacted: true,
-        }),
-        variable({
-          schemaKey: "FEATURE_FLAG",
-          runtimeKey: "FEATURE_FLAG",
-          bucket: "shared",
-          kind: "boolean",
-          optional: true,
-        }),
-        variable({
-          schemaKey: "RAW_NUMBER",
-          runtimeKey: "RAW_NUMBER",
-          kind: "number",
-        }),
-        variable({
-          schemaKey: "META",
-          runtimeKey: "META",
-          bucket: "shared",
-          kind: "json",
-        }),
-        variable({
-          schemaKey: "API_URL",
-          runtimeKey: "NEXT_PUBLIC_API_URL",
-          bucket: "client",
-          kind: "url",
-          sourceLine: 5,
-        }),
-      ], { server: "", client: "NEXT_PUBLIC_", shared: "" }),
+      model(
+        [
+          variable({
+            schemaKey: "PORT",
+            runtimeKey: "PORT",
+            kind: "port",
+            hasDefault: true,
+            defaultValue: 3000,
+            redacted: true,
+          }),
+          variable({
+            schemaKey: "FEATURE_FLAG",
+            runtimeKey: "FEATURE_FLAG",
+            bucket: "shared",
+            kind: "boolean",
+            optional: true,
+          }),
+          variable({
+            schemaKey: "RAW_NUMBER",
+            runtimeKey: "RAW_NUMBER",
+            kind: "number",
+          }),
+          variable({
+            schemaKey: "META",
+            runtimeKey: "META",
+            bucket: "shared",
+            kind: "json",
+          }),
+          variable({
+            schemaKey: "API_URL",
+            runtimeKey: "NEXT_PUBLIC_API_URL",
+            bucket: "client",
+            kind: "url",
+            sourceLine: 5,
+          }),
+        ],
+        { server: "", client: "NEXT_PUBLIC_", shared: "" },
+      ),
     );
 
     expect(source).toContain(
@@ -99,17 +99,13 @@ describe("generate-env-ts", () => {
     });
 
     test("client only", () => {
-      const source = generateEnvTs(
-        model([variable({ bucket: "client", schemaKey: "API" })]),
-      );
+      const source = generateEnvTs(model([variable({ bucket: "client", schemaKey: "API" })]));
       expect(source).toContain("client: {");
       expect(source).toContain("API: requiredString,");
     });
 
     test("shared only", () => {
-      const source = generateEnvTs(
-        model([variable({ bucket: "shared", schemaKey: "NAME" })]),
-      );
+      const source = generateEnvTs(model([variable({ bucket: "shared", schemaKey: "NAME" })]));
       expect(source).toContain("shared: {");
       expect(source).toContain("NAME: requiredString,");
     });
@@ -198,9 +194,7 @@ describe("generate-env-ts", () => {
     });
 
     test("optional + redacted without default", () => {
-      const source = generateEnvTs(
-        model([variable({ optional: true, redacted: true })]),
-      );
+      const source = generateEnvTs(model([variable({ optional: true, redacted: true })]));
       expect(source).toContain("KEY: redacted(optional(requiredString)),");
     });
   });
@@ -261,20 +255,24 @@ describe("generate-env-ts", () => {
   describe("stringEnum", () => {
     test("renders stringEnum with values", () => {
       const source = generateEnvTs(
-        model([variable({
-          kind: "stringEnum",
-          stringEnumValues: ["dev", "staging", "prod"],
-        })]),
+        model([
+          variable({
+            kind: "stringEnum",
+            stringEnumValues: ["dev", "staging", "prod"],
+          }),
+        ]),
       );
       expect(source).toContain('KEY: stringEnum(["dev", "staging", "prod"]),');
     });
 
     test("stringEnum imports stringEnum helper", () => {
       const source = generateEnvTs(
-        model([variable({
-          kind: "stringEnum",
-          stringEnumValues: ["a", "b"],
-        })]),
+        model([
+          variable({
+            kind: "stringEnum",
+            stringEnumValues: ["a", "b"],
+          }),
+        ]),
       );
       expect(source).toContain("stringEnum");
       const importMatch = source.match(/import \{ (.+) \} from "@ayronforge\/envil"/);
@@ -283,77 +281,91 @@ describe("generate-env-ts", () => {
 
     test("stringEnum with withDefault", () => {
       const source = generateEnvTs(
-        model([variable({
-          kind: "stringEnum",
-          stringEnumValues: ["dev", "staging", "prod"],
-          hasDefault: true,
-          defaultValue: "dev",
-        })]),
+        model([
+          variable({
+            kind: "stringEnum",
+            stringEnumValues: ["dev", "staging", "prod"],
+            hasDefault: true,
+            defaultValue: "dev",
+          }),
+        ]),
       );
       expect(source).toContain('KEY: withDefault(stringEnum(["dev", "staging", "prod"]), "dev"),');
     });
 
     test("stringEnum with optional", () => {
       const source = generateEnvTs(
-        model([variable({
-          kind: "stringEnum",
-          stringEnumValues: ["a", "b"],
-          optional: true,
-        })]),
+        model([
+          variable({
+            kind: "stringEnum",
+            stringEnumValues: ["a", "b"],
+            optional: true,
+          }),
+        ]),
       );
       expect(source).toContain('KEY: optional(stringEnum(["a", "b"])),');
     });
 
     test("stringEnum with redacted", () => {
       const source = generateEnvTs(
-        model([variable({
-          kind: "stringEnum",
-          stringEnumValues: ["x", "y"],
-          redacted: true,
-        })]),
+        model([
+          variable({
+            kind: "stringEnum",
+            stringEnumValues: ["x", "y"],
+            redacted: true,
+          }),
+        ]),
       );
       expect(source).toContain('KEY: redacted(stringEnum(["x", "y"])),');
     });
 
     test("stringEnum with all wrappers", () => {
       const source = generateEnvTs(
-        model([variable({
-          kind: "stringEnum",
-          stringEnumValues: ["a", "b", "c"],
-          hasDefault: true,
-          defaultValue: "a",
-          redacted: true,
-        })]),
+        model([
+          variable({
+            kind: "stringEnum",
+            stringEnumValues: ["a", "b", "c"],
+            hasDefault: true,
+            defaultValue: "a",
+            redacted: true,
+          }),
+        ]),
       );
       expect(source).toContain('KEY: redacted(withDefault(stringEnum(["a", "b", "c"]), "a")),');
     });
 
     test("stringEnum does not import Schema", () => {
       const source = generateEnvTs(
-        model([variable({
-          kind: "stringEnum",
-          stringEnumValues: ["a"],
-        })]),
+        model([
+          variable({
+            kind: "stringEnum",
+            stringEnumValues: ["a"],
+          }),
+        ]),
       );
       expect(source).not.toContain('from "effect"');
     });
 
     test("stringEnum values with special characters", () => {
       const source = generateEnvTs(
-        model([variable({
-          kind: "stringEnum",
-          stringEnumValues: ["hello world", 'has"quote'],
-        })]),
+        model([
+          variable({
+            kind: "stringEnum",
+            stringEnumValues: ["hello world", 'has"quote'],
+          }),
+        ]),
       );
       expect(source).toContain('stringEnum(["hello world", "has\\"quote"])');
     });
 
     test("stringEnum single value", () => {
       const source = generateEnvTs(
-        model([variable({
-          kind: "stringEnum",
-          stringEnumValues: ["only"],
-        })]),
+        model([
+          variable({
+            kind: "stringEnum",
+            stringEnumValues: ["only"],
+          }),
+        ]),
       );
       expect(source).toContain('KEY: stringEnum(["only"]),');
     });
@@ -375,9 +387,7 @@ describe("generate-env-ts", () => {
     });
 
     test("string default rendered with quotes", () => {
-      const source = generateEnvTs(
-        model([variable({ hasDefault: true, defaultValue: "hello" })]),
-      );
+      const source = generateEnvTs(model([variable({ hasDefault: true, defaultValue: "hello" })]));
       expect(source).toContain('withDefault(requiredString, "hello")');
     });
 

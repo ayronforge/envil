@@ -93,9 +93,10 @@ function renderSchemaExpression(
     stringEnumValues?: readonly string[];
   },
 ): { expression: string; helpers: Set<string>; needsSchemaImport: boolean } {
-  let expression = kind === "stringEnum" && wrappers.stringEnumValues
-    ? `stringEnum([${wrappers.stringEnumValues.map((v) => JSON.stringify(v)).join(", ")}])`
-    : (SPECIAL_EXPRESSIONS[kind] ?? kind);
+  let expression =
+    kind === "stringEnum" && wrappers.stringEnumValues
+      ? `stringEnum([${wrappers.stringEnumValues.map((v) => JSON.stringify(v)).join(", ")}])`
+      : (SPECIAL_EXPRESSIONS[kind] ?? kind);
   const helpers = new Set<string>([kind]);
   const needsSchemaImport = kind === "json";
 

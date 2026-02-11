@@ -55,14 +55,7 @@ describe("dotenv-codec", () => {
     });
 
     test("multiple sections", () => {
-      const source = [
-        "# @server",
-        "A=1",
-        "# @client",
-        "B=2",
-        "# @shared",
-        "C=3",
-      ].join("\n");
+      const source = ["# @server", "A=1", "# @client", "B=2", "# @shared", "C=3"].join("\n");
 
       const parsed = decodeDotenvText(source);
       expect(parsed.entries[0].sectionBucket).toBe("server");
@@ -71,12 +64,9 @@ describe("dotenv-codec", () => {
     });
 
     test("section prefix directives", () => {
-      const source = [
-        "# @server SRV_",
-        "KEY=value",
-        "# @client NEXT_PUBLIC_",
-        "KEY2=value2",
-      ].join("\n");
+      const source = ["# @server SRV_", "KEY=value", "# @client NEXT_PUBLIC_", "KEY2=value2"].join(
+        "\n",
+      );
 
       const parsed = decodeDotenvText(source);
       expect(parsed.prefix).toEqual({
@@ -143,9 +133,7 @@ describe("dotenv-codec", () => {
     });
 
     test("@type without value throws", () => {
-      expect(() => decodeDotenvText("# @type\nKEY=value\n")).toThrow(
-        '"@type" requires a value',
-      );
+      expect(() => decodeDotenvText("# @type\nKEY=value\n")).toThrow('"@type" requires a value');
     });
 
     test("@no-default sets hasDefault false", () => {
@@ -217,14 +205,9 @@ describe("dotenv-codec", () => {
     });
 
     test("multiple sections with prefixes", () => {
-      const source = [
-        "# @server SRV_",
-        "A=1",
-        "# @client CLI_",
-        "B=2",
-        "# @shared S_",
-        "C=3",
-      ].join("\n");
+      const source = ["# @server SRV_", "A=1", "# @client CLI_", "B=2", "# @shared S_", "C=3"].join(
+        "\n",
+      );
       const parsed = decodeDotenvText(source);
       expect(parsed.prefix).toEqual({ server: "SRV_", client: "CLI_", shared: "S_" });
       expect(parsed.entries[0].sectionBucket).toBe("server");
@@ -375,18 +358,14 @@ describe("dotenv-codec", () => {
 
     test("optional flag renders # @optional", () => {
       const output = encodeDotenvText({
-        entries: [
-          { key: "K", value: "v", line: 1, directives: { optional: true } },
-        ],
+        entries: [{ key: "K", value: "v", line: 1, directives: { optional: true } }],
       });
       expect(output).toContain("# @optional");
     });
 
     test("redacted flag renders # @redacted", () => {
       const output = encodeDotenvText({
-        entries: [
-          { key: "K", value: "v", line: 1, directives: { redacted: true } },
-        ],
+        entries: [{ key: "K", value: "v", line: 1, directives: { redacted: true } }],
       });
       expect(output).toContain("# @redacted");
     });
@@ -434,18 +413,14 @@ describe("dotenv-codec", () => {
 
     test("@no-default renders # @no-default", () => {
       const output = encodeDotenvText({
-        entries: [
-          { key: "K", value: "v", line: 1, directives: { hasDefault: false } },
-        ],
+        entries: [{ key: "K", value: "v", line: 1, directives: { hasDefault: false } }],
       });
       expect(output).toContain("# @no-default");
     });
 
     test("hasDefault true does not render # @no-default", () => {
       const output = encodeDotenvText({
-        entries: [
-          { key: "K", value: "v", line: 1, directives: { hasDefault: true } },
-        ],
+        entries: [{ key: "K", value: "v", line: 1, directives: { hasDefault: true } }],
       });
       expect(output).not.toContain("# @no-default");
     });
@@ -467,9 +442,7 @@ describe("dotenv-codec", () => {
 
     test("stringEnum without values does not render @type line", () => {
       const output = encodeDotenvText({
-        entries: [
-          { key: "K", value: "v", line: 1, directives: { type: "stringEnum" } },
-        ],
+        entries: [{ key: "K", value: "v", line: 1, directives: { type: "stringEnum" } }],
       });
       expect(output).not.toContain("# @type");
     });
@@ -530,9 +503,7 @@ describe("dotenv-codec", () => {
   describe("round-trip", () => {
     test("@no-default survives encode -> decode", () => {
       const encoded = encodeDotenvText({
-        entries: [
-          { key: "PORT", value: "3000", line: 1, directives: { hasDefault: false } },
-        ],
+        entries: [{ key: "PORT", value: "3000", line: 1, directives: { hasDefault: false } }],
       });
       const decoded = decodeDotenvText(encoded);
       expect(decoded.entries[0].directives.hasDefault).toBe(false);
@@ -540,9 +511,7 @@ describe("dotenv-codec", () => {
 
     test("section prefix survives encode -> decode", () => {
       const encoded = encodeDotenvText({
-        entries: [
-          { key: "SRV_PORT", value: "3000", line: 1, directives: { bucket: "server" } },
-        ],
+        entries: [{ key: "SRV_PORT", value: "3000", line: 1, directives: { bucket: "server" } }],
         prefix: { server: "SRV_", client: "NEXT_PUBLIC_" },
       });
       const decoded = decodeDotenvText(encoded);

@@ -24,7 +24,11 @@ function inferKind(key: string, value: string) {
   return model.variables[0].kind;
 }
 
-function inferVariable(key: string, value: string, overrides?: Partial<DotenvDocument["entries"][number]>) {
+function inferVariable(
+  key: string,
+  value: string,
+  overrides?: Partial<DotenvDocument["entries"][number]>,
+) {
   const model = inferModel({ entries: [entry(key, value, overrides)] }, { prefix: EMPTY_PREFIX });
   return model.variables[0];
 }
@@ -200,10 +204,7 @@ describe("infer", () => {
     });
 
     test("empty prefix does not match", () => {
-      const model = inferModel(
-        { entries: [entry("KEY", "value")] },
-        { prefix: EMPTY_PREFIX },
-      );
+      const model = inferModel({ entries: [entry("KEY", "value")] }, { prefix: EMPTY_PREFIX });
       expect(model.variables[0].bucket).toBe("server");
     });
 
@@ -413,11 +414,7 @@ describe("infer", () => {
     test("alphabetical within bucket", () => {
       const model = inferModel(
         {
-          entries: [
-            entry("Z_KEY", "x"),
-            entry("A_KEY", "x"),
-            entry("M_KEY", "x"),
-          ],
+          entries: [entry("Z_KEY", "x"), entry("A_KEY", "x"), entry("M_KEY", "x")],
         },
         { prefix: EMPTY_PREFIX },
       );
@@ -467,7 +464,9 @@ describe("infer", () => {
     });
 
     test("@no-default combined with @type", () => {
-      const v = inferVariable("COUNT", "42", { directives: { hasDefault: false, type: "integer" } });
+      const v = inferVariable("COUNT", "42", {
+        directives: { hasDefault: false, type: "integer" },
+      });
       expect(v.hasDefault).toBe(false);
       expect(v.kind).toBe("integer");
       expect(v.defaultValue).toBeUndefined();

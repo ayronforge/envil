@@ -69,11 +69,20 @@ export function examineSchema(schema: Schema.Schema.Any): ExaminedSchema {
 
   const kind = getAnn<SchemaKind>(ast, SCHEMA_KIND_ANNOTATION);
   const placeholder = getAnn<string>(ast, PLACEHOLDER_ANNOTATION);
-  const stringEnumValues = kind === "stringEnum"
-    ? getAnn<readonly string[]>(ast, STRING_ENUM_VALUES_ANNOTATION)
-    : undefined;
+  const stringEnumValues =
+    kind === "stringEnum"
+      ? getAnn<readonly string[]>(ast, STRING_ENUM_VALUES_ANNOTATION)
+      : undefined;
 
-  return { kind, placeholder, optional: isOptional, hasDefault, defaultValue, redacted: isRedacted, stringEnumValues };
+  return {
+    kind,
+    placeholder,
+    optional: isOptional,
+    hasDefault,
+    defaultValue,
+    redacted: isRedacted,
+    stringEnumValues,
+  };
 }
 
 export function buildEnvExample(definition: EnvDefinition): string {
@@ -132,7 +141,9 @@ function encodeDefault(schema: Schema.Schema.Any, examined: ExaminedSchema): str
     if (examined.redacted) {
       valueToEncode = Redacted.make(valueToEncode);
     }
-    const encoded = Schema.encodeSync(schema as Schema.Schema<unknown, unknown, never>)(valueToEncode);
+    const encoded = Schema.encodeSync(schema as Schema.Schema<unknown, unknown, never>)(
+      valueToEncode,
+    );
     return String(encoded ?? "");
   } catch {
     return stringifyDefault(examined);

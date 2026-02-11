@@ -149,10 +149,7 @@ async function runAddExample(options: AddExampleOptions, io: CliIO): Promise<voi
   io.stdout(`Generated ${outputPath}\n`);
 }
 
-function resolvePrefix(
-  options: AddEnvOptions,
-  fromDocument?: Partial<PrefixConfig>,
-): PrefixConfig {
+function resolvePrefix(options: AddEnvOptions, fromDocument?: Partial<PrefixConfig>): PrefixConfig {
   const fromFramework = options.framework ? FRAMEWORK_PREFIXES[options.framework] : undefined;
 
   return {
