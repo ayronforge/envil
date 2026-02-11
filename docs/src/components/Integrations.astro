@@ -1,18 +1,6 @@
 ---
 import { secretManagers } from "../data/content.ts";
-import { getIcon } from "../lib/utils.ts";
 import CodeBlock from "./CodeBlock.astro";
-
-const iconsBlack = await Promise.all(
-    secretManagers.map((sm) => getIcon(sm.icon, "black")),
-);
-const iconsWhite = await Promise.all(
-    secretManagers.map((sm) => getIcon(sm.icon, "white")),
-);
-
-const iconBlackUrls = iconsBlack.map((i) => i.url);
-const iconWhiteUrls = iconsWhite.map((i) => i.url);
-const iconWhiteInvert = iconsWhite.map((i) => i.invert);
 ---
 
 <section class="relative pb-28 px-6 lg:px-12">
@@ -33,16 +21,9 @@ const iconWhiteInvert = iconsWhite.map((i) => i.invert);
                     <div class="glass-card glass-hover rounded-2xl p-5 flex flex-col">
                         <div class="flex items-center gap-3 mb-4">
                             <img
-                                src={iconBlackUrls[i]}
+                                src={sm.icon}
                                 alt={sm.name}
                                 class="w-5 h-5 shrink-0"
-                                data-theme-visible="light"
-                            />
-                            <img
-                                src={iconWhiteUrls[i]}
-                                alt={sm.name}
-                                class:list={["w-5 h-5 shrink-0", iconWhiteInvert[i] && "brightness-0 invert"]}
-                                data-theme-visible="dark"
                             />
                             <h3 class="text-primary font-semibold text-sm">
                                 {sm.name}

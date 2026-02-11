@@ -1,23 +1,18 @@
 ---
 import { presets } from "../data/content.ts";
-import { getIcon } from "../lib/utils.ts";
 import { highlightCode } from "../lib/highlight.ts";
 import { PresetSelector } from "./preset-selector.tsx";
 
-const invertIcon = (p: typeof presets[number]) =>
-  "invertIcon" in p && !!p.invertIcon;
-
-const iconsLight = await Promise.all(presets.map((p) => getIcon(p.icon, "black")));
-const iconsDark = await Promise.all(presets.map((p) => getIcon(p.icon, "white", {invert: invertIcon(p) })));
+const iconsLight = await Promise.all(presets.map((p) => p.iconLight));
+const iconsDark = await Promise.all(presets.map((p) => p.iconDark));
 
 const presetData = presets.map((p, i) => ({
   name: p.name,
   prefix: p.prefix,
   code: p.code,
   highlightedCode: highlightCode(p.code),
-  iconLight: iconsLight[i].url,
-  iconDark: iconsDark[i].url,
-  invertDark: iconsDark[i].invert,
+  iconLight: iconsLight[i],
+  iconDark: iconsDark[i],
 }));
 ---
 

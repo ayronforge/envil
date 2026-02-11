@@ -10,7 +10,6 @@ interface PresetData {
   highlightedCode: string;
   iconLight: string;
   iconDark: string;
-  invertDark: boolean;
 }
 
 export function PresetSelector({ presets }: { presets: PresetData[] }) {

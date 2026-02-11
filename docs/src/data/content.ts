@@ -54,7 +54,7 @@ export const features = [
 export const secretManagers = [
   {
     name: "AWS Secrets Manager",
-    icon: "amazonwebservices",
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/amazonwebservices/amazonwebservices-original-wordmark.svg",
     import: "@ayronforge/envil/aws",
     description: "Resolve secrets from AWS Secrets Manager using the AWS SDK.",
     code: `import { fromAwsSecrets } from "@ayronforge/envil/aws"
@@ -69,7 +69,7 @@ fromAwsSecrets({
   },
   {
     name: "Azure Key Vault",
-    icon: "azure",
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/azure/azure-original.svg",
     import: "@ayronforge/envil/azure",
     description: "Fetch secrets from Azure Key Vault with managed identity support.",
     code: `import { fromAzureKeyVault } from "@ayronforge/envil/azure"
@@ -84,7 +84,7 @@ fromAzureKeyVault({
   },
   {
     name: "GCP Secret Manager",
-    icon: "googlecloud",
+    icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/googlecloud/googlecloud-original.svg",
     import: "@ayronforge/envil/gcp",
     description: "Access secrets stored in Google Cloud Secret Manager.",
     code: `import { fromGcpSecrets } from "@ayronforge/envil/gcp"
@@ -99,7 +99,7 @@ fromGcpSecrets({
   },
   {
     name: "1Password",
-    icon: "1password",
+    icon: "https://cdn.simpleicons.org/1password/3B66BC",
     import: "@ayronforge/envil/1password",
     description: "Retrieve secrets directly from 1Password vaults.",
     code: `import { fromOnePassword } from "@ayronforge/envil/1password"
@@ -116,7 +116,8 @@ fromOnePassword({
 export const presets = [
   {
     name: "Next.js",
-    icon: "nextdotjs",
+    iconLight: "https://cdn.simpleicons.org/nextdotjs/black",
+    iconDark: "https://cdn.simpleicons.org/nextdotjs/white",
     prefix: "NEXT_PUBLIC_",
     code: `import { createEnv, postgresUrl, url } from "@ayronforge/envil"
 import { nextjs } from "@ayronforge/envil/presets"
@@ -129,7 +130,8 @@ const env = createEnv({
   },
   {
     name: "Vite",
-    icon: "vite",
+    iconLight: "https://cdn.simpleicons.org/vite/black",
+    iconDark: "https://cdn.simpleicons.org/vite/white",
     prefix: "VITE_",
     code: `import { createEnv, requiredString, url } from "@ayronforge/envil"
 import { vite } from "@ayronforge/envil/presets"
@@ -142,6 +144,8 @@ const env = createEnv({
   },
   {
     name: "Expo",
+    iconLight: "https://cdn.simpleicons.org/expo/black",
+    iconDark: "https://cdn.simpleicons.org/expo/white",
     icon: "expo",
     prefix: "EXPO_PUBLIC_",
     code: `import { createEnv, url } from "@ayronforge/envil"
@@ -154,9 +158,8 @@ const env = createEnv({
   },
   {
     name: "Nuxt",
-    icon: "nuxtjs",
-    deviconVariant: "plain",
-    invertIcon: true,
+    iconLight: "https://cdn.simpleicons.org/nuxt/black",
+    iconDark: "https://cdn.simpleicons.org/nuxt/white",
     prefix: "NUXT_PUBLIC_",
     code: `import { createEnv, url } from "@ayronforge/envil"
 import { nuxt } from "@ayronforge/envil/presets"
@@ -168,7 +171,8 @@ const env = createEnv({
   },
   {
     name: "SvelteKit",
-    icon: "svelte",
+    iconLight: "https://cdn.simpleicons.org/svelte/black",
+    iconDark: "https://cdn.simpleicons.org/svelte/white",
     prefix: "PUBLIC_",
     code: `import { createEnv, url } from "@ayronforge/envil"
 import { sveltekit } from "@ayronforge/envil/presets"
@@ -180,7 +184,8 @@ const env = createEnv({
   },
   {
     name: "Astro",
-    icon: "astro",
+    iconLight: "https://cdn.simpleicons.org/astro/black",
+    iconDark: "https://cdn.simpleicons.org/astro/white",
     prefix: "PUBLIC_",
     code: `import { createEnv, url } from "@ayronforge/envil"
 import { astro } from "@ayronforge/envil/presets"
