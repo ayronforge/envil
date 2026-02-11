@@ -17,7 +17,13 @@ export const docsNav: NavSection[] = [
       { title: "Introduction", slug: "" },
       { title: "Quickstart", slug: "getting-started" },
       { title: "Core Concepts", slug: "core-concepts" },
+    ],
+  },
+  {
+    title: "CLI",
+    items: [
       { title: "Envil CLI", slug: "envil-cli" },
+      { title: "Directives", slug: "directives" },
     ],
   },
   {

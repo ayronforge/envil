@@ -34,6 +34,7 @@ createEnv({
 ## Number schemas
 
 <TypeTable rows={[
+  { name: "number", type: "number", description: "Any number parsed from string via NumberFromString." },
   { name: "positiveNumber", type: "number", description: "Positive number parsed from string. Must be > 0." },
   { name: "integer", type: "number", description: "Integer parsed from string. No decimals allowed." },
   { name: "nonNegativeNumber", type: "number", description: "Non-negative number parsed from string. Must be >= 0." },
@@ -41,13 +42,14 @@ createEnv({
 ]} />
 
 ```ts
-import { port, positiveNumber, integer } from "@ayronforge/envil"
+import { number, port, positiveNumber, integer } from "@ayronforge/envil"
 
 createEnv({
   server: {
     PORT: port,                    // 1-65535
     MAX_RETRIES: integer,          // whole number
     RATE_LIMIT: positiveNumber,    // > 0
+    THRESHOLD: number,             // any number (e.g. "3.14" → 3.14)
   },
 })
 ```

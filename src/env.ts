@@ -318,6 +318,10 @@ export function createEnv(
     autoRedactResolver?: boolean;
   },
 ) {
+  if (process.env.ENVIL_INTROSPECT_ONLY === "1") {
+    return new Proxy({}, { get: () => undefined }) as any;
+  }
+
   if (opts.resolvers?.length) {
     const shouldAutoRedact = opts.autoRedactResolver !== false;
     return Effect.all(opts.resolvers, { concurrency: "unbounded" }).pipe(

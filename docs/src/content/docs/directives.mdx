@@ -1,0 +1,180 @@
+---
+title: Directives
+description: Control how .env.example variables are interpreted using comment-based directives.
+order: 10
+---
+
+import Callout from "@/components/docs/Callout.astro";
+
+Directives are special comments in `.env.example` files that control how the CLI interprets variables. They are entirely optional — [inference](/envil/docs/envil-cli#inference-rules) handles most cases automatically. Use directives when you need to override the inferred behavior.
+
+## Section directives
+
+Section directives assign all following variables to a bucket until the next section appears. You can optionally include a prefix after the section name:
+
+```bash
+# @server SERVER_
+SERVER_DATABASE_URL=postgres://user:pass@localhost:5432/app
+SERVER_PORT=3000
+
+# @client NEXT_PUBLIC_
+NEXT_PUBLIC_API_URL=https://example.com
+
+# @shared
+NODE_ENV=development
+```
+
+The three sections correspond to the `server`, `client`, and `shared` fields in your `envDefinition`. Variables without a section default to `server`.
+
+When a prefix is provided (e.g. `# @server SERVER_`), the CLI strips the prefix from each key to produce the schema key. The generated `envDefinition` stores the prefix config:
+
+```ts
+export const envDefinition = {
+  prefix: {
+    server: "SERVER_",
+    client: "NEXT_PUBLIC_",
+    shared: "",
+  },
+  server: {
+    DATABASE_URL: withDefault(postgresUrl, "postgres://user:pass@localhost:5432/app"),
+    PORT: withDefault(port, 3000),
+  },
+  client: {
+    API_URL: withDefault(url, "https://example.com"),
+  },
+  // ...
+}
+```
+
+When `envil add example` regenerates the `.env.example`, it reads the prefix from the `envDefinition` and emits the combined section+prefix form automatically.
+
+<Callout type="note">
+  CLI flags (`--client-prefix`, `--server-prefix`, `--shared-prefix`, `--framework`) take priority over section-level prefix directives.
+</Callout>
+
+## Per-variable directives
+
+Per-variable directives override inference for individual variables. Place them on the line above the assignment, or inline after the value:
+
+```bash
+# Above the variable
+# @type integer
+TIMEOUT=30
+
+# Inline
+VERBOSE=true # @optional @redacted
+```
+
+Multiple directives can be combined on a single line.
+
+### `@type`
+
+Overrides the inferred schema kind:
+
+```bash
+# @type number
+RATE=3.14
+
+# @type requiredString
+CODE=12345
+```
+
+Accepted values: `requiredString`, `boolean`, `integer`, `number`, `port`, `url`, `postgresUrl`, `redisUrl`, `mongoUrl`, `mysqlUrl`, `commaSeparated`, `commaSeparatedNumbers`, `commaSeparatedUrls`, `json`.
+
+Aliases are also accepted: `string` for `requiredString`, `bool` for `boolean`, `int` for `integer`.
+
+#### `@type enum`
+
+A special form of `@type` that generates a `stringEnum` schema. List the allowed values as a comma-separated list:
+
+```bash
+# @type enum dev,staging,prod
+NODE_ENV=dev
+```
+
+This generates `NODE_ENV: withDefault(stringEnum(["dev", "staging", "prod"]), "dev")`.
+
+### `@optional`
+
+Marks the variable as optional. The generated code wraps it with `optional(schema)`, making it accept `undefined`:
+
+```bash
+# @optional
+DEBUG_HOST=localhost
+```
+
+Produces `DEBUG_HOST: withDefault(optional(requiredString), "localhost")` — the variable has a default but is explicitly typed as optional.
+
+Pass `false` to disable: `# @optional false`.
+
+### `@redacted`
+
+Marks the variable as sensitive. The generated code wraps it with `redacted(schema)`, producing a `Redacted<T>` value that won't leak in logs or serialization:
+
+```bash
+# @redacted
+API_SECRET=my-secret
+```
+
+Pass `false` to disable: `# @redacted false`.
+
+### `@bucket`
+
+Overrides the bucket for a single variable, regardless of the active section:
+
+```bash
+# @server
+PORT=3000
+
+# This variable goes to shared even though we're in the server section
+# @bucket shared
+NODE_ENV=development
+```
+
+### `@no-default`
+
+By default, variables with an assigned value use that value as the default. Use `@no-default` to opt out, making the variable required at runtime:
+
+```bash
+# @no-default
+PORT=3000
+```
+
+This generates `PORT: port` with no `withDefault` wrapper. The assigned value `3000` is still used for type inference, but the variable is required at runtime.
+
+## Bucket resolution order
+
+When determining which bucket a variable belongs to, the CLI checks in this order:
+
+1. Inline `@bucket` directive on the variable
+2. Active section (`# @server`, `# @client`, `# @shared`)
+3. Prefix inference (e.g. a key starting with `NEXT_PUBLIC_` maps to `client` when that prefix is configured)
+4. Falls back to `server`
+
+## Full example
+
+```bash
+# @server SERVER_
+
+SERVER_PORT=3000
+SERVER_DATABASE_URL=postgres://user:pass@localhost:5432/app
+
+# @redacted
+SERVER_API_SECRET=change-me
+
+# @type integer
+# @no-default
+SERVER_MAX_RETRIES=3
+
+# @type enum dev,staging,prod
+SERVER_NODE_ENV=dev
+
+# @client NEXT_PUBLIC_
+
+NEXT_PUBLIC_API_URL=https://api.example.com
+
+# @shared
+
+# @optional
+DEBUG=false
+```

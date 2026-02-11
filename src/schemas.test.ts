@@ -481,6 +481,32 @@ describe("stringEnum", () => {
   test("rejects undefined", () => {
     expect(() => decode(nodeEnv, undefined)).toThrow();
   });
+
+  test("composes with withDefault", () => {
+    const schema = withDefault(nodeEnv, "development");
+    expect(decode(schema, undefined)).toBe("development");
+    expect(decode(schema, "production")).toBe("production");
+  });
+
+  test("composes with optional", () => {
+    const schema = optional(nodeEnv);
+    expect(decode(schema, undefined)).toBeUndefined();
+    expect(decode(schema, "staging")).toBe("staging");
+  });
+
+  test("composes with redacted", () => {
+    const schema = redacted(nodeEnv);
+    const result = decode(schema, "production");
+    expect(Redacted.isRedacted(result)).toBe(true);
+    expect(Redacted.value(result as Redacted.Redacted<string>)).toBe("production");
+  });
+
+  test("two-value enum", () => {
+    const schema = stringEnum(["yes", "no"]);
+    expect(decode(schema, "yes")).toBe("yes");
+    expect(decode(schema, "no")).toBe("no");
+    expect(() => decode(schema, "maybe")).toThrow();
+  });
 });
 
 describe("json", () => {

@@ -1,7 +1,9 @@
+import pkg from "../../../package.json";
+
 export const site = {
   name: "envil",
   fullName: "@ayronforge/envil",
-  version: "0.3.1",
+  version: pkg.version,
   tagline: "Environment variables you can trust at runtime",
   description:
     "Validate, secure, and manage your environment variables with full TypeScript inference. From web apps to autonomous AI agents — your config is always correct, your secrets always protected. Built on Effect Schema.",
