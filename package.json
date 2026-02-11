@@ -1,6 +1,6 @@
 {
   "name": "@ayronforge/envil",
-  "version": "0.5.5",
+  "version": "0.6.0",
   "description": "Type-safe environment variable validation using Effect Schema",
   "keywords": [
     "effect",
