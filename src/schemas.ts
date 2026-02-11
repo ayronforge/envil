@@ -60,8 +60,6 @@ export const requiredString = Schema.String.pipe(Schema.minLength(1)).annotation
   [PLACEHOLDER_ANNOTATION]: "CHANGE_ME",
 } as Record<PropertyKey, unknown>);
 
-export const optionalString = Schema.UndefinedOr(Schema.String);
-
 export const boolean = Schema.transform(
   Schema.String.pipe(
     Schema.filter((s) => ["true", "false", "1", "0"].includes(s.toLowerCase()), {
