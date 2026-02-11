@@ -43,12 +43,7 @@ export function PresetSelector({ presets }: { presets: PresetData[] }) {
               <span className="relative z-10 flex items-center gap-2.5 pointer-events-none">
                 <span className="w-5 h-5 flex items-center justify-center shrink-0">
                   <img src={p.iconLight} alt="" className="w-4 h-4" data-theme-visible="light" />
-                  <img
-                    src={p.iconDark}
-                    alt=""
-                    className={`w-4 h-4${p.invertDark ? " brightness-0 invert" : ""}`}
-                    data-theme-visible="dark"
-                  />
+                  <img src={p.iconDark} alt="" className="w-4 h-4" data-theme-visible="dark" />
                 </span>
                 <span>{p.name}</span>
               </span>
