@@ -1,7 +1,7 @@
 const buildConfig: Bun.BuildConfig = {
   entrypoints: [
     "src/index.ts",
-    "src/cli.ts",
+    //"src/cli.ts",
     "src/presets.ts",
     "src/resolvers/aws.ts",
     "src/resolvers/azure.ts",
