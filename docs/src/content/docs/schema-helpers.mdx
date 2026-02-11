@@ -6,10 +6,10 @@ order: 5
 
 import Callout from "@/components/docs/Callout.astro";
 
-better-env provides four helper functions for common patterns when defining environment variable schemas.
+envil provides four helper functions for common patterns when defining environment variable schemas.
 
 ```ts
-import { withDefault, optional, redacted, json } from "@ayronforge/better-env"
+import { withDefault, optional, redacted, json } from "@ayronforge/envil"
 ```
 
 ## withDefault
@@ -21,7 +21,7 @@ Adds a default value to a schema, making the variable optional. If the env var i
 ### Data-first style
 
 ```ts
-import { withDefault, port } from "@ayronforge/better-env"
+import { withDefault, port } from "@ayronforge/envil"
 
 createEnv({
   server: {
@@ -34,7 +34,7 @@ createEnv({
 ### Pipe style
 
 ```ts
-import { withDefault, port } from "@ayronforge/better-env"
+import { withDefault, port } from "@ayronforge/envil"
 
 createEnv({
   server: {
@@ -54,7 +54,7 @@ Both styles produce the same result. Use whichever reads better in your codebase
 Makes any schema accept `undefined`, allowing the env var to be missing without causing a validation error. This is a shorthand for `Schema.UndefinedOr(schema)`.
 
 ```ts
-import { optional } from "@ayronforge/better-env"
+import { optional } from "@ayronforge/envil"
 import { Schema } from "effect"
 
 createEnv({
@@ -75,7 +75,7 @@ createEnv({
 Wraps a schema with Effect's `Redacted` type. This prevents accidental logging, serialization, or spreading of sensitive values.
 
 ```ts
-import { redacted } from "@ayronforge/better-env"
+import { redacted } from "@ayronforge/envil"
 import { Redacted, Schema } from "effect"
 
 const env = createEnv({
@@ -100,7 +100,7 @@ The `redacted` helper is a shorthand for `Schema.Redacted(schema)`. Values wrapp
 Parses a JSON string env var and validates the parsed result against an inner schema:
 
 ```ts
-import { json } from "@ayronforge/better-env"
+import { json } from "@ayronforge/envil"
 import { Schema } from "effect"
 
 createEnv({
@@ -129,7 +129,7 @@ FEATURE_FLAGS: Expected valid JSON, but got '{ invalid json'
 Helpers can be composed together:
 
 ```ts
-import { withDefault, optional, redacted, json } from "@ayronforge/better-env"
+import { withDefault, optional, redacted, json } from "@ayronforge/envil"
 import { Schema } from "effect"
 
 createEnv({

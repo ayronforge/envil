@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
-  "exclude": ["node_modules", "build", "docs", "dist", "**/*.test.ts"],
+  "exclude": ["node_modules", "build", "docs", "dist", "scripts", "**/*.test.ts"],
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",

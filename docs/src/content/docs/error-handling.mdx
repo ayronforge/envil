@@ -1,16 +1,16 @@
 ---
 title: Error Handling
-description: Understand the error classes thrown by better-env and how to handle them.
+description: Understand the error classes thrown by envil and how to handle them.
 order: 8
 ---
 
 import TypeTable from "@/components/docs/TypeTable.astro";
 import Callout from "@/components/docs/Callout.astro";
 
-better-env uses three distinct error types to signal different failure modes. All error classes are exported from the main package.
+envil uses three distinct error types to signal different failure modes. All error classes are exported from the main package.
 
 ```ts
-import { EnvValidationError, ClientAccessError } from "@ayronforge/better-env"
+import { EnvValidationError, ClientAccessError } from "@ayronforge/envil"
 ```
 
 ## EnvValidationError
@@ -26,7 +26,7 @@ Thrown when one or more environment variables fail schema validation.
 ### Example
 
 ```ts
-import { createEnv, requiredString, port, EnvValidationError } from "@ayronforge/better-env"
+import { createEnv, requiredString, port, EnvValidationError } from "@ayronforge/envil"
 
 try {
   const env = createEnv({
@@ -83,7 +83,7 @@ Thrown when client-side code attempts to access a server-only environment variab
 ### Example
 
 ```ts
-import { createEnv, requiredString, ClientAccessError } from "@ayronforge/better-env"
+import { createEnv, requiredString, ClientAccessError } from "@ayronforge/envil"
 
 const env = createEnv({
   server: {
@@ -107,7 +107,7 @@ try {
 
 ## ResolverError
 
-Thrown when a [resolver](/better-env/docs/resolvers) fails to initialize or fetch secrets. This is an Effect tagged error, used in the Effect error channel.
+Thrown when a [resolver](/envil/docs/resolvers) fails to initialize or fetch secrets. This is an Effect tagged error, used in the Effect error channel.
 
 <TypeTable rows={[
   { name: "_tag", type: '"ResolverError"', description: "Discriminant tag for Effect error handling." },
@@ -120,8 +120,8 @@ Thrown when a [resolver](/better-env/docs/resolvers) fails to initialize or fetc
 
 ```ts
 import { Effect } from "effect"
-import { createEnv, requiredString } from "@ayronforge/better-env"
-import { fromAwsSecrets, ResolverError } from "@ayronforge/better-env/aws"
+import { createEnv, requiredString } from "@ayronforge/envil"
+import { fromAwsSecrets, ResolverError } from "@ayronforge/envil/aws"
 
 const envEffect = createEnv({
   server: {
@@ -145,4 +145,26 @@ const program = envEffect.pipe(
 
 <Callout type="warning">
   When using resolvers, `createEnv` returns an `Effect.Effect` instead of a plain object. You must run it with `Effect.runPromise` or `Effect.runSync` (or use it within an Effect pipeline).
+</Callout>
+
+## Safe alternative
+
+If you prefer handling errors without `try`/`catch` or Effect error channels, use [`safeCreateEnv`](/envil/docs/safe-parsing). It captures errors in a discriminated result object instead of raising exceptions:
+
+```ts
+import { safeCreateEnv, requiredString } from "@ayronforge/envil"
+
+const result = safeCreateEnv({
+  server: { DATABASE_URL: requiredString },
+  isServer: true,
+})
+
+if (!result.success) {
+  // result.error is EnvValidationError
+  console.error(result.error.errors)
+}
+```
+
+<Callout type="tip">
+  With resolvers, `safeCreateEnv` returns an Effect that **never fails** — both `ResolverError` and `EnvValidationError` are captured in the result object. See [Safe Parsing](/envil/docs/safe-parsing) for details.
 </Callout>

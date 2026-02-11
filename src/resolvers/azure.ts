@@ -1,7 +1,12 @@
 import { Effect } from "effect";
 
 import { ResolverError, type ResolverResult } from "./types.ts";
-import { keyValueResultsToRecord, strictOrElse, toResolverError, tryInitializeClient } from "./utils.ts";
+import {
+  keyValueResultsToRecord,
+  strictOrElse,
+  toResolverError,
+  tryInitializeClient,
+} from "./utils.ts";
 
 export { ResolverError } from "./types.ts";
 
@@ -46,12 +51,15 @@ export function fromAzureKeyVault(
     const results = yield* Effect.forEach(
       Object.entries(secrets),
       ([envKey, secretName]) =>
-        strictOrElse(Effect.tryPromise(() => client.getSecret(secretName)), {
-          strict,
-          resolver: "azure",
-          message: `Failed to resolve secret "${secretName}" for env key "${envKey}"`,
-          fallback: () => undefined,
-        }).pipe(Effect.map((value) => ({ envKey, value }))),
+        strictOrElse(
+          Effect.tryPromise(() => client.getSecret(secretName)),
+          {
+            strict,
+            resolver: "azure",
+            message: `Failed to resolve secret "${secretName}" for env key "${envKey}"`,
+            fallback: () => undefined,
+          },
+        ).pipe(Effect.map((value) => ({ envKey, value }))),
       { concurrency: "unbounded" },
     );
 

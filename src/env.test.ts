@@ -215,7 +215,7 @@ describe("createEnv", () => {
     test("shared vars from extended envs remain accessible on client", () => {
       const baseEnv = createEnv({
         shared: { APP_NAME: requiredString },
-        runtimeEnv: { APP_NAME: "better-env" },
+        runtimeEnv: { APP_NAME: "envil" },
         isServer: true,
       });
 
@@ -226,7 +226,7 @@ describe("createEnv", () => {
         isServer: false,
       });
 
-      expect(env.APP_NAME).toBe("better-env");
+      expect(env.APP_NAME).toBe("envil");
     });
 
     test("accessing client vars from client works fine", () => {

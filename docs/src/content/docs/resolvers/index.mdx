@@ -16,8 +16,8 @@ Resolvers let you pull environment variable values from cloud secret managers in
 When you pass a `resolvers` array to `createEnv`, the return type changes from a plain object to an `Effect.Effect`:
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/better-env"
-import { fromAwsSecrets } from "@ayronforge/better-env/aws"
+import { createEnv, requiredString } from "@ayronforge/envil"
+import { fromAwsSecrets } from "@ayronforge/envil/aws"
 import { Effect } from "effect"
 
 // With resolvers → returns Effect
@@ -126,11 +126,11 @@ fromAwsSecrets({
 ## Available resolvers
 
 <TypeTable rows={[
-  { name: "fromAwsSecrets", type: "@ayronforge/better-env/aws", description: "AWS Secrets Manager. Peer dep: @aws-sdk/client-secrets-manager" },
-  { name: "fromGcpSecrets", type: "@ayronforge/better-env/gcp", description: "GCP Secret Manager. Peer dep: @google-cloud/secret-manager" },
-  { name: "fromAzureKeyVault", type: "@ayronforge/better-env/azure", description: "Azure Key Vault. Peer deps: @azure/keyvault-secrets, @azure/identity" },
-  { name: "fromOnePassword", type: "@ayronforge/better-env/1password", description: "1Password. Peer dep: @1password/sdk" },
-  { name: "fromRemoteSecrets", type: "@ayronforge/better-env", description: "Custom / remote secrets. No peer dep — bring your own client." },
+  { name: "fromAwsSecrets", type: "@ayronforge/envil/aws", description: "AWS Secrets Manager. Peer dep: @aws-sdk/client-secrets-manager" },
+  { name: "fromGcpSecrets", type: "@ayronforge/envil/gcp", description: "GCP Secret Manager. Peer dep: @google-cloud/secret-manager" },
+  { name: "fromAzureKeyVault", type: "@ayronforge/envil/azure", description: "Azure Key Vault. Peer deps: @azure/keyvault-secrets, @azure/identity" },
+  { name: "fromOnePassword", type: "@ayronforge/envil/1password", description: "1Password. Peer dep: @1password/sdk" },
+  { name: "fromRemoteSecrets", type: "@ayronforge/envil", description: "Custom / remote secrets. No peer dep — bring your own client." },
 ]} />
 
 <Callout type="note">
@@ -138,19 +138,19 @@ fromAwsSecrets({
 </Callout>
 
 <CardGroup>
-  <Card title="AWS Secrets Manager" href="/better-env/docs/resolvers/aws">
+  <Card title="AWS Secrets Manager" href="/envil/docs/resolvers/aws">
     Batch-fetch secrets with JSON key extraction and automatic SDK initialization.
   </Card>
-  <Card title="GCP Secret Manager" href="/better-env/docs/resolvers/gcp">
+  <Card title="GCP Secret Manager" href="/envil/docs/resolvers/gcp">
     Access secrets with full resource name support and automatic Uint8Array decoding.
   </Card>
-  <Card title="Azure Key Vault" href="/better-env/docs/resolvers/azure">
+  <Card title="Azure Key Vault" href="/envil/docs/resolvers/azure">
     Fetch secrets with DefaultAzureCredential and managed identity support.
   </Card>
-  <Card title="1Password" href="/better-env/docs/resolvers/onepassword">
+  <Card title="1Password" href="/envil/docs/resolvers/onepassword">
     Resolve secrets from 1Password vaults using the SDK's batch resolution.
   </Card>
-  <Card title="Custom / Remote Secrets" href="/better-env/docs/resolvers/remote">
+  <Card title="Custom / Remote Secrets" href="/envil/docs/resolvers/remote">
     Generic resolver for custom integrations, testing, and unsupported providers.
   </Card>
 </CardGroup>

@@ -1,7 +1,7 @@
 {
-  "redirects": [{ "source": "/", "destination": "/better-env", "permanent": false }],
+  "redirects": [{ "source": "/", "destination": "/envil", "permanent": false }],
   "rewrites": [
-    { "source": "/better-env", "destination": "/" },
-    { "source": "/better-env/:path*", "destination": "/:path*" }
+    { "source": "/envil", "destination": "/" },
+    { "source": "/envil/:path*", "destination": "/:path*" }
   ]
 }

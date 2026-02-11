@@ -1,5 +1,5 @@
 {
-  "name": "@ayronforge/better-env",
+  "name": "@ayronforge/envil",
   "version": "0.5.5",
   "description": "Type-safe environment variable validation using Effect Schema",
   "keywords": [
@@ -11,18 +11,18 @@
     "typescript",
     "validation"
   ],
-  "homepage": "https://github.com/ayronforge/better-env#readme",
+  "homepage": "https://github.com/ayronforge/envil#readme",
   "bugs": {
-    "url": "https://github.com/ayronforge/better-env/issues"
+    "url": "https://github.com/ayronforge/envil/issues"
   },
   "license": "MIT",
   "author": "Pedro Toledo",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ayronforge/better-env.git"
+    "url": "https://github.com/ayronforge/envil.git"
   },
   "bin": {
-    "better-env": "./dist/cli.js"
+    "envil": "./dist/cli.js"
   },
   "files": [
     "dist"

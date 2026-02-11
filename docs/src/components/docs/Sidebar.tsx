@@ -1,3 +1,5 @@
+import { ExternalLink } from "lucide-react";
+
 import type { NavSection } from "@/data/docs-nav";
 
 interface SidebarProps {
@@ -16,6 +18,22 @@ export function Sidebar({ sections, currentSlug, baseUrl }: SidebarProps) {
           </h4>
           <ul className="space-y-0.5">
             {section.items.map((item) => {
+              if (item.external && item.href) {
+                return (
+                  <li key={item.href}>
+                    <a
+                      href={item.href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-colors text-primary/70 hover:text-primary hover:bg-primary/5"
+                    >
+                      {item.title}
+                      <ExternalLink className="size-3 text-muted" />
+                    </a>
+                  </li>
+                );
+              }
+
               const href = item.slug === "" ? `${baseUrl}/docs` : `${baseUrl}/docs/${item.slug}`;
               const isActive = currentSlug === item.slug;
               return (

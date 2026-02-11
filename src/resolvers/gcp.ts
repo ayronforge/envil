@@ -1,7 +1,12 @@
 import { Effect } from "effect";
 
 import { ResolverError, type ResolverResult } from "./types.ts";
-import { keyValueResultsToRecord, strictOrElse, toResolverError, tryInitializeClient } from "./utils.ts";
+import {
+  keyValueResultsToRecord,
+  strictOrElse,
+  toResolverError,
+  tryInitializeClient,
+} from "./utils.ts";
 
 export { ResolverError } from "./types.ts";
 
@@ -25,7 +30,10 @@ export function fromGcpSecrets(
     );
 
     if (usesShortSecretName && !projectId) {
-      return yield* toResolverError("gcp", "projectId must be provided when using short secret names");
+      return yield* toResolverError(
+        "gcp",
+        "projectId must be provided when using short secret names",
+      );
     }
 
     const client = yield* tryInitializeClient(
@@ -53,12 +61,15 @@ export function fromGcpSecrets(
           ? secretName
           : `projects/${projectId}/secrets/${secretName}/versions/${version}`;
 
-        return strictOrElse(Effect.tryPromise(() => client.getSecret(name)), {
-          strict,
-          resolver: "gcp",
-          message: `Failed to resolve secret "${secretName}" for env key "${envKey}"`,
-          fallback: () => undefined,
-        }).pipe(Effect.map((value) => ({ envKey, value })));
+        return strictOrElse(
+          Effect.tryPromise(() => client.getSecret(name)),
+          {
+            strict,
+            resolver: "gcp",
+            message: `Failed to resolve secret "${secretName}" for env key "${envKey}"`,
+            fallback: () => undefined,
+          },
+        ).pipe(Effect.map((value) => ({ envKey, value })));
       },
       { concurrency: "unbounded" },
     );

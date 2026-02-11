@@ -10,7 +10,7 @@ import Callout from "@/components/docs/Callout.astro";
 Framework presets provide pre-configured `prefix` settings for popular frameworks. They handle the client-side prefix convention so you don't have to configure it manually.
 
 ```ts
-import { nextjs, vite, expo, nuxt, sveltekit, astro } from "@ayronforge/better-env/presets"
+import { nextjs, vite, expo, nuxt, sveltekit, astro } from "@ayronforge/envil/presets"
 ```
 
 ## Available presets
@@ -31,8 +31,8 @@ Spread the preset into your `createEnv` call:
 ### Next.js
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/better-env"
-import { nextjs } from "@ayronforge/better-env/presets"
+import { createEnv, requiredString } from "@ayronforge/envil"
+import { nextjs } from "@ayronforge/envil/presets"
 import { Schema } from "effect"
 
 export const env = createEnv({
@@ -50,8 +50,8 @@ export const env = createEnv({
 ### Vite
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/better-env"
-import { vite } from "@ayronforge/better-env/presets"
+import { createEnv, requiredString } from "@ayronforge/envil"
+import { vite } from "@ayronforge/envil/presets"
 
 export const env = createEnv({
   ...vite,
@@ -73,8 +73,8 @@ export const env = createEnv({
 ### Expo
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/better-env"
-import { expo } from "@ayronforge/better-env/presets"
+import { createEnv, requiredString } from "@ayronforge/envil"
+import { expo } from "@ayronforge/envil/presets"
 
 export const env = createEnv({
   ...expo,
@@ -88,8 +88,8 @@ export const env = createEnv({
 ### Nuxt
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/better-env"
-import { nuxt } from "@ayronforge/better-env/presets"
+import { createEnv, requiredString } from "@ayronforge/envil"
+import { nuxt } from "@ayronforge/envil/presets"
 
 export const env = createEnv({
   ...nuxt,
@@ -103,8 +103,8 @@ export const env = createEnv({
 ### SvelteKit
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/better-env"
-import { sveltekit } from "@ayronforge/better-env/presets"
+import { createEnv, requiredString } from "@ayronforge/envil"
+import { sveltekit } from "@ayronforge/envil/presets"
 
 export const env = createEnv({
   ...sveltekit,
@@ -118,8 +118,8 @@ export const env = createEnv({
 ### Astro
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/better-env"
-import { astro } from "@ayronforge/better-env/presets"
+import { createEnv, requiredString } from "@ayronforge/envil"
+import { astro } from "@ayronforge/envil/presets"
 
 export const env = createEnv({
   ...astro,

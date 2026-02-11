@@ -6,7 +6,7 @@ import { defineConfig } from "astro/config";
 
 export default defineConfig({
   site: "https://ayronforge.com",
-  base: "/better-env",
+  base: "/envil",
   integrations: [react(), mdx(), sitemap()],
   vite: {
     plugins: [tailwindcss()],

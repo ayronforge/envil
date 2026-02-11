@@ -1,13 +1,13 @@
 export const site = {
-  name: "better-env",
-  fullName: "@ayronforge/better-env",
+  name: "envil",
+  fullName: "@ayronforge/envil",
   version: "0.3.1",
   tagline: "Environment variables you can trust at runtime",
   description:
     "Validate, secure, and manage your environment variables with full TypeScript inference. From web apps to autonomous AI agents — your config is always correct, your secrets always protected. Built on Effect Schema.",
-  github: "https://github.com/ayronforge/better-env",
-  npm: "https://www.npmjs.com/package/@ayronforge/better-env",
-  install: "bun add @ayronforge/better-env effect",
+  github: "https://github.com/ayronforge/envil",
+  npm: "https://www.npmjs.com/package/@ayronforge/envil",
+  install: "bun add @ayronforge/envil effect",
 };
 
 export const features = [
@@ -53,9 +53,9 @@ export const secretManagers = [
   {
     name: "AWS Secrets Manager",
     icon: "amazonwebservices",
-    import: "@ayronforge/better-env/aws",
+    import: "@ayronforge/envil/aws",
     description: "Resolve secrets from AWS Secrets Manager using the AWS SDK.",
-    code: `import { fromAwsSecrets } from "@ayronforge/better-env/aws"
+    code: `import { fromAwsSecrets } from "@ayronforge/envil/aws"
 
 fromAwsSecrets({
   secrets: {
@@ -68,9 +68,9 @@ fromAwsSecrets({
   {
     name: "Azure Key Vault",
     icon: "azure",
-    import: "@ayronforge/better-env/azure",
+    import: "@ayronforge/envil/azure",
     description: "Fetch secrets from Azure Key Vault with managed identity support.",
-    code: `import { fromAzureKeyVault } from "@ayronforge/better-env/azure"
+    code: `import { fromAzureKeyVault } from "@ayronforge/envil/azure"
 
 fromAzureKeyVault({
   secrets: {
@@ -83,9 +83,9 @@ fromAzureKeyVault({
   {
     name: "GCP Secret Manager",
     icon: "googlecloud",
-    import: "@ayronforge/better-env/gcp",
+    import: "@ayronforge/envil/gcp",
     description: "Access secrets stored in Google Cloud Secret Manager.",
-    code: `import { fromGcpSecrets } from "@ayronforge/better-env/gcp"
+    code: `import { fromGcpSecrets } from "@ayronforge/envil/gcp"
 
 fromGcpSecrets({
   secrets: {
@@ -98,9 +98,9 @@ fromGcpSecrets({
   {
     name: "1Password",
     icon: "1password",
-    import: "@ayronforge/better-env/1password",
+    import: "@ayronforge/envil/1password",
     description: "Retrieve secrets directly from 1Password vaults.",
-    code: `import { fromOnePassword } from "@ayronforge/better-env/1password"
+    code: `import { fromOnePassword } from "@ayronforge/envil/1password"
 
 fromOnePassword({
   secrets: {
@@ -116,8 +116,8 @@ export const presets = [
     name: "Next.js",
     icon: "nextdotjs",
     prefix: "NEXT_PUBLIC_",
-    code: `import { createEnv, postgresUrl, url } from "@ayronforge/better-env"
-import { nextjs } from "@ayronforge/better-env/presets"
+    code: `import { createEnv, postgresUrl, url } from "@ayronforge/envil"
+import { nextjs } from "@ayronforge/envil/presets"
 
 const env = createEnv({
   ...nextjs,
@@ -129,8 +129,8 @@ const env = createEnv({
     name: "Vite",
     icon: "vite",
     prefix: "VITE_",
-    code: `import { createEnv, requiredString, url } from "@ayronforge/better-env"
-import { vite } from "@ayronforge/better-env/presets"
+    code: `import { createEnv, requiredString, url } from "@ayronforge/envil"
+import { vite } from "@ayronforge/envil/presets"
 
 const env = createEnv({
   ...vite,
@@ -142,8 +142,8 @@ const env = createEnv({
     name: "Expo",
     icon: "expo",
     prefix: "EXPO_PUBLIC_",
-    code: `import { createEnv, url } from "@ayronforge/better-env"
-import { expo } from "@ayronforge/better-env/presets"
+    code: `import { createEnv, url } from "@ayronforge/envil"
+import { expo } from "@ayronforge/envil/presets"
 
 const env = createEnv({
   ...expo,
@@ -156,8 +156,8 @@ const env = createEnv({
     deviconVariant: "plain",
     invertIcon: true,
     prefix: "NUXT_PUBLIC_",
-    code: `import { createEnv, url } from "@ayronforge/better-env"
-import { nuxt } from "@ayronforge/better-env/presets"
+    code: `import { createEnv, url } from "@ayronforge/envil"
+import { nuxt } from "@ayronforge/envil/presets"
 
 const env = createEnv({
   ...nuxt,
@@ -168,8 +168,8 @@ const env = createEnv({
     name: "SvelteKit",
     icon: "svelte",
     prefix: "PUBLIC_",
-    code: `import { createEnv, url } from "@ayronforge/better-env"
-import { sveltekit } from "@ayronforge/better-env/presets"
+    code: `import { createEnv, url } from "@ayronforge/envil"
+import { sveltekit } from "@ayronforge/envil/presets"
 
 const env = createEnv({
   ...sveltekit,
@@ -180,8 +180,8 @@ const env = createEnv({
     name: "Astro",
     icon: "astro",
     prefix: "PUBLIC_",
-    code: `import { createEnv, url } from "@ayronforge/better-env"
-import { astro } from "@ayronforge/better-env/presets"
+    code: `import { createEnv, url } from "@ayronforge/envil"
+import { astro } from "@ayronforge/envil/presets"
 
 const env = createEnv({
   ...astro,
@@ -190,7 +190,7 @@ const env = createEnv({
   },
 ];
 
-export const codeExample = `import { createEnv, redacted, url } from "@ayronforge/better-env"
+export const codeExample = `import { createEnv, redacted, url } from "@ayronforge/envil"
 import { Schema } from "effect"
 
 export const env = createEnv({

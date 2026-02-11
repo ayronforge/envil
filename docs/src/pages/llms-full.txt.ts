@@ -107,7 +107,7 @@ export const GET: APIRoute = async () => {
   }
 
   const parts: string[] = [
-    "# @ayronforge/better-env — Full Documentation",
+    "# @ayronforge/envil — Full Documentation",
     "",
     "> Type-safe environment variables powered by Effect Schema.",
     "",

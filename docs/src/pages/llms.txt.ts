@@ -2,12 +2,12 @@ import type { APIRoute } from "astro";
 
 import { docsNav } from "@/data/docs-nav";
 
-const BASE = "/better-env";
+const BASE = "/envil";
 const SITE = "https://ayronforge.com";
 
 export const GET: APIRoute = () => {
   const lines: string[] = [
-    "# @ayronforge/better-env",
+    "# @ayronforge/envil",
     "",
     "> Type-safe environment variables powered by Effect Schema. Validate, transform, and manage env vars with full TypeScript inference.",
     "",

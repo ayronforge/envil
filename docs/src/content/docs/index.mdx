@@ -8,13 +8,13 @@ import Card from "@/components/docs/Card.astro";
 import CardGroup from "@/components/docs/CardGroup.astro";
 import Callout from "@/components/docs/Callout.astro";
 
-`@ayronforge/better-env` is a type-safe environment variable library built on [Effect Schema](https://effect.website/docs/schema/introduction). It validates your env vars at startup, gives you full TypeScript inference, and prevents client-side access to server secrets.
+`@ayronforge/envil` is a type-safe environment variable library built on [Effect Schema](https://effect.website/docs/schema/introduction). It validates your env vars at startup, gives you full TypeScript inference, and prevents client-side access to server secrets.
 
-## Why better-env?
+## Why envil?
 
 Environment variables are stringly-typed by default. A missing `DATABASE_URL` or a malformed `PORT` shouldn't crash your app deep in a request handler — it should fail **immediately** at startup with a clear error message.
 
-**better-env** gives you:
+**envil** gives you:
 
 - **Runtime validation** — every env var is parsed through Effect Schema at startup
 - **Full type inference** — your `env` object is fully typed from your schema definitions, no manual annotations needed
@@ -26,7 +26,7 @@ Environment variables are stringly-typed by default. A missing `DATABASE_URL` or
 ## Quick example
 
 ```ts
-import { createEnv, port, requiredString, boolean } from "@ayronforge/better-env"
+import { createEnv, port, requiredString, boolean } from "@ayronforge/envil"
 import { Schema } from "effect"
 
 export const env = createEnv({
@@ -56,17 +56,20 @@ PORT: Expected Port (1-65535), but got "not-a-number"
 ```
 
 <CardGroup>
-  <Card title="Quickstart" href="/better-env/docs/getting-started">
-    Install better-env and create your first type-safe env config in minutes.
+  <Card title="Quickstart" href="/envil/docs/getting-started">
+    Install envil and create your first type-safe env config in minutes.
   </Card>
-  <Card title="Core Concepts" href="/better-env/docs/core-concepts">
+  <Card title="Core Concepts" href="/envil/docs/core-concepts">
     Learn about validation, client/server separation, and the proxy model.
   </Card>
-  <Card title="Built-in Schemas" href="/better-env/docs/schemas">
+  <Card title="Built-in Schemas" href="/envil/docs/schemas">
     Explore all the ready-to-use schemas for strings, numbers, URLs, and more.
   </Card>
-  <Card title="Resolvers" href="/better-env/docs/resolvers">
+  <Card title="Resolvers" href="/envil/docs/resolvers">
     Pull secrets from AWS, GCP, Azure, or 1Password at startup.
+  </Card>
+  <Card title="Safe Parsing" href="/envil/docs/safe-parsing">
+    Validate env vars without throwing — get typed result objects instead.
   </Card>
 </CardGroup>
 

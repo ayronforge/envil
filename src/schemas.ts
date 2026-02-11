@@ -1,6 +1,6 @@
 import { Function, Schema } from "effect";
 
-export const DEFAULT_VALUE_ANNOTATION = Symbol.for("@ayronforge/better-env/default-value");
+export const DEFAULT_VALUE_ANNOTATION = Symbol.for("@ayronforge/envil/default-value");
 
 export const withDefault: {
   <S extends Schema.Schema.Any>(

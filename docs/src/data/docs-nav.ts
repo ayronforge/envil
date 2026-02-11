@@ -1,6 +1,8 @@
 export interface NavItem {
   title: string;
   slug: string;
+  href?: string;
+  external?: boolean;
 }
 
 export interface NavSection {
@@ -15,6 +17,7 @@ export const docsNav: NavSection[] = [
       { title: "Introduction", slug: "" },
       { title: "Quickstart", slug: "getting-started" },
       { title: "Core Concepts", slug: "core-concepts" },
+      { title: "Envil CLI", slug: "envil-cli" },
     ],
   },
   {
@@ -30,6 +33,7 @@ export const docsNav: NavSection[] = [
       { title: "Framework Presets", slug: "framework-presets" },
       { title: "Environment Composition", slug: "environment-composition" },
       { title: "Error Handling", slug: "error-handling" },
+      { title: "Safe Parsing", slug: "safe-parsing" },
     ],
   },
   {
@@ -47,6 +51,13 @@ export const docsNav: NavSection[] = [
     title: "Reference",
     items: [{ title: "API Reference", slug: "api-reference" }],
   },
+  {
+    title: "LLMs",
+    items: [
+      { title: "llms.txt", slug: "", href: "/envil/llms.txt", external: true },
+      { title: "llms-full.txt", slug: "", href: "/envil/llms-full.txt", external: true },
+    ],
+  },
 ];
 
 export interface FlatNavItem extends NavItem {
@@ -55,7 +66,9 @@ export interface FlatNavItem extends NavItem {
 
 export function getFlatNavItems(): FlatNavItem[] {
   return docsNav.flatMap((section) =>
-    section.items.map((item) => ({ ...item, section: section.title })),
+    section.items
+      .filter((item) => !item.external)
+      .map((item) => ({ ...item, section: section.title })),
   );
 }
 

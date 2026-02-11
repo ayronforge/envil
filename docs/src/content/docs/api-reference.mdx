@@ -1,6 +1,6 @@
 ---
 title: API Reference
-description: Complete API reference for @ayronforge/better-env — all functions, schemas, errors, and types.
+description: Complete API reference for @ayronforge/envil — all functions, schemas, errors, and types.
 order: 15
 ---
 
@@ -60,9 +60,50 @@ interface PrefixMap {
 
 ---
 
+## safeCreateEnv
+
+A safe alternative to `createEnv` that returns discriminated result objects instead of raising exceptions.
+
+### Without resolvers
+
+```ts
+function safeCreateEnv<TServer, TClient, TShared, TExtends>(
+  opts: EnvOptions<TServer, TClient, TShared, TExtends>
+): SafeCreateEnvResult<EnvResult<TExtends, TServer, TClient, TShared>, EnvValidationError>
+```
+
+Returns `{ success: true, data }` or `{ success: false, error }` synchronously.
+
+### With resolvers
+
+```ts
+function safeCreateEnv<TServer, TClient, TShared, TExtends>(
+  opts: EnvOptions<TServer, TClient, TShared, TExtends> & {
+    resolvers: readonly Effect.Effect<ResolverResult, ResolverError>[]
+  }
+): Effect.Effect<
+  SafeCreateEnvResult<EnvResult<...>, ResolverError | EnvValidationError>,
+  never
+>
+```
+
+Returns an `Effect` that **never fails** — both resolver and validation errors are captured in the result.
+
+### Result types
+
+<TypeTable rows={[
+  { name: "SafeCreateEnvSuccess<T>", type: "{ success: true; data: T }", description: "Success branch of the result." },
+  { name: "SafeCreateEnvFailure<E>", type: "{ success: false; error: E }", description: "Failure branch of the result." },
+  { name: "SafeCreateEnvResult<T, E>", type: "SafeCreateEnvSuccess<T> | SafeCreateEnvFailure<E>", description: "Discriminated union of success and failure." },
+]} showDefault={false} />
+
+Accepts the same options as `createEnv` — see [Safe Parsing](/envil/docs/safe-parsing) for full usage details.
+
+---
+
 ## Schemas
 
-All schemas are exported from `@ayronforge/better-env`.
+All schemas are exported from `@ayronforge/envil`.
 
 ### String schemas
 
@@ -162,7 +203,7 @@ Effect tagged error for resolver failures.
 
 ## Presets
 
-Exported from `@ayronforge/better-env/presets`.
+Exported from `@ayronforge/envil/presets`.
 
 <TypeTable rows={[
   { name: "nextjs", type: "{ prefix: { client: \"NEXT_PUBLIC_\" } }", description: "Next.js client prefix preset." },
@@ -180,7 +221,7 @@ Exported from `@ayronforge/better-env/presets`.
 ### fromAwsSecrets
 
 ```ts
-import { fromAwsSecrets } from "@ayronforge/better-env/aws"
+import { fromAwsSecrets } from "@ayronforge/envil/aws"
 ```
 
 <TypeTable rows={[
@@ -192,7 +233,7 @@ import { fromAwsSecrets } from "@ayronforge/better-env/aws"
 ### fromGcpSecrets
 
 ```ts
-import { fromGcpSecrets } from "@ayronforge/better-env/gcp"
+import { fromGcpSecrets } from "@ayronforge/envil/gcp"
 ```
 
 <TypeTable rows={[
@@ -205,7 +246,7 @@ import { fromGcpSecrets } from "@ayronforge/better-env/gcp"
 ### fromAzureKeyVault
 
 ```ts
-import { fromAzureKeyVault } from "@ayronforge/better-env/azure"
+import { fromAzureKeyVault } from "@ayronforge/envil/azure"
 ```
 
 <TypeTable rows={[
@@ -218,7 +259,7 @@ import { fromAzureKeyVault } from "@ayronforge/better-env/azure"
 ### fromOnePassword
 
 ```ts
-import { fromOnePassword } from "@ayronforge/better-env/1password"
+import { fromOnePassword } from "@ayronforge/envil/1password"
 ```
 
 <TypeTable rows={[
@@ -230,7 +271,7 @@ import { fromOnePassword } from "@ayronforge/better-env/1password"
 ### fromRemoteSecrets
 
 ```ts
-import { fromRemoteSecrets } from "@ayronforge/better-env"
+import { fromRemoteSecrets } from "@ayronforge/envil"
 ```
 
 <TypeTable rows={[
@@ -246,7 +287,7 @@ import { fromRemoteSecrets } from "@ayronforge/better-env"
 The client interface for `fromRemoteSecrets` and custom integrations.
 
 ```ts
-import type { SecretClient } from "@ayronforge/better-env"
+import type { SecretClient } from "@ayronforge/envil"
 
 interface SecretClient {
   getSecret: (secretId: string) => Promise<string | undefined>

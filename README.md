@@ -1,15 +1,15 @@
-# @ayronforge/better-env
+# @ayronforge/envil
 
 Typesafe environment variables using [Effect Schema](https://effect.website/docs/schema/introduction).
 
-![NPM Version](https://img.shields.io/npm/v/@ayronforge/better-env)
-![License](https://img.shields.io/npm/l/@ayronforge/better-env)
+![NPM Version](https://img.shields.io/npm/v/@ayronforge/envil)
+![License](https://img.shields.io/npm/l/@ayronforge/envil)
 
-Never deploy with invalid environment variables again. **better-env** validates all your env vars at startup, gives you full TypeScript autocompletion, and keeps server secrets out of client bundles — powered by the [Effect](https://effect.website) ecosystem.
+Never deploy with invalid environment variables again. **envil** validates all your env vars at startup, gives you full TypeScript autocompletion, and keeps server secrets out of client bundles — powered by the [Effect](https://effect.website) ecosystem.
 
 ## Documentation
 
-For schemas, helpers, prefix support, framework presets, composable envs, resolvers, and more — visit the **[documentation](https://ayronforge.com/better-env)**.
+For schemas, helpers, prefix support, framework presets, composable envs, resolvers, and more — visit the **[documentation](https://ayronforge.com/envil)**.
 
 ## Highlights
 
@@ -29,14 +29,40 @@ For schemas, helpers, prefix support, framework presets, composable envs, resolv
 
 ```bash
 # npm
-npm install @ayronforge/better-env effect
+npm install @ayronforge/envil effect
 
 # pnpm
-pnpm add @ayronforge/better-env effect
+pnpm add @ayronforge/envil effect
 
 # bun
-bun add @ayronforge/better-env effect
+bun add @ayronforge/envil effect
 ```
+
+## CLI (`envil`)
+
+This package ships a CLI named `envil` with deterministic schema/example round-tripping:
+
+```bash
+# infer env.ts from .env.example
+envil add env --input .env.example --output src/env.ts --force
+
+# regenerate .env.example from env.ts manifest
+envil add example --input src/env.ts --output .env.example --force
+```
+
+`envil add env` supports:
+
+- `--framework <nextjs|vite|expo|nuxt|sveltekit|astro>`
+- `--client-prefix <prefix>`
+- `--server-prefix <prefix>`
+- `--shared-prefix <prefix>`
+- `--force`
+
+`envil add example` supports:
+
+- `--force`
+
+Both commands support `--help` for full usage output.
 
 ## Quick start
 
@@ -49,7 +75,7 @@ import {
   boolean,
   postgresUrl,
   redacted,
-} from "@ayronforge/better-env";
+} from "@ayronforge/envil";
 
 export const env = createEnv({
   server: {

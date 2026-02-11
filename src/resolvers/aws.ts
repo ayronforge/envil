@@ -1,7 +1,12 @@
 import { Effect } from "effect";
 
 import { ResolverError, type ResolverResult } from "./types.ts";
-import { fillMissingMapValues, strictOrElse, toResolverError, tryInitializeClient } from "./utils.ts";
+import {
+  fillMissingMapValues,
+  strictOrElse,
+  toResolverError,
+  tryInitializeClient,
+} from "./utils.ts";
 
 export { ResolverError } from "./types.ts";
 
@@ -24,7 +29,9 @@ function createSdkClient(region?: string): Effect.Effect<
 
     return {
       getSecret: async (secretId: string) => {
-        const response = await sdkClient.send(new sdk.GetSecretValueCommand({ SecretId: secretId }));
+        const response = await sdkClient.send(
+          new sdk.GetSecretValueCommand({ SecretId: secretId }),
+        );
         return response.SecretString ?? undefined;
       },
       getSecrets: async (secretIds: string[]) => {
@@ -78,20 +85,26 @@ export function fromAwsSecrets(
 
     if (uniqueSecretIds.length === 1) {
       const secretId = uniqueSecretIds[0]!;
-      const value = yield* strictOrElse(Effect.tryPromise(() => client.getSecret(secretId)), {
-        strict,
-        resolver: "aws",
-        message: `Failed to resolve secret "${secretId}"`,
-        fallback: () => undefined,
-      });
+      const value = yield* strictOrElse(
+        Effect.tryPromise(() => client.getSecret(secretId)),
+        {
+          strict,
+          resolver: "aws",
+          message: `Failed to resolve secret "${secretId}"`,
+          fallback: () => undefined,
+        },
+      );
       secretValues.set(secretId, value);
     } else {
-      const batchResult = yield* strictOrElse(Effect.tryPromise(() => client.getSecrets(uniqueSecretIds)), {
-        strict,
-        resolver: "aws",
-        message: "Failed to resolve AWS secrets batch",
-        fallback: () => new Map<string, string | undefined>(),
-      });
+      const batchResult = yield* strictOrElse(
+        Effect.tryPromise(() => client.getSecrets(uniqueSecretIds)),
+        {
+          strict,
+          resolver: "aws",
+          message: "Failed to resolve AWS secrets batch",
+          fallback: () => new Map<string, string | undefined>(),
+        },
+      );
 
       for (const [id, value] of batchResult) {
         secretValues.set(id, value);

@@ -1,6 +1,6 @@
 ---
 title: Core Concepts
-description: Understand how better-env validates variables, separates client/server access, and uses a proxy for runtime safety.
+description: Understand how envil validates variables, separates client/server access, and uses a proxy for runtime safety.
 order: 3
 ---
 
@@ -91,7 +91,7 @@ createEnv({
 })
 ```
 
-This is what [framework presets](/better-env/docs/framework-presets) configure for you.
+This is what [framework presets](/envil/docs/framework-presets) configure for you.
 
 ## Redacted values
 
@@ -151,7 +151,7 @@ This is useful for testing or for frameworks like Vite where `import.meta.env` i
 Combine `runtimeEnv` with `isServer` to write deterministic tests without touching real environment variables:
 
 ```ts
-import { createEnv, requiredString, postgresUrl, port, withDefault } from "@ayronforge/better-env"
+import { createEnv, requiredString, postgresUrl, port, withDefault } from "@ayronforge/envil"
 import { expect, test } from "vitest"
 
 test("env parses correctly", () => {

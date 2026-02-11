@@ -7,10 +7,10 @@ order: 4
 import TypeTable from "@/components/docs/TypeTable.astro";
 import Callout from "@/components/docs/Callout.astro";
 
-better-env ships with a set of ready-to-use schemas for common environment variable patterns. All schemas are exported from the main package.
+envil ships with a set of ready-to-use schemas for common environment variable patterns. All schemas are exported from the main package.
 
 ```ts
-import { requiredString, port, boolean, url } from "@ayronforge/better-env"
+import { requiredString, port, boolean, url } from "@ayronforge/envil"
 ```
 
 ## String schemas
@@ -20,7 +20,7 @@ import { requiredString, port, boolean, url } from "@ayronforge/better-env"
 ]} />
 
 ```ts
-import { requiredString, optional } from "@ayronforge/better-env"
+import { requiredString, optional } from "@ayronforge/envil"
 import { Schema } from "effect"
 
 createEnv({
@@ -41,7 +41,7 @@ createEnv({
 ]} />
 
 ```ts
-import { port, positiveNumber, integer } from "@ayronforge/better-env"
+import { port, positiveNumber, integer } from "@ayronforge/envil"
 
 createEnv({
   server: {
@@ -59,7 +59,7 @@ createEnv({
 ]} />
 
 ```ts
-import { boolean } from "@ayronforge/better-env"
+import { boolean } from "@ayronforge/envil"
 
 createEnv({
   server: {
@@ -81,7 +81,7 @@ createEnv({
 ]} />
 
 ```ts
-import { url, postgresUrl, redisUrl } from "@ayronforge/better-env"
+import { url, postgresUrl, redisUrl } from "@ayronforge/envil"
 
 createEnv({
   server: {
@@ -100,7 +100,7 @@ createEnv({
 ]} />
 
 ```ts
-import { commaSeparated, commaSeparatedNumbers } from "@ayronforge/better-env"
+import { commaSeparated, commaSeparatedNumbers } from "@ayronforge/envil"
 
 createEnv({
   server: {
@@ -117,7 +117,7 @@ createEnv({
 Creates a schema that accepts only the specified literal values:
 
 ```ts
-import { stringEnum } from "@ayronforge/better-env"
+import { stringEnum } from "@ayronforge/envil"
 
 createEnv({
   shared: {
@@ -132,7 +132,7 @@ createEnv({
 Parses a JSON string and validates the result against an inner schema:
 
 ```ts
-import { json } from "@ayronforge/better-env"
+import { json } from "@ayronforge/envil"
 import { Schema } from "effect"
 
 createEnv({
@@ -168,5 +168,5 @@ createEnv({
 ```
 
 <Callout type="tip">
-  If you need a schema that doesn't exist as a built-in, just use Effect Schema directly. better-env accepts any `Schema.Schema<any, any, never>`.
+  If you need a schema that doesn't exist as a built-in, just use Effect Schema directly. envil accepts any `Schema.Schema<any, any, never>`.
 </Callout>

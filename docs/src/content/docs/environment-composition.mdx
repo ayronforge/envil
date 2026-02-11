@@ -22,7 +22,7 @@ The `extends` option takes an array of existing env objects and merges them into
 
 ```ts
 // db.env.ts
-import { createEnv, requiredString, port } from "@ayronforge/better-env"
+import { createEnv, requiredString, port } from "@ayronforge/envil"
 
 export const dbEnv = createEnv({
   server: {
@@ -32,7 +32,7 @@ export const dbEnv = createEnv({
 })
 
 // auth.env.ts
-import { createEnv, requiredString } from "@ayronforge/better-env"
+import { createEnv, requiredString } from "@ayronforge/envil"
 
 export const authEnv = createEnv({
   server: {
@@ -42,7 +42,7 @@ export const authEnv = createEnv({
 })
 
 // env.ts — the combined env
-import { createEnv, requiredString } from "@ayronforge/better-env"
+import { createEnv, requiredString } from "@ayronforge/envil"
 import { dbEnv } from "./db.env"
 import { authEnv } from "./auth.env"
 
@@ -82,7 +82,7 @@ const app = createEnv({
 
 ```ts
 // packages/shared/env.ts
-import { createEnv } from "@ayronforge/better-env"
+import { createEnv } from "@ayronforge/envil"
 import { Schema } from "effect"
 
 export const sharedEnv = createEnv({
@@ -92,7 +92,7 @@ export const sharedEnv = createEnv({
 })
 
 // packages/api/env.ts
-import { createEnv, requiredString, port } from "@ayronforge/better-env"
+import { createEnv, requiredString, port } from "@ayronforge/envil"
 import { sharedEnv } from "@shared/env"
 
 export const apiEnv = createEnv({
@@ -104,8 +104,8 @@ export const apiEnv = createEnv({
 })
 
 // packages/web/env.ts
-import { createEnv, requiredString } from "@ayronforge/better-env"
-import { nextjs } from "@ayronforge/better-env/presets"
+import { createEnv, requiredString } from "@ayronforge/envil"
+import { nextjs } from "@ayronforge/envil/presets"
 import { sharedEnv } from "@shared/env"
 
 export const webEnv = createEnv({

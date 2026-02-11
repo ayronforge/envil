@@ -2,11 +2,7 @@ import { Effect } from "effect";
 
 import { ResolverError } from "./types.ts";
 
-export function toResolverError(
-  resolver: string,
-  message: string,
-  cause?: unknown,
-): ResolverError {
+export function toResolverError(resolver: string, message: string, cause?: unknown): ResolverError {
   return new ResolverError({ resolver, message, cause });
 }
 

@@ -12,8 +12,8 @@ import Callout from "@/components/docs/Callout.astro";
 `fromRemoteSecrets` is the generic escape hatch for custom integrations, testing, and secret providers not covered by the built-in resolvers. You provide your own `SecretClient` implementation.
 
 ```ts
-import { createEnv, requiredString, fromRemoteSecrets } from "@ayronforge/better-env"
-import type { SecretClient } from "@ayronforge/better-env"
+import { createEnv, requiredString, fromRemoteSecrets } from "@ayronforge/envil"
+import type { SecretClient } from "@ayronforge/envil"
 import { Effect } from "effect"
 
 const client: SecretClient = {
@@ -44,7 +44,7 @@ const envEffect = createEnv({
 const env = await Effect.runPromise(envEffect)
 ```
 
-No peer dependencies required — `fromRemoteSecrets` is exported directly from `@ayronforge/better-env`.
+No peer dependencies required — `fromRemoteSecrets` is exported directly from `@ayronforge/envil`.
 
 ## Options
 

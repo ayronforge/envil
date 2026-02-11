@@ -1,7 +1,12 @@
 import { Effect } from "effect";
 
 import { ResolverError, type ResolverResult } from "./types.ts";
-import { keyValueResultsToRecord, strictOrElse, toResolverError, tryInitializeClient } from "./utils.ts";
+import {
+  keyValueResultsToRecord,
+  strictOrElse,
+  toResolverError,
+  tryInitializeClient,
+} from "./utils.ts";
 
 export { ResolverError } from "./types.ts";
 
@@ -35,7 +40,7 @@ export function fromOnePassword(
         const sdk = await import("@1password/sdk");
         const sdkClient = await sdk.createClient({
           auth: token,
-          integrationName: "better-env",
+          integrationName: "envil",
           integrationVersion: "1.0.0",
         });
 

@@ -25,12 +25,15 @@ export function fromRemoteSecrets(
     const secretValues = new Map<string, string | undefined>();
 
     if (client.getSecrets && secretIds.length > 1) {
-      const batchResult = yield* strictOrElse(Effect.tryPromise(() => client.getSecrets!(secretIds)), {
-        strict,
-        resolver: "remote",
-        message: "Failed to resolve remote secrets batch",
-        fallback: () => new Map<string, string | undefined>(),
-      });
+      const batchResult = yield* strictOrElse(
+        Effect.tryPromise(() => client.getSecrets!(secretIds)),
+        {
+          strict,
+          resolver: "remote",
+          message: "Failed to resolve remote secrets batch",
+          fallback: () => new Map<string, string | undefined>(),
+        },
+      );
 
       for (const [id, value] of batchResult) {
         secretValues.set(id, value);
@@ -40,12 +43,15 @@ export function fromRemoteSecrets(
       const results = yield* Effect.forEach(
         secretIds,
         (secretId) =>
-          strictOrElse(Effect.tryPromise(() => client.getSecret(secretId)), {
-            strict,
-            resolver: "remote",
-            message: `Failed to resolve remote secret "${secretId}"`,
-            fallback: () => undefined,
-          }).pipe(Effect.map((value) => ({ envKey: secretId, value }))),
+          strictOrElse(
+            Effect.tryPromise(() => client.getSecret(secretId)),
+            {
+              strict,
+              resolver: "remote",
+              message: `Failed to resolve remote secret "${secretId}"`,
+              fallback: () => undefined,
+            },
+          ).pipe(Effect.map((value) => ({ envKey: secretId, value }))),
         { concurrency: "unbounded" },
       );
 
