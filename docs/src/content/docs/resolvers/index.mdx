@@ -45,7 +45,8 @@ const env = await Effect.runPromise(envEffect)
 1. All resolvers run **concurrently** (unbounded concurrency)
 2. Results are merged: `process.env` is the base, resolver results override
 3. The merged env is passed through schema validation
-4. If any resolver fails, a `ResolverError` is propagated through the Effect error channel
+4. Resolver initialization/configuration failures surface as `ResolverError` in the Effect error channel
+5. Per-secret fetch misses are returned as `undefined` and then handled by schema validation
 
 ### Merge behavior
 
@@ -108,6 +109,19 @@ env.DB_PASS // string (not Redacted)
 <Callout type="tip">
   Even with `autoRedactResolver: false`, you can still use `redacted()` in your schema to explicitly mark individual keys as `Redacted`.
 </Callout>
+
+## Resolver failure modes
+
+Built-in resolvers default to **lenient** per-secret fetching: if an individual fetch fails, the resolver returns `undefined` for that key and schema validation decides whether that is acceptable.
+
+Set `strict: true` on a resolver to fail immediately with `ResolverError` on fetch/parsing errors:
+
+```ts
+fromAwsSecrets({
+  secrets: { DB_PASS: "prod/db-pass" },
+  strict: true,
+})
+```
 
 ## Available resolvers
 

@@ -6,10 +6,10 @@ order: 5
 
 import Callout from "@/components/docs/Callout.astro";
 
-better-env provides three helper functions for common patterns when defining environment variable schemas.
+better-env provides four helper functions for common patterns when defining environment variable schemas.
 
 ```ts
-import { withDefault, redacted, json } from "@ayronforge/better-env"
+import { withDefault, optional, redacted, json } from "@ayronforge/better-env"
 ```
 
 ## withDefault
@@ -47,6 +47,27 @@ Both styles produce the same result. Use whichever reads better in your codebase
 
 <Callout type="note">
   `withDefault` wraps the schema in `Schema.UndefinedOr(...)` and applies a transform that substitutes `undefined` with the default value. The resulting type reflects the schema's output type — e.g., `withDefault(port, 3000)` produces `number`, not `number | undefined`.
+</Callout>
+
+## optional
+
+Makes any schema accept `undefined`, allowing the env var to be missing without causing a validation error. This is a shorthand for `Schema.UndefinedOr(schema)`.
+
+```ts
+import { optional } from "@ayronforge/better-env"
+import { Schema } from "effect"
+
+createEnv({
+  server: {
+    // All of these are optional — missing vars become undefined
+    DEBUG_HOST: optional(Schema.String),
+    TRACE_SAMPLE_RATE: optional(Schema.Number),
+  },
+})
+```
+
+<Callout type="note">
+  Unlike `withDefault`, `optional` does not substitute a fallback — the resulting type includes `undefined`. Use `withDefault` when you need a guaranteed value.
 </Callout>
 
 ## redacted
@@ -108,7 +129,7 @@ FEATURE_FLAGS: Expected valid JSON, but got '{ invalid json'
 Helpers can be composed together:
 
 ```ts
-import { withDefault, redacted, json } from "@ayronforge/better-env"
+import { withDefault, optional, redacted, json } from "@ayronforge/better-env"
 import { Schema } from "effect"
 
 createEnv({
@@ -118,6 +139,9 @@ createEnv({
       json(Schema.Struct({ debug: Schema.Boolean })),
       { debug: false },
     ),
+
+    // Optional with a default
+    LOG_LEVEL: optional(Schema.String).pipe(withDefault("info")),
 
     // Redacted string with a default
     API_KEY: redacted(Schema.String).pipe(withDefault("dev-key")),

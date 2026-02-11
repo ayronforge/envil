@@ -68,7 +68,6 @@ All schemas are exported from `@ayronforge/better-env`.
 
 <TypeTable rows={[
   { name: "requiredString", type: "Schema<string, string>", description: "Non-empty string (minLength: 1)." },
-  { name: "optionalString", type: "Schema<string | undefined, string | undefined>", description: "Optional string. Allows undefined." },
 ]} />
 
 ### Number schemas
@@ -117,6 +116,7 @@ All schemas are exported from `@ayronforge/better-env`.
 
 <TypeTable rows={[
   { name: "withDefault(schema, value)", type: "(schema: S, default: T) => Schema", description: "Makes a schema optional with a default value. Supports data-first and pipe style." },
+  { name: "optional(schema)", type: "(schema: S) => Schema<T | undefined>", description: "Makes a schema accept undefined. Shorthand for Schema.UndefinedOr(schema)." },
   { name: "redacted(schema)", type: "(schema: S) => Schema<Redacted<T>>", description: "Wraps schema output in Effect Redacted. Use Redacted.value() to unwrap." },
 ]} />
 
@@ -168,6 +168,9 @@ Exported from `@ayronforge/better-env/presets`.
   { name: "nextjs", type: "{ prefix: { client: \"NEXT_PUBLIC_\" } }", description: "Next.js client prefix preset." },
   { name: "vite", type: "{ prefix: { client: \"VITE_\" } }", description: "Vite client prefix preset." },
   { name: "expo", type: "{ prefix: { client: \"EXPO_PUBLIC_\" } }", description: "Expo client prefix preset." },
+  { name: "nuxt", type: "{ prefix: { client: \"NUXT_PUBLIC_\" } }", description: "Nuxt client prefix preset." },
+  { name: "sveltekit", type: "{ prefix: { client: \"PUBLIC_\" } }", description: "SvelteKit client prefix preset." },
+  { name: "astro", type: "{ prefix: { client: \"PUBLIC_\" } }", description: "Astro client prefix preset." },
 ]} />
 
 ---
@@ -183,6 +186,7 @@ import { fromAwsSecrets } from "@ayronforge/better-env/aws"
 <TypeTable rows={[
   { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → secret IDs. Supports #jsonKey syntax." },
   { name: "region", type: "string", description: "AWS region." },
+  { name: "strict", type: "boolean", default: "false", description: "When true, secret fetch/parsing errors fail with ResolverError instead of returning undefined." },
 ]} />
 
 ### fromGcpSecrets
@@ -195,6 +199,7 @@ import { fromGcpSecrets } from "@ayronforge/better-env/gcp"
   { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → secret names or full resource paths." },
   { name: "projectId", type: "string", description: "GCP project ID." },
   { name: "version", type: "string", default: '"latest"', description: "Secret version." },
+  { name: "strict", type: "boolean", default: "false", description: "When true, secret fetch errors fail with ResolverError instead of returning undefined." },
 ]} />
 
 ### fromAzureKeyVault
@@ -207,6 +212,7 @@ import { fromAzureKeyVault } from "@ayronforge/better-env/azure"
   { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → Key Vault secret names." },
   { name: "vaultUrl", type: "string", required: true, description: "Azure Key Vault URL." },
   { name: "credential", type: "unknown", description: "Azure credential. Defaults to DefaultAzureCredential." },
+  { name: "strict", type: "boolean", default: "false", description: "When true, secret fetch errors fail with ResolverError instead of returning undefined." },
 ]} />
 
 ### fromOnePassword
@@ -218,6 +224,7 @@ import { fromOnePassword } from "@ayronforge/better-env/1password"
 <TypeTable rows={[
   { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → 1Password secret references (op:// URIs)." },
   { name: "serviceAccountToken", type: "string", description: "1Password service account token." },
+  { name: "strict", type: "boolean", default: "false", description: "When true, batch resolution errors fail with ResolverError instead of returning undefined." },
 ]} />
 
 ### fromRemoteSecrets
@@ -229,6 +236,7 @@ import { fromRemoteSecrets } from "@ayronforge/better-env"
 <TypeTable rows={[
   { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → secret identifiers passed to the client." },
   { name: "client", type: "SecretClient", required: true, description: "Custom client implementing the SecretClient interface." },
+  { name: "strict", type: "boolean", default: "false", description: "When true, client fetch errors fail with ResolverError instead of returning undefined." },
 ]} />
 
 ---

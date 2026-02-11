@@ -1,12 +1,14 @@
 import { Effect } from "effect";
 
 import { ResolverError, type ResolverResult } from "./types.ts";
+import { fillMissingMapValues, strictOrElse, toResolverError, tryInitializeClient } from "./utils.ts";
 
 export { ResolverError } from "./types.ts";
 
 interface AwsSecretsOptions<K extends string = string> {
   secrets: Record<K, string>;
   region?: string;
+  strict?: boolean;
 }
 
 function createSdkClient(region?: string): Effect.Effect<
@@ -16,41 +18,36 @@ function createSdkClient(region?: string): Effect.Effect<
   },
   ResolverError
 > {
-  return Effect.tryPromise({
-    try: async () => {
-      const sdk = await import("@aws-sdk/client-secrets-manager");
-      const sdkClient = new sdk.SecretsManagerClient(region ? { region } : {});
-      return {
-        getSecret: async (secretId: string) => {
+  return tryInitializeClient("aws", "Failed to initialize AWS Secrets Manager client", async () => {
+    const sdk = await import("@aws-sdk/client-secrets-manager");
+    const sdkClient = new sdk.SecretsManagerClient(region ? { region } : {});
+
+    return {
+      getSecret: async (secretId: string) => {
+        const response = await sdkClient.send(new sdk.GetSecretValueCommand({ SecretId: secretId }));
+        return response.SecretString ?? undefined;
+      },
+      getSecrets: async (secretIds: string[]) => {
+        const result = new Map<string, string | undefined>();
+
+        for (let i = 0; i < secretIds.length; i += 20) {
+          const batch = secretIds.slice(i, i + 20);
           const response = await sdkClient.send(
-            new sdk.GetSecretValueCommand({ SecretId: secretId }),
+            new sdk.BatchGetSecretValueCommand({ SecretIdList: batch }),
           );
-          return response.SecretString ?? undefined;
-        },
-        getSecrets: async (secretIds: string[]) => {
-          const result = new Map<string, string | undefined>();
-          for (let i = 0; i < secretIds.length; i += 20) {
-            const batch = secretIds.slice(i, i + 20);
-            const response = await sdkClient.send(
-              new sdk.BatchGetSecretValueCommand({ SecretIdList: batch }),
-            );
-            for (const sv of response.SecretValues ?? []) {
-              if (sv.Name) result.set(sv.Name, sv.SecretString ?? undefined);
-            }
-            for (const id of batch) {
-              if (!result.has(id)) result.set(id, undefined);
+
+          for (const secretValue of response.SecretValues ?? []) {
+            if (secretValue.Name) {
+              result.set(secretValue.Name, secretValue.SecretString ?? undefined);
             }
           }
-          return result;
-        },
-      };
-    },
-    catch: (cause) =>
-      new ResolverError({
-        resolver: "aws",
-        message: "Failed to initialize AWS Secrets Manager client",
-        cause,
-      }),
+
+          fillMissingMapValues(batch, result);
+        }
+
+        return result;
+      },
+    };
   });
 }
 
@@ -61,14 +58,15 @@ export function fromAwsSecrets(
   opts: AwsSecretsOptions,
 ): Effect.Effect<ResolverResult, ResolverError> {
   return Effect.gen(function* () {
+    const strict = opts.strict ?? false;
     const client = yield* createSdkClient(opts.region);
 
-    // Group env keys by secret ID to minimize API calls
+    // Group env keys by secret ID to minimize API calls.
     const secretIdToKeys = new Map<string, { envKey: string; jsonKey?: string }[]>();
     for (const [envKey, ref] of Object.entries(opts.secrets)) {
-      const hashIdx = ref.indexOf("#");
-      const secretId = hashIdx >= 0 ? ref.slice(0, hashIdx) : ref;
-      const jsonKey = hashIdx >= 0 ? ref.slice(hashIdx + 1) : undefined;
+      const hashIndex = ref.indexOf("#");
+      const secretId = hashIndex >= 0 ? ref.slice(0, hashIndex) : ref;
+      const jsonKey = hashIndex >= 0 ? ref.slice(hashIndex + 1) : undefined;
 
       const existing = secretIdToKeys.get(secretId) ?? [];
       existing.push({ envKey, jsonKey });
@@ -79,39 +77,55 @@ export function fromAwsSecrets(
     const secretValues = new Map<string, string | undefined>();
 
     if (uniqueSecretIds.length === 1) {
-      const value = yield* Effect.tryPromise(() => client.getSecret(uniqueSecretIds[0]!)).pipe(
-        Effect.orElseSucceed(() => undefined),
-      );
-      secretValues.set(uniqueSecretIds[0]!, value);
+      const secretId = uniqueSecretIds[0]!;
+      const value = yield* strictOrElse(Effect.tryPromise(() => client.getSecret(secretId)), {
+        strict,
+        resolver: "aws",
+        message: `Failed to resolve secret "${secretId}"`,
+        fallback: () => undefined,
+      });
+      secretValues.set(secretId, value);
     } else {
-      const batchResult = yield* Effect.tryPromise(() => client.getSecrets(uniqueSecretIds)).pipe(
-        Effect.orElseSucceed(() => new Map<string, string | undefined>()),
-      );
+      const batchResult = yield* strictOrElse(Effect.tryPromise(() => client.getSecrets(uniqueSecretIds)), {
+        strict,
+        resolver: "aws",
+        message: "Failed to resolve AWS secrets batch",
+        fallback: () => new Map<string, string | undefined>(),
+      });
+
       for (const [id, value] of batchResult) {
         secretValues.set(id, value);
       }
-      for (const id of uniqueSecretIds) {
-        if (!secretValues.has(id)) secretValues.set(id, undefined);
-      }
+      fillMissingMapValues(uniqueSecretIds, secretValues);
     }
 
     const result: Record<string, string | undefined> = {};
     for (const [secretId, entries] of secretIdToKeys) {
-      const raw = secretValues.get(secretId);
+      const rawValue = secretValues.get(secretId);
       for (const { envKey, jsonKey } of entries) {
-        if (raw === undefined) {
+        if (rawValue === undefined) {
           result[envKey] = undefined;
           continue;
         }
-        if (jsonKey) {
-          try {
-            const parsed = JSON.parse(raw);
-            result[envKey] = parsed[jsonKey] !== undefined ? String(parsed[jsonKey]) : undefined;
-          } catch {
-            result[envKey] = undefined;
+
+        if (!jsonKey) {
+          result[envKey] = rawValue;
+          continue;
+        }
+
+        try {
+          const parsed = JSON.parse(rawValue) as Record<string, unknown>;
+          result[envKey] = parsed[jsonKey] !== undefined ? String(parsed[jsonKey]) : undefined;
+        } catch (cause) {
+          if (strict) {
+            return yield* toResolverError(
+              "aws",
+              `Failed to parse secret "${secretId}" as JSON while extracting key "${jsonKey}"`,
+              cause,
+            );
           }
-        } else {
-          result[envKey] = raw;
+
+          result[envKey] = undefined;
         }
       }
     }

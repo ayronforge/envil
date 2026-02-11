@@ -1,5 +1,6 @@
 import type { APIRoute } from "astro";
 import { getCollection } from "astro:content";
+
 import { docsNav } from "@/data/docs-nav";
 
 function typeTableToMarkdown(match: string): string {

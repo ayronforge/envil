@@ -1,5 +1,7 @@
 import { Function, Schema } from "effect";
 
+export const DEFAULT_VALUE_ANNOTATION = Symbol.for("@ayronforge/better-env/default-value");
+
 export const withDefault: {
   <S extends Schema.Schema.Any>(
     defaultValue: NonNullable<Schema.Schema.Type<S>>,
@@ -18,15 +20,26 @@ export const withDefault: {
   >;
 } = Function.dual(
   2,
-  <S extends Schema.Schema.Any>(schema: S, defaultValue: NonNullable<Schema.Schema.Type<S>>) =>
-    Schema.transform(Schema.UndefinedOr(schema), Schema.typeSchema(schema), {
-      decode: (value) => value ?? defaultValue,
-      encode: (value) => value,
-    }) as Schema.transform<
+  <S extends Schema.Schema.Any>(schema: S, defaultValue: NonNullable<Schema.Schema.Type<S>>) => {
+    const withDefaultSchema = Schema.transform(
+      Schema.UndefinedOr(schema),
+      Schema.typeSchema(schema),
+      {
+        decode: (value) => value ?? defaultValue,
+        encode: (value) => value,
+      },
+    ) as Schema.transform<
       Schema.UndefinedOr<S>,
       Schema.SchemaClass<NonNullable<Schema.Schema.Type<S>>>
-    >,
+    >;
+
+    return withDefaultSchema.annotations({
+      [DEFAULT_VALUE_ANNOTATION]: defaultValue,
+    } as Record<PropertyKey, unknown>);
+  },
 );
+
+export const optional = <S extends Schema.Schema.Any>(schema: S) => Schema.UndefinedOr(schema);
 
 export const redacted = <S extends Schema.Schema.Any>(schema: S) => Schema.Redacted(schema);
 

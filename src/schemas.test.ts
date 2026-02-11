@@ -12,7 +12,7 @@ import {
   mongoUrl,
   mysqlUrl,
   nonNegativeNumber,
-  optionalString,
+  optional,
   port,
   positiveNumber,
   postgresUrl,
@@ -53,7 +53,7 @@ describe("withDefault", () => {
   });
 
   test("narrows output type to exclude undefined", () => {
-    const schema = optionalString.pipe(withDefault("x"));
+    const schema = optional(Schema.String).pipe(withDefault("x"));
     type Out = Schema.Schema.Type<typeof schema>;
     const _assert: [Out] extends [string] ? ([string] extends [Out] ? true : never) : never = true;
     expect(_assert).toBe(true);
@@ -79,6 +79,42 @@ describe("withDefault", () => {
 
     const result2 = decode(composed, "hello");
     expect(Redacted.value(result2 as Redacted.Redacted<string>)).toBe("hello");
+  });
+});
+
+describe("optional", () => {
+  const schema = optional(Schema.String);
+
+  test("accepts undefined", () => {
+    expect(decode(schema, undefined)).toBeUndefined();
+  });
+
+  test("passes valid values through", () => {
+    expect(decode(schema, "hello")).toBe("hello");
+  });
+
+  test("rejects invalid values", () => {
+    expect(() => decode(schema, 123)).toThrow();
+  });
+
+  test("works with non-string schemas", () => {
+    const numSchema = optional(Schema.Number);
+    expect(decode(numSchema, undefined)).toBeUndefined();
+    expect(decode(numSchema, 42)).toBe(42);
+    expect(() => decode(numSchema, "hello")).toThrow();
+  });
+
+  test("composes with withDefault", () => {
+    const schema = optional(Schema.String).pipe(withDefault("fallback"));
+    expect(decode(schema, undefined)).toBe("fallback");
+    expect(decode(schema, "hello")).toBe("hello");
+  });
+
+  test("composes with redacted", () => {
+    const schema = optional(Schema.String).pipe(redacted);
+    const result = decode(schema, "secret");
+    expect(Redacted.isRedacted(result)).toBe(true);
+    expect(Redacted.value(result as Redacted.Redacted<string | undefined>)).toBe("secret");
   });
 });
 
@@ -111,24 +147,6 @@ describe("requiredString", () => {
 
   test("rejects non-strings", () => {
     expect(() => decode(requiredString, 42)).toThrow();
-  });
-});
-
-describe("optionalString", () => {
-  test("accepts strings", () => {
-    expect(decode(optionalString, "hello")).toBe("hello");
-  });
-
-  test("accepts undefined", () => {
-    expect(decode(optionalString, undefined)).toBeUndefined();
-  });
-
-  test("rejects null", () => {
-    expect(() => decode(optionalString, null)).toThrow();
-  });
-
-  test("rejects numbers", () => {
-    expect(() => decode(optionalString, 42)).toThrow();
   });
 });
 

@@ -1,6 +1,6 @@
 ---
 title: Framework Presets
-description: Pre-configured prefix settings for Next.js, Vite, and Expo.
+description: Pre-configured prefix settings for Next.js, Vite, Expo, Nuxt, SvelteKit, and Astro.
 order: 6
 ---
 
@@ -10,15 +10,18 @@ import Callout from "@/components/docs/Callout.astro";
 Framework presets provide pre-configured `prefix` settings for popular frameworks. They handle the client-side prefix convention so you don't have to configure it manually.
 
 ```ts
-import { nextjs, vite, expo } from "@ayronforge/better-env/presets"
+import { nextjs, vite, expo, nuxt, sveltekit, astro } from "@ayronforge/better-env/presets"
 ```
 
 ## Available presets
 
-<TypeTable rows={[
+<TypeTable showDefault={false} rows={[
   { name: "nextjs", type: "{ prefix: { client: \"NEXT_PUBLIC_\" } }", description: "Next.js — client variables must start with NEXT_PUBLIC_" },
   { name: "vite", type: "{ prefix: { client: \"VITE_\" } }", description: "Vite — client variables must start with VITE_" },
   { name: "expo", type: "{ prefix: { client: \"EXPO_PUBLIC_\" } }", description: "Expo — client variables must start with EXPO_PUBLIC_" },
+  { name: "nuxt", type: "{ prefix: { client: \"NUXT_PUBLIC_\" } }", description: "Nuxt — client variables must start with NUXT_PUBLIC_" },
+  { name: "sveltekit", type: "{ prefix: { client: \"PUBLIC_\" } }", description: "SvelteKit — client variables must start with PUBLIC_" },
+  { name: "astro", type: "{ prefix: { client: \"PUBLIC_\" } }", description: "Astro — client variables must start with PUBLIC_" },
 ]} />
 
 ## Usage
@@ -79,6 +82,52 @@ export const env = createEnv({
     API_URL: requiredString,
     // Reads EXPO_PUBLIC_API_URL from env
   },
+})
+```
+
+### Nuxt
+
+```ts
+import { createEnv, requiredString } from "@ayronforge/better-env"
+import { nuxt } from "@ayronforge/better-env/presets"
+
+export const env = createEnv({
+  ...nuxt,
+  client: {
+    API_URL: requiredString,
+    // Reads NUXT_PUBLIC_API_URL from env
+  },
+})
+```
+
+### SvelteKit
+
+```ts
+import { createEnv, requiredString } from "@ayronforge/better-env"
+import { sveltekit } from "@ayronforge/better-env/presets"
+
+export const env = createEnv({
+  ...sveltekit,
+  client: {
+    API_URL: requiredString,
+    // Reads PUBLIC_API_URL from env
+  },
+})
+```
+
+### Astro
+
+```ts
+import { createEnv, requiredString } from "@ayronforge/better-env"
+import { astro } from "@ayronforge/better-env/presets"
+
+export const env = createEnv({
+  ...astro,
+  client: {
+    API_URL: requiredString,
+    // Reads PUBLIC_API_URL from env
+  },
+  runtimeEnv: import.meta.env, // Astro exposes env via import.meta.env
 })
 ```
 

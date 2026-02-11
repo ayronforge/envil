@@ -1,7 +1,8 @@
 import type { APIRoute, GetStaticPaths } from "astro";
 import { getCollection } from "astro:content";
-import { generateOgImage } from "@/lib/og-image";
+
 import { site } from "@/data/content";
+import { generateOgImage } from "@/lib/og-image";
 
 export const getStaticPaths: GetStaticPaths = async () => {
   const docs = await getCollection("docs");

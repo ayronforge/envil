@@ -17,16 +17,16 @@ import { requiredString, port, boolean, url } from "@ayronforge/better-env"
 
 <TypeTable rows={[
   { name: "requiredString", type: "string", description: "Non-empty string. Fails if the value is undefined or empty." },
-  { name: "optionalString", type: "string | undefined", description: "Optional string. Allows undefined values." },
 ]} />
 
 ```ts
-import { requiredString, optionalString } from "@ayronforge/better-env"
+import { requiredString, optional } from "@ayronforge/better-env"
+import { Schema } from "effect"
 
 createEnv({
   server: {
-    API_KEY: requiredString,       // must be present and non-empty
-    OPTIONAL_FLAG: optionalString,  // can be undefined
+    API_KEY: requiredString,          // must be present and non-empty
+    OPTIONAL_FLAG: optional(Schema.String),  // can be undefined
   },
 })
 ```

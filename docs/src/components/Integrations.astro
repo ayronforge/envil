@@ -9,6 +9,10 @@ const iconsBlack = await Promise.all(
 const iconsWhite = await Promise.all(
     secretManagers.map((sm) => getIcon(sm.icon, "white")),
 );
+
+const iconBlackUrls = iconsBlack.map((i) => i.url);
+const iconWhiteUrls = iconsWhite.map((i) => i.url);
+const iconWhiteInvert = iconsWhite.map((i) => i.invert);
 ---
 
 <section class="relative pb-28 px-6 lg:px-12">
@@ -29,15 +33,15 @@ const iconsWhite = await Promise.all(
                     <div class="glass-card glass-hover rounded-2xl p-5 flex flex-col">
                         <div class="flex items-center gap-3 mb-4">
                             <img
-                                src={iconsBlack[i]}
+                                src={iconBlackUrls[i]}
                                 alt={sm.name}
                                 class="w-5 h-5 shrink-0"
                                 data-theme-visible="light"
                             />
                             <img
-                                src={iconsWhite[i]}
+                                src={iconWhiteUrls[i]}
                                 alt={sm.name}
-                                class="w-5 h-5 shrink-0"
+                                class:list={["w-5 h-5 shrink-0", iconWhiteInvert[i] && "brightness-0 invert"]}
                                 data-theme-visible="dark"
                             />
                             <h3 class="text-primary font-semibold text-sm">

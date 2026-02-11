@@ -150,7 +150,7 @@
 }
 
 [data-theme="dark"] .docs-prose pre {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.03) !important;
   border-color: rgba(255, 255, 255, 0.08);
 }
 
@@ -210,8 +210,8 @@
 }
 
 /* Shiki dual theme support */
-[data-theme="dark"] .shiki,
-[data-theme="dark"] .shiki span {
+[data-theme="dark"] .astro-code,
+[data-theme="dark"] .astro-code span {
   color: var(--shiki-dark) !important;
   background-color: transparent !important;
 }
@@ -272,4 +272,3 @@
 .callout-danger .callout-title {
   color: #ef4444;
 }
-

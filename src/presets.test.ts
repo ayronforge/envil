@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { createEnv } from "./env.ts";
-import { expo, nextjs, vite } from "./presets.ts";
+import { astro, expo, nextjs, nuxt, sveltekit, vite } from "./presets.ts";
 import { requiredString } from "./schemas.ts";
 
 describe("presets", () => {
@@ -15,6 +15,18 @@ describe("presets", () => {
 
   test("expo preset has correct client prefix", () => {
     expect(expo.prefix).toEqual({ client: "EXPO_PUBLIC_" });
+  });
+
+  test("nuxt preset has correct client prefix", () => {
+    expect(nuxt.prefix).toEqual({ client: "NUXT_PUBLIC_" });
+  });
+
+  test("sveltekit preset has correct client prefix", () => {
+    expect(sveltekit.prefix).toEqual({ client: "PUBLIC_" });
+  });
+
+  test("astro preset has correct client prefix", () => {
+    expect(astro.prefix).toEqual({ client: "PUBLIC_" });
   });
 
   test("nextjs preset works with createEnv", () => {
@@ -44,6 +56,36 @@ describe("presets", () => {
       ...expo,
       client: { API_URL: requiredString },
       runtimeEnv: { EXPO_PUBLIC_API_URL: "http://api" },
+      isServer: true,
+    });
+    expect(env.API_URL).toBe("http://api");
+  });
+
+  test("nuxt preset works with createEnv", () => {
+    const env = createEnv({
+      ...nuxt,
+      client: { API_URL: requiredString },
+      runtimeEnv: { NUXT_PUBLIC_API_URL: "http://api" },
+      isServer: true,
+    });
+    expect(env.API_URL).toBe("http://api");
+  });
+
+  test("sveltekit preset works with createEnv", () => {
+    const env = createEnv({
+      ...sveltekit,
+      client: { API_URL: requiredString },
+      runtimeEnv: { PUBLIC_API_URL: "http://api" },
+      isServer: true,
+    });
+    expect(env.API_URL).toBe("http://api");
+  });
+
+  test("astro preset works with createEnv", () => {
+    const env = createEnv({
+      ...astro,
+      client: { API_URL: requiredString },
+      runtimeEnv: { PUBLIC_API_URL: "http://api" },
       isServer: true,
     });
     expect(env.API_URL).toBe("http://api");

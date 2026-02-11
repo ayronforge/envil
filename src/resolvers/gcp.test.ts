@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
 
 const secretStore = new Map<string, string>();
 
@@ -17,7 +17,7 @@ mock.module("@google-cloud/secret-manager", () => ({
   },
 }));
 
-const { fromGcpSecrets } = await import("./gcp.ts");
+const { fromGcpSecrets, ResolverError } = await import("./gcp.ts");
 
 describe("fromGcpSecrets", () => {
   beforeEach(() => {
@@ -32,6 +32,21 @@ describe("fromGcpSecrets", () => {
     );
 
     expect(result.DB_PASSWORD).toBe("secret-value");
+  });
+
+  test("fails with ResolverError when using short names without projectId", async () => {
+    const exit = await Effect.runPromiseExit(
+      fromGcpSecrets({ secrets: { DB_PASSWORD: "my-secret" } }),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const error = (exit.cause as { _tag: string; error: unknown }).error;
+      expect(error).toBeInstanceOf(ResolverError);
+      expect((error as ResolverError).message).toContain(
+        "projectId must be provided when using short secret names",
+      );
+    }
   });
 
   test("resolves secrets using full resource path", async () => {
@@ -73,6 +88,25 @@ describe("fromGcpSecrets", () => {
 
     expect(result.EXISTING).toBe("value");
     expect(result.MISSING).toBeUndefined();
+  });
+
+  test("strict mode fails when a secret fetch errors", async () => {
+    const exit = await Effect.runPromiseExit(
+      fromGcpSecrets({
+        secrets: { MISSING: "nonexistent" },
+        projectId: "my-project",
+        strict: true,
+      }),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const error = (exit.cause as { _tag: string; error: unknown }).error;
+      expect(error).toBeInstanceOf(ResolverError);
+      expect((error as ResolverError).message).toContain(
+        'Failed to resolve secret "nonexistent" for env key "MISSING"',
+      );
+    }
   });
 
   test("handles string data directly", async () => {

@@ -20,5 +20,5 @@
     "preserveDuplicates": false,
     "preserveWhitespace": false
   },
-  "ignorePatterns": ["src/**/routeTree.gen.ts", "convex/_generated/**"]
+  "ignorePatterns": ["src/**/routeTree.gen.ts", "**/*.{css,html,hbs}"]
 }

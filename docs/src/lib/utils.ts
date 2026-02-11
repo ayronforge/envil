@@ -21,22 +21,29 @@ async function tryUrl(url: string): Promise<string | null> {
 const deviconUrl = (slug: string, variant: string) =>
   `https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/${slug}/${slug}-${variant}.svg`;
 
-export async function getIcon(slug: string, color: "white" | "black" = "black"): Promise<string> {
-  const candidates = [
-    `https://cdn.simpleicons.org/${slug}/${color}`,
-    ...(color === "white"
-      ? [deviconUrl(slug, "plain-white"), deviconUrl(slug, "original-white")]
-      : []),
+export async function getIcon(
+  slug: string,
+  color: "white" | "black" = "black",
+  params?: { invert?: boolean },
+): Promise<{ url: string; invert: boolean }> {
+  const invert = params?.invert ?? false;
+
+  const candidates = [`https://cdn.simpleicons.org/${slug}/${color}`];
+
+  if (color === "white") {
+    candidates.push(deviconUrl(slug, "plain-white"), deviconUrl(slug, "original-white"));
+  }
+  candidates.push(
     deviconUrl(slug, "plain"),
     deviconUrl(slug, "original"),
     deviconUrl(slug, "plain-wordmark"),
     deviconUrl(slug, "original-wordmark"),
-  ];
+  );
 
   for (const url of candidates) {
     const result = await tryUrl(url);
-    if (result) return result;
+    if (result) return { url: result, invert };
   }
 
-  return candidates[0];
+  return { url: candidates[0], invert };
 }

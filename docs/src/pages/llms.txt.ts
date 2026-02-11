@@ -1,4 +1,5 @@
 import type { APIRoute } from "astro";
+
 import { docsNav } from "@/data/docs-nav";
 
 const BASE = "/better-env";

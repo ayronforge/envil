@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
 
-import { fromRemoteSecrets } from "./remote.ts";
+import { ResolverError, fromRemoteSecrets } from "./remote.ts";
 
 describe("fromRemoteSecrets", () => {
   test("resolves a single secret (non-batch client)", async () => {
@@ -100,5 +100,46 @@ describe("fromRemoteSecrets", () => {
     );
 
     expect(result.A).toBeUndefined();
+  });
+
+  test("strict mode fails when getSecret throws", async () => {
+    const client = {
+      getSecret: async (_id: string): Promise<string | undefined> => {
+        throw new Error("Network error");
+      },
+    };
+
+    const exit = await Effect.runPromiseExit(
+      fromRemoteSecrets({ secrets: { A: "secret-a" }, client, strict: true }),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const error = (exit.cause as { _tag: string; error: unknown }).error;
+      expect(error).toBeInstanceOf(ResolverError);
+      expect((error as ResolverError).message).toContain(
+        'Failed to resolve remote secret "secret-a"',
+      );
+    }
+  });
+
+  test("strict mode fails when getSecrets throws", async () => {
+    const client = {
+      getSecret: async (_id: string) => undefined,
+      getSecrets: async (_ids: string[]) => {
+        throw new Error("Batch network error");
+      },
+    };
+
+    const exit = await Effect.runPromiseExit(
+      fromRemoteSecrets({ secrets: { A: "secret-a", B: "secret-b" }, client, strict: true }),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const error = (exit.cause as { _tag: string; error: unknown }).error;
+      expect(error).toBeInstanceOf(ResolverError);
+      expect((error as ResolverError).message).toBe("Failed to resolve remote secrets batch");
+    }
   });
 });

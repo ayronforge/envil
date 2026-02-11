@@ -150,6 +150,44 @@ const env = createEnv({
   client: { API_URL: url },
 })`,
   },
+  {
+    name: "Nuxt",
+    icon: "nuxtjs",
+    deviconVariant: "plain",
+    invertIcon: true,
+    prefix: "NUXT_PUBLIC_",
+    code: `import { createEnv, url } from "@ayronforge/better-env"
+import { nuxt } from "@ayronforge/better-env/presets"
+
+const env = createEnv({
+  ...nuxt,
+  client: { API_URL: url },
+})`,
+  },
+  {
+    name: "SvelteKit",
+    icon: "svelte",
+    prefix: "PUBLIC_",
+    code: `import { createEnv, url } from "@ayronforge/better-env"
+import { sveltekit } from "@ayronforge/better-env/presets"
+
+const env = createEnv({
+  ...sveltekit,
+  client: { API_URL: url },
+})`,
+  },
+  {
+    name: "Astro",
+    icon: "astro",
+    prefix: "PUBLIC_",
+    code: `import { createEnv, url } from "@ayronforge/better-env"
+import { astro } from "@ayronforge/better-env/presets"
+
+const env = createEnv({
+  ...astro,
+  client: { API_URL: url },
+})`,
+  },
 ];
 
 export const codeExample = `import { createEnv, redacted, url } from "@ayronforge/better-env"

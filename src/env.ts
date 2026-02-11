@@ -1,93 +1,213 @@
 import { Effect, Either, ParseResult, Redacted, Schema } from "effect";
 
 import { ClientAccessError, EnvValidationError } from "./errors.ts";
+import { resolvePrefixMap } from "./prefix.ts";
 import type { ResolverError, ResolverResult } from "./resolvers/types.ts";
+import type {
+  AnyEnv,
+  EnvOptions,
+  EnvResult,
+  EnvResultAutoRedacted,
+  ExtractResolverKeys,
+  InternalEnvOptions,
+  PrefixMap,
+  PrefixStr,
+  SchemaDict,
+} from "./types.ts";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnySchema = Schema.Schema<any, any, never>;
-type SchemaDict = Record<string, AnySchema>;
-type InferEnv<T extends SchemaDict> = { [K in keyof T]: Schema.Schema.Type<T[K]> };
-
-type MaybeRedact<T> = T extends Redacted.Redacted<infer _> ? T : Redacted.Redacted<T>;
-
-type InferEnvAutoRedacted<
-  T extends SchemaDict,
-  ResolverKeys extends string,
-  Prefix extends string = "",
-> = {
-  [K in keyof T]: `${Prefix}${K & string}` extends ResolverKeys
-    ? MaybeRedact<Schema.Schema.Type<T[K]>>
-    : Schema.Schema.Type<T[K]>;
-};
-
-// Extract resolver keys from resolver array type (distributive via infer U)
-type ExtractResolverKeys<T extends readonly any[]> = // eslint-disable-line @typescript-eslint/no-explicit-any
-  T[number] extends infer U // eslint-disable-line @typescript-eslint/no-explicit-any
-    ? U extends Effect.Effect<ResolverResult<infer K>, any, any>
-      ? K
-      : never // eslint-disable-line @typescript-eslint/no-explicit-any
-    : never;
-
-// Extract string prefix for type-level matching (PrefixMap not supported, falls back to "")
-type PrefixStr<P> = P extends string ? P : "";
-
-type AnyEnv = Readonly<Record<string, unknown>>;
-
-type MergeEnvs<T extends readonly AnyEnv[]> = T extends readonly [
-  infer First extends AnyEnv,
-  ...infer Rest extends readonly AnyEnv[],
-]
-  ? First & MergeEnvs<Rest>
-  : {};
-
-type KnownKeys<T> = keyof {
-  [K in keyof T as string extends K ? never : K]: T[K];
-};
-
-type EnvResult<
-  TExtends extends readonly AnyEnv[],
-  TServer extends SchemaDict,
-  TClient extends SchemaDict,
-  TShared extends SchemaDict,
-> = Readonly<
-  Omit<MergeEnvs<TExtends>, KnownKeys<TServer> | KnownKeys<TClient> | KnownKeys<TShared>> &
-    InferEnv<TServer & TClient & TShared>
->;
-
-type EnvResultAutoRedacted<
-  TExtends extends readonly AnyEnv[],
-  TServer extends SchemaDict,
-  TClient extends SchemaDict,
-  TShared extends SchemaDict,
-  ResolverKeys extends string,
-  Prefix extends string = "",
-> = Readonly<
-  Omit<MergeEnvs<TExtends>, KnownKeys<TServer> | KnownKeys<TClient> | KnownKeys<TShared>> &
-    InferEnvAutoRedacted<TServer & TClient & TShared, ResolverKeys, Prefix>
->;
-
-interface PrefixMap {
-  server?: string;
-  client?: string;
-  shared?: string;
+interface EnvMeta {
+  readonly serverKeys: ReadonlySet<string>;
+  readonly clientKeys: ReadonlySet<string>;
+  readonly sharedKeys: ReadonlySet<string>;
 }
 
-interface EnvOptions<
-  TServer extends SchemaDict,
-  TClient extends SchemaDict,
-  TShared extends SchemaDict,
-  TExtends extends readonly AnyEnv[] = readonly [],
-> {
-  server?: TServer;
-  client?: TClient;
-  shared?: TShared;
-  extends?: TExtends;
-  prefix?: string | PrefixMap;
-  runtimeEnv?: Record<string, string | undefined>;
-  isServer?: boolean;
-  emptyStringAsUndefined?: boolean;
-  onValidationError?: (errors: string[]) => void;
-  _autoRedactKeys?: Set<string>;
+interface AggregatedKeys {
+  serverKeys: Set<string>;
+  clientKeys: Set<string>;
+  sharedKeys: Set<string>;
+}
+
+const envMetaStore = new WeakMap<object, EnvMeta>();
+
+type EnvCategory = keyof Required<PrefixMap>;
+
+function addToSet(target: Set<string>, values: Iterable<string>) {
+  for (const value of values) {
+    target.add(value);
+  }
+}
+
+function getEnvMeta(env: unknown): EnvMeta | undefined {
+  if (typeof env !== "object" || env === null) {
+    return undefined;
+  }
+
+  return envMetaStore.get(env);
+}
+
+function normalizeRuntimeEnv(
+  runtimeEnv: Record<string, string | undefined>,
+  emptyStringAsUndefined: boolean | undefined,
+): Record<string, string | undefined> {
+  if (!emptyStringAsUndefined) {
+    return runtimeEnv;
+  }
+
+  return Object.fromEntries(
+    Object.entries(runtimeEnv).map(([key, value]) => [key, value === "" ? undefined : value]),
+  );
+}
+
+function aggregateEnvKeys(
+  server: SchemaDict,
+  client: SchemaDict,
+  shared: SchemaDict,
+  extendsEnvs: readonly AnyEnv[],
+): AggregatedKeys {
+  const serverKeys = new Set<string>(Object.keys(server));
+  const clientKeys = new Set<string>(Object.keys(client));
+  const sharedKeys = new Set<string>(Object.keys(shared));
+
+  for (const ext of extendsEnvs) {
+    const meta = getEnvMeta(ext);
+    if (!meta) continue;
+    addToSet(serverKeys, meta.serverKeys);
+    addToSet(clientKeys, meta.clientKeys);
+    addToSet(sharedKeys, meta.sharedKeys);
+  }
+
+  return { serverKeys, clientKeys, sharedKeys };
+}
+
+function selectSchemaForRuntime(
+  isServer: boolean,
+  server: SchemaDict,
+  client: SchemaDict,
+  shared: SchemaDict,
+): SchemaDict {
+  return isServer ? { ...server, ...client, ...shared } : { ...client, ...shared };
+}
+
+function getKeyCategory(key: string, client: SchemaDict, shared: SchemaDict): EnvCategory {
+  if (key in client) return "client";
+  if (key in shared) return "shared";
+  return "server";
+}
+
+function parseSchemaValues(
+  schema: SchemaDict,
+  options: {
+    client: SchemaDict;
+    shared: SchemaDict;
+    runtimeEnv: Record<string, string | undefined>;
+    prefixMap: Required<PrefixMap>;
+    autoRedactKeys?: ReadonlySet<string>;
+  },
+): { values: Record<string, unknown>; errors: string[] } {
+  const values: Record<string, unknown> = {};
+  const errors: string[] = [];
+
+  for (const [key, validator] of Object.entries(schema)) {
+    const category = getKeyCategory(key, options.client, options.shared);
+    const envKey = `${options.prefixMap[category]}${key}`;
+    const rawValue = options.runtimeEnv[envKey];
+    const parsed = Schema.decodeUnknownEither(validator)(rawValue);
+
+    if (Either.isLeft(parsed)) {
+      const detail = ParseResult.TreeFormatter.formatErrorSync(parsed.left);
+      errors.push(`${envKey}: ${detail}`);
+      continue;
+    }
+
+    let finalValue = parsed.right;
+    if (options.autoRedactKeys?.has(envKey) && !Redacted.isRedacted(finalValue)) {
+      finalValue = Redacted.make(finalValue);
+    }
+
+    values[key] = finalValue;
+  }
+
+  return { values, errors };
+}
+
+function raiseValidationErrors(
+  errors: string[],
+  onValidationError?: (errors: string[]) => void,
+): void {
+  if (errors.length === 0) {
+    return;
+  }
+
+  if (onValidationError) {
+    try {
+      onValidationError(errors);
+    } catch (error) {
+      throw error instanceof EnvValidationError ? error : new EnvValidationError([String(error)]);
+    }
+  }
+
+  throw new EnvValidationError(errors);
+}
+
+function mergeExtendedEnvs(
+  extendsEnvs: readonly AnyEnv[],
+  parsedValues: Record<string, unknown>,
+): Record<string, unknown> {
+  const mergedValues: Record<string, unknown> = {};
+
+  for (const ext of extendsEnvs) {
+    for (const [key, value] of Object.entries(ext)) {
+      mergedValues[key] = value;
+    }
+  }
+
+  for (const [key, value] of Object.entries(parsedValues)) {
+    mergedValues[key] = value;
+  }
+
+  return mergedValues;
+}
+
+function createClientBlockedKeys(aggregated: AggregatedKeys): Set<string> {
+  const blockedKeys = new Set<string>();
+
+  for (const key of aggregated.serverKeys) {
+    if (!aggregated.clientKeys.has(key) && !aggregated.sharedKeys.has(key)) {
+      blockedKeys.add(key);
+    }
+  }
+
+  return blockedKeys;
+}
+
+function createReadOnlyEnv<T extends AnyEnv>(
+  envValues: Record<string, unknown>,
+  options: {
+    isServer: boolean;
+    clientBlockedKeys: ReadonlySet<string>;
+  },
+): T {
+  const frozenValues = Object.freeze(envValues);
+
+  return new Proxy(frozenValues, {
+    get(target, prop) {
+      if (typeof prop !== "string") return undefined;
+      if (!options.isServer && options.clientBlockedKeys.has(prop)) {
+        throw new ClientAccessError(prop);
+      }
+
+      return Reflect.get(target, prop);
+    },
+    set() {
+      throw new TypeError("Environment object is read-only");
+    },
+    deleteProperty() {
+      throw new TypeError("Environment object is read-only");
+    },
+    defineProperty() {
+      throw new TypeError("Environment object is read-only");
+    },
+  }) as T;
 }
 
 function buildEnv<
@@ -96,78 +216,46 @@ function buildEnv<
   TShared extends SchemaDict = {},
   const TExtends extends readonly AnyEnv[] = readonly [],
 >(
-  opts: EnvOptions<TServer, TClient, TShared, TExtends>,
+  opts: InternalEnvOptions<TServer, TClient, TShared, TExtends>,
 ): EnvResult<TExtends, TServer, TClient, TShared> {
-  const runtimeEnv = opts.runtimeEnv ?? process.env;
-
-  const processedEnv: Record<string, string | undefined> = opts.emptyStringAsUndefined
-    ? Object.fromEntries(Object.entries(runtimeEnv).map(([k, v]) => [k, v === "" ? undefined : v]))
-    : runtimeEnv;
-
+  const extendsEnvs = opts.extends ?? [];
+  const runtimeEnv = normalizeRuntimeEnv(
+    opts.runtimeEnv ?? process.env,
+    opts.emptyStringAsUndefined,
+  );
   const isServer = opts.isServer ?? typeof window === "undefined";
 
   const server = opts.server ?? ({} as TServer);
   const client = opts.client ?? ({} as TClient);
   const shared = opts.shared ?? ({} as TShared);
 
-  const prefixMap: Required<PrefixMap> =
-    typeof opts.prefix === "string" || opts.prefix === undefined
-      ? { server: opts.prefix ?? "", client: opts.prefix ?? "", shared: opts.prefix ?? "" }
-      : {
-          server: opts.prefix.server ?? "",
-          client: opts.prefix.client ?? "",
-          shared: opts.prefix.shared ?? "",
-        };
+  const aggregated = aggregateEnvKeys(server, client, shared, extendsEnvs);
+  const prefixMap = resolvePrefixMap(opts.prefix);
+  const runtimeSchema = selectSchemaForRuntime(isServer, server, client, shared);
+  const { values: parsedValues, errors } = parseSchemaValues(runtimeSchema, {
+    client,
+    shared,
+    runtimeEnv,
+    prefixMap,
+    autoRedactKeys: opts._autoRedactKeys,
+  });
 
-  const schema = isServer ? { ...server, ...client, ...shared } : { ...client, ...shared };
+  raiseValidationErrors(errors, opts.onValidationError);
 
-  const result: Record<string, unknown> = {};
-  const errors: string[] = [];
+  const mergedValues = mergeExtendedEnvs(extendsEnvs, parsedValues);
+  const clientBlockedKeys = createClientBlockedKeys(aggregated);
+  const env = createReadOnlyEnv<EnvResult<TExtends, TServer, TClient, TShared>>(mergedValues, {
+    isServer,
+    clientBlockedKeys,
+  });
 
-  for (const [key, validator] of Object.entries(schema)) {
-    const category = key in client ? "client" : key in shared ? "shared" : "server";
-    const envKey = `${prefixMap[category]}${key}`;
-    const value = processedEnv[envKey];
-    const parsed = Schema.decodeUnknownEither(validator)(value);
+  envMetaStore.set(env as object, {
+    serverKeys: aggregated.serverKeys,
+    clientKeys: aggregated.clientKeys,
+    sharedKeys: aggregated.sharedKeys,
+  });
 
-    if (Either.isLeft(parsed)) {
-      const detail = ParseResult.TreeFormatter.formatErrorSync(parsed.left);
-      errors.push(`${envKey}: ${detail}`);
-    } else {
-      let finalValue = parsed.right;
-      if (opts._autoRedactKeys?.has(envKey) && !Redacted.isRedacted(finalValue)) {
-        finalValue = Redacted.make(finalValue);
-      }
-      result[key] = finalValue;
-    }
-  }
-
-  if (errors.length > 0) {
-    if (opts.onValidationError) {
-      opts.onValidationError(errors);
-    }
-    throw new EnvValidationError(errors);
-  }
-
-  const mergedResult: Record<string, unknown> = {};
-  for (const ext of opts.extends ?? []) {
-    for (const [key, value] of Object.entries(ext)) {
-      mergedResult[key] = value;
-    }
-  }
-  for (const [key, value] of Object.entries(result)) {
-    mergedResult[key] = value;
-  }
-
-  return new Proxy(mergedResult, {
-    get(target, prop) {
-      if (typeof prop !== "string") return undefined;
-      if (!isServer && prop in server && !(prop in client) && !(prop in shared)) {
-        throw new ClientAccessError(prop);
-      }
-      return Reflect.get(target, prop);
-    },
-  }) as EnvResult<TExtends, TServer, TClient, TShared>;
+  return env;
 }
 
 export function createEnv<
@@ -187,13 +275,13 @@ export function createEnv<
   ResolverError | EnvValidationError
 >;
 
-// Overload: with resolvers (autoRedactResolver defaults to true) → auto-redact resolver keys
+// Overload: with resolvers (autoRedactResolver defaults to true) -> auto-redact resolver keys
 export function createEnv<
   TServer extends SchemaDict = {},
   TClient extends SchemaDict = {},
   TShared extends SchemaDict = {},
   const TExtends extends readonly AnyEnv[] = readonly [],
-  const TResolvers extends readonly Effect.Effect<ResolverResult<any>, ResolverError>[] = // eslint-disable-line @typescript-eslint/no-explicit-any
+  const TResolvers extends readonly Effect.Effect<ResolverResult<any>, ResolverError>[] =
     readonly [],
   const TPrefix extends string | PrefixMap | undefined = undefined,
 >(
@@ -214,7 +302,7 @@ export function createEnv<
   ResolverError | EnvValidationError
 >;
 
-// Overload: without resolvers → synchronous
+// Overload: without resolvers -> synchronous
 export function createEnv<
   TServer extends SchemaDict = {},
   TClient extends SchemaDict = {},
@@ -236,12 +324,15 @@ export function createEnv(
       Effect.map((results) => {
         const autoRedactKeys = new Set<string>();
         if (shouldAutoRedact) {
-          for (const r of results) {
-            for (const [k, v] of Object.entries(r)) {
-              if (v !== undefined) autoRedactKeys.add(k);
+          for (const result of results) {
+            for (const [key, value] of Object.entries(result)) {
+              if (value !== undefined) {
+                autoRedactKeys.add(key);
+              }
             }
           }
         }
+
         return {
           mergedEnv: Object.assign({}, opts.runtimeEnv ?? process.env, ...results),
           autoRedactKeys,
@@ -255,10 +346,12 @@ export function createEnv(
               runtimeEnv: mergedEnv,
               _autoRedactKeys: shouldAutoRedact ? autoRedactKeys : undefined,
             }),
-          catch: (e) => (e instanceof EnvValidationError ? e : new EnvValidationError([String(e)])),
+          catch: (error) =>
+            error instanceof EnvValidationError ? error : new EnvValidationError([String(error)]),
         }),
       ),
     );
   }
+
   return buildEnv(opts);
 }

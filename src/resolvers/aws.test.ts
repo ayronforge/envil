@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 
-import { Effect } from "effect";
+import { Effect, Exit } from "effect";
 
 const secretStore = new Map<string, string>();
 
@@ -37,7 +37,7 @@ mock.module("@aws-sdk/client-secrets-manager", () => ({
   },
 }));
 
-const { fromAwsSecrets } = await import("./aws.ts");
+const { fromAwsSecrets, ResolverError } = await import("./aws.ts");
 
 describe("fromAwsSecrets", () => {
   beforeEach(() => {
@@ -85,6 +85,19 @@ describe("fromAwsSecrets", () => {
     expect(result.MISSING).toBeUndefined();
   });
 
+  test("strict mode fails when a single secret fetch errors", async () => {
+    const exit = await Effect.runPromiseExit(
+      fromAwsSecrets({ secrets: { MISSING: "nonexistent" }, strict: true }),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const error = (exit.cause as { _tag: string; error: unknown }).error;
+      expect(error).toBeInstanceOf(ResolverError);
+      expect((error as ResolverError).message).toContain('Failed to resolve secret "nonexistent"');
+    }
+  });
+
   test("returns undefined for missing secrets (batch)", async () => {
     secretStore.set("secret-a", "value-a");
 
@@ -114,5 +127,20 @@ describe("fromAwsSecrets", () => {
     );
 
     expect(result.BAD_JSON).toBeUndefined();
+  });
+
+  test("strict mode fails on invalid JSON when using # syntax", async () => {
+    secretStore.set("my-secret", "not-json");
+
+    const exit = await Effect.runPromiseExit(
+      fromAwsSecrets({ secrets: { BAD_JSON: "my-secret#key" }, strict: true }),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const error = (exit.cause as { _tag: string; error: unknown }).error;
+      expect(error).toBeInstanceOf(ResolverError);
+      expect((error as ResolverError).message).toContain('Failed to parse secret "my-secret"');
+    }
   });
 });

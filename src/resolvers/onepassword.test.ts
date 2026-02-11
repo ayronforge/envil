@@ -18,7 +18,7 @@ mock.module("@1password/sdk", () => ({
   }),
 }));
 
-const { fromOnePassword } = await import("./onepassword.ts");
+const { fromOnePassword, ResolverError } = await import("./onepassword.ts");
 
 describe("fromOnePassword", () => {
   beforeEach(() => {
@@ -55,6 +55,23 @@ describe("fromOnePassword", () => {
 
     expect(result.A).toBeUndefined();
     expect(result.B).toBeUndefined();
+  });
+
+  test("strict mode fails on batch resolution error", async () => {
+    const exit = await Effect.runPromiseExit(
+      fromOnePassword({
+        secrets: { A: "op://vault/item/a", B: "op://vault/item/b" },
+        serviceAccountToken: "test-token",
+        strict: true,
+      }),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const error = (exit.cause as { _tag: string; error: unknown }).error;
+      expect(error).toBeInstanceOf(ResolverError);
+      expect((error as ResolverError).message).toBe("Failed to resolve 1Password secrets");
+    }
   });
 
   test("fails with ResolverError if neither token nor env var is provided", async () => {

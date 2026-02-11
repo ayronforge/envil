@@ -6,8 +6,10 @@ import { createEnv } from "./env.ts";
 import { ClientAccessError, EnvValidationError } from "./errors.ts";
 import { ResolverError, type ResolverResult } from "./resolvers/types.ts";
 import {
+  boolean,
   commaSeparated,
-  optionalString,
+  optional,
+  port,
   positiveNumber,
   redacted,
   requiredString,
@@ -183,7 +185,7 @@ describe("createEnv", () => {
         isServer: false,
       });
       try {
-        env.SECRET;
+        Reflect.get(env, "SECRET");
         expect.unreachable("should have thrown");
       } catch (e) {
         expect(e).toBeInstanceOf(ClientAccessError);
@@ -191,6 +193,40 @@ describe("createEnv", () => {
         expect(err._tag).toBe("ClientAccessError");
         expect(err.variableName).toBe("SECRET");
       }
+    });
+
+    test("server vars from extended envs are blocked on client", () => {
+      const baseEnv = createEnv({
+        server: { SECRET: requiredString },
+        runtimeEnv: { SECRET: "base-secret" },
+        isServer: true,
+      });
+
+      const env = createEnv({
+        extends: [baseEnv],
+        client: { API_URL: requiredString },
+        runtimeEnv: { API_URL: "http://api" },
+        isServer: false,
+      });
+
+      expect(() => env.SECRET).toThrow(ClientAccessError);
+    });
+
+    test("shared vars from extended envs remain accessible on client", () => {
+      const baseEnv = createEnv({
+        shared: { APP_NAME: requiredString },
+        runtimeEnv: { APP_NAME: "better-env" },
+        isServer: true,
+      });
+
+      const env = createEnv({
+        extends: [baseEnv],
+        client: { API_URL: requiredString },
+        runtimeEnv: { API_URL: "http://api" },
+        isServer: false,
+      });
+
+      expect(env.APP_NAME).toBe("better-env");
     });
 
     test("accessing client vars from client works fine", () => {
@@ -343,6 +379,30 @@ describe("createEnv", () => {
       });
       expect((env as Record<string, unknown>).NONEXISTENT).toBeUndefined();
     });
+
+    test("prevents assigning to validated keys", () => {
+      const env = createEnv({
+        server: { A: requiredString },
+        runtimeEnv: { A: "val" },
+        isServer: true,
+      });
+      expect(() => {
+        (env as Record<string, unknown>).A = "mutated";
+      }).toThrow(TypeError);
+      expect(env.A).toBe("val");
+    });
+
+    test("prevents deleting validated keys", () => {
+      const env = createEnv({
+        server: { A: requiredString },
+        runtimeEnv: { A: "val" },
+        isServer: true,
+      });
+      expect(() => {
+        delete (env as Record<string, unknown>).A;
+      }).toThrow(TypeError);
+      expect(env.A).toBe("val");
+    });
   });
 
   describe("schema integration", () => {
@@ -373,9 +433,55 @@ describe("createEnv", () => {
       expect(env.MODE).toBe("production");
     });
 
-    test("works with optionalString (undefined passes through)", () => {
+    test("works with withDefault(Schema.String) when env var IS set", () => {
       const env = createEnv({
-        server: { OPT: optionalString },
+        server: { MODE: withDefault(Schema.String, "default") },
+        runtimeEnv: { MODE: "dev" },
+        isServer: true,
+      });
+      expect(env.MODE).toBe("dev");
+    });
+
+    test("works with withDefault(requiredString) when env var IS set", () => {
+      const env = createEnv({
+        server: { MODE: requiredString.pipe(withDefault("fallback")) },
+        runtimeEnv: { MODE: "dev" },
+        isServer: true,
+      });
+      expect(env.MODE).toBe("dev");
+    });
+
+    test("withDefault(requiredString, '') fails when env var is missing (default validated)", () => {
+      expect(() =>
+        createEnv({
+          server: { MODE: withDefault(requiredString, "") },
+          runtimeEnv: {},
+          isServer: true,
+        }),
+      ).toThrow("Invalid environment variables");
+    });
+
+    test("works with port.pipe(withDefault) when env var IS set", () => {
+      const env = createEnv({
+        server: { PORT: port.pipe(withDefault(3000)) },
+        runtimeEnv: { PORT: "8080" },
+        isServer: true,
+      });
+      expect(env.PORT).toBe(8080);
+    });
+
+    test("works with boolean.pipe(withDefault) when env var IS set", () => {
+      const env = createEnv({
+        server: { DEBUG: boolean.pipe(withDefault(false)) },
+        runtimeEnv: { DEBUG: "true" },
+        isServer: true,
+      });
+      expect(env.DEBUG).toBe(true);
+    });
+
+    test("works with optional(Schema.String) (undefined passes through)", () => {
+      const env = createEnv({
+        server: { OPT: optional(Schema.String) },
         runtimeEnv: {},
         isServer: true,
       });
@@ -471,8 +577,8 @@ describe("createEnv", () => {
       ).toThrow("Invalid environment variables");
     });
 
-    test("callback can throw custom error", () => {
-      expect(() =>
+    test("callback-thrown errors are normalized to EnvValidationError", () => {
+      try {
         createEnv({
           server: { A: requiredString },
           runtimeEnv: {},
@@ -480,8 +586,12 @@ describe("createEnv", () => {
           onValidationError: (errors) => {
             throw new Error(`Custom: ${errors.join(", ")}`);
           },
-        }),
-      ).toThrow("Custom:");
+        });
+        expect.unreachable("should have thrown");
+      } catch (e) {
+        expect(e).toBeInstanceOf(EnvValidationError);
+        expect((e as EnvValidationError).errors[0]).toContain("Custom:");
+      }
     });
   });
 
@@ -538,7 +648,7 @@ describe("createEnv", () => {
 
     test("undefined values are unaffected", () => {
       const env = createEnv({
-        server: { OPT: optionalString },
+        server: { OPT: optional(Schema.String) },
         runtimeEnv: {},
         isServer: true,
         emptyStringAsUndefined: true,
@@ -791,6 +901,27 @@ describe("createEnv", () => {
       }
     });
 
+    test("onValidationError callback throws normalize to EnvValidationError with resolvers", async () => {
+      const result = await Effect.runPromiseExit(
+        createEnv({
+          server: { A: requiredString },
+          resolvers: [fakeResolver({})],
+          isServer: true,
+          onValidationError: () => {
+            throw new Error("Custom resolver callback failure");
+          },
+        }),
+      );
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        const error = (result.cause as { _tag: string; error: unknown }).error;
+        expect(error).toBeInstanceOf(EnvValidationError);
+        expect((error as EnvValidationError).errors[0]).toContain(
+          "Custom resolver callback failure",
+        );
+      }
+    });
+
     test("works with prefix", async () => {
       const env = await Effect.runPromise(
         createEnv({
@@ -899,7 +1030,7 @@ describe("createEnv", () => {
     test("undefined resolver values don't trigger auto-redaction", async () => {
       const env = await Effect.runPromise(
         createEnv({
-          server: { A: requiredString, B: optionalString },
+          server: { A: requiredString, B: optional(Schema.String) },
           resolvers: [fakeResolver({ A: "value", B: undefined })],
           runtimeEnv: {},
           isServer: true,

@@ -66,6 +66,7 @@ const env = await Effect.runPromise(envEffect)
 <TypeTable rows={[
   { name: "secrets", type: "Record<string, string>", required: true, description: "Map of env var names to AWS secret IDs. Supports #jsonKey syntax for JSON extraction." },
   { name: "region", type: "string", description: "AWS region for the Secrets Manager client." },
+  { name: "strict", type: "boolean", default: "false", description: "When true, secret fetch/parsing errors fail with ResolverError instead of returning undefined." },
 ]} />
 
 ## JSON key extraction

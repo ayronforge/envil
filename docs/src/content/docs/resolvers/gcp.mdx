@@ -67,6 +67,7 @@ const env = await Effect.runPromise(envEffect)
   { name: "secrets", type: "Record<string, string>", required: true, description: "Map of env var names to GCP secret names (or full resource paths)." },
   { name: "projectId", type: "string", description: "GCP project ID. Required when using short secret names." },
   { name: "version", type: "string", default: '"latest"', description: "Secret version to access." },
+  { name: "strict", type: "boolean", default: "false", description: "When true, secret fetch errors fail with ResolverError instead of returning undefined." },
 ]} />
 
 ## Full resource names

@@ -64,7 +64,7 @@ export const env = createEnv({
 });
 
 env.DATABASE_URL; // string — fully typed
-env.API_SECRET;   // string — redacted value auto-unwrapped
+env.API_SECRET;   // Redacted<string> — unwrap with Redacted.value(env.API_SECRET)
 env.PORT;         // number — transformed from string
 ```
 

@@ -51,6 +51,7 @@ No peer dependencies required — `fromRemoteSecrets` is exported directly from 
 <TypeTable rows={[
   { name: "secrets", type: "Record<string, string>", required: true, description: "Map of env var names to secret identifiers passed to the client." },
   { name: "client", type: "SecretClient", required: true, description: "Your custom client implementing the SecretClient interface." },
+  { name: "strict", type: "boolean", default: "false", description: "When true, client fetch errors fail with ResolverError instead of returning undefined." },
 ]} />
 
 ## SecretClient interface

@@ -1,10 +1,24 @@
 ---
 import { presets } from "../data/content.ts";
 import { getIcon } from "../lib/utils.ts";
-import CodeBlock from "./CodeBlock.astro";
+import { highlightCode } from "../lib/highlight.ts";
+import { PresetSelector } from "./preset-selector.tsx";
 
-const iconsBlack = await Promise.all(presets.map((p) => getIcon(p.icon, "black")));
-const iconsWhite = await Promise.all(presets.map((p) => getIcon(p.icon, "white")));
+const invertIcon = (p: typeof presets[number]) =>
+  "invertIcon" in p && !!p.invertIcon;
+
+const iconsLight = await Promise.all(presets.map((p) => getIcon(p.icon, "black")));
+const iconsDark = await Promise.all(presets.map((p) => getIcon(p.icon, "white", {invert: invertIcon(p) })));
+
+const presetData = presets.map((p, i) => ({
+  name: p.name,
+  prefix: p.prefix,
+  code: p.code,
+  highlightedCode: highlightCode(p.code),
+  iconLight: iconsLight[i].url,
+  iconDark: iconsDark[i].url,
+  invertDark: iconsDark[i].invert,
+}));
 ---
 
 <section class="relative pb-28 px-6 lg:px-12">
@@ -14,22 +28,16 @@ const iconsWhite = await Promise.all(presets.map((p) => getIcon(p.icon, "white")
       <p class="text-muted text-lg max-w-xl mx-auto">Get started instantly with pre-configured presets for popular frameworks.</p>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-      {presets.map((preset, i) => (
-        <div class="glass-card glass-hover rounded-2xl p-5 flex flex-col">
-          <div class="flex items-center gap-3 mb-4">
-            <span class="w-8 h-8 rounded-lg bg-secondary/10 border border-secondary/10 flex items-center justify-center">
-              <img src={iconsBlack[i]} alt={preset.name} class="w-4 h-4" data-theme-visible="light" />
-              <img src={iconsWhite[i]} alt={preset.name} class="w-4 h-4" data-theme-visible="dark" />
-            </span>
-            <h3 class="text-primary font-semibold">{preset.name}</h3>
-            <span class="ml-auto text-[10px] font-mono text-muted px-2 py-0.5 rounded-md bg-primary/5 border border-primary/5">{preset.prefix}</span>
-          </div>
-          <div class="mt-auto">
-            <CodeBlock code={preset.code} />
-          </div>
-        </div>
-      ))}
-    </div>
+    <PresetSelector client:visible presets={presetData} />
   </div>
 </section>
+
+<style>
+  :global(.preset-code-block) {
+    box-shadow: 0 0 60px rgba(234, 107, 62, 0.08), 0 20px 40px rgba(0, 0, 0, 0.1);
+  }
+  :global([data-theme="dark"] .preset-code-block) {
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 0 60px rgba(234, 107, 62, 0.1), 0 20px 40px rgba(0, 0, 0, 0.3);
+  }
+</style>

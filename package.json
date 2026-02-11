@@ -21,6 +21,9 @@
     "type": "git",
     "url": "https://github.com/ayronforge/better-env.git"
   },
+  "bin": {
+    "better-env": "./dist/cli.js"
+  },
   "files": [
     "dist"
   ],
@@ -55,13 +58,13 @@
   },
   "scripts": {
     "build": "bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/presets.ts src/resolvers/aws.ts src/resolvers/azure.ts src/resolvers/gcp.ts src/resolvers/onepassword.ts --outdir dist --format esm --packages external --sourcemap=linked",
+    "build:js": "bun run scripts/build-cli.ts",
     "build:types": "tsgo --noEmit false --declaration --emitDeclarationOnly --outDir dist --rootDir src",
     "prepublishOnly": "bun run build",
     "typecheck": "tsgo --noEmit",
     "lint": "oxlint --type-aware ./src",
     "lint:fix": "oxlint --type-aware --fix ./src",
-    "fmt": "oxfmt ./src",
+    "fmt": "oxfmt ./src ./docs",
     "fmt:check": "oxfmt --check ./src",
     "check": "bun run lint:fix && bun run fmt",
     "test": "bun test",

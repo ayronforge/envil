@@ -19,7 +19,7 @@ mock.module("@azure/identity", () => ({
   DefaultAzureCredential: class {},
 }));
 
-const { fromAzureKeyVault } = await import("./azure.ts");
+const { fromAzureKeyVault, ResolverError } = await import("./azure.ts");
 
 describe("fromAzureKeyVault", () => {
   beforeEach(() => {
@@ -68,6 +68,25 @@ describe("fromAzureKeyVault", () => {
 
     expect(result.EXISTING).toBe("value");
     expect(result.MISSING).toBeUndefined();
+  });
+
+  test("strict mode fails when a secret fetch errors", async () => {
+    const exit = await Effect.runPromiseExit(
+      fromAzureKeyVault({
+        secrets: { MISSING: "nonexistent" },
+        vaultUrl: "https://test-vault.vault.azure.net",
+        strict: true,
+      }),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+    if (Exit.isFailure(exit)) {
+      const error = (exit.cause as { _tag: string; error: unknown }).error;
+      expect(error).toBeInstanceOf(ResolverError);
+      expect((error as ResolverError).message).toContain(
+        'Failed to resolve secret "nonexistent" for env key "MISSING"',
+      );
+    }
   });
 
   test("fails with ResolverError if vaultUrl is empty", async () => {

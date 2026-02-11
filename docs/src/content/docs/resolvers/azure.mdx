@@ -67,6 +67,7 @@ const env = await Effect.runPromise(envEffect)
   { name: "secrets", type: "Record<string, string>", required: true, description: "Map of env var names to Azure Key Vault secret names." },
   { name: "vaultUrl", type: "string", required: true, description: "Azure Key Vault URL." },
   { name: "credential", type: "unknown", description: "Azure credential. Defaults to DefaultAzureCredential." },
+  { name: "strict", type: "boolean", default: "false", description: "When true, secret fetch errors fail with ResolverError instead of returning undefined." },
 ]} />
 
 ## Default credentials
