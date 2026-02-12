@@ -5,7 +5,7 @@ import path from "node:path";
 
 import { Schema } from "effect";
 
-import { runCli } from "../cli.ts";
+import { runCli } from "../cli-core.ts";
 import { buildEnvExample } from "../introspect.ts";
 import * as S from "../schemas.ts";
 
@@ -226,6 +226,30 @@ describe("envil cli", () => {
       expect(io.stderr.join("")).toContain("Unable to read");
       await rm(tempDir, { recursive: true, force: true });
     });
+
+    test("invalid envDefinition schema entry returns actionable error", async () => {
+      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-invalid-definition-"));
+      await writeFile(
+        path.join(tempDir, "env.ts"),
+        [
+          "export const envDefinition = {",
+          '  server: { BAD: "not-a-schema" },',
+          "  client: {},",
+          "  shared: {},",
+          "};",
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+
+      const io = createBufferedIO(tempDir);
+      const code = await runCli(["add", "example", "--input", "env.ts"], io.io);
+
+      expect(code).toBe(1);
+      expect(io.stderr.join("")).toContain("Invalid envDefinition");
+      expect(io.stderr.join("")).toContain("envDefinition.server.BAD must be an Effect Schema");
+      await rm(tempDir, { recursive: true, force: true });
+    });
   });
 
   describe("flag parsing", () => {
@@ -285,6 +309,38 @@ describe("envil cli", () => {
       const code = await runCli(["add", "env", "--output", "env.ts", "--force=false"], io.io);
       expect(code).toBe(1);
       expect(io.stderr.join("")).toContain("already exists");
+      await rm(tempDir, { recursive: true, force: true });
+    });
+
+    test("--force=0 does not set force", async () => {
+      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-flag-"));
+      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
+      await writeFile(path.join(tempDir, "env.ts"), "existing\n", "utf8");
+      const io = createBufferedIO(tempDir);
+      const code = await runCli(["add", "env", "--output", "env.ts", "--force=0"], io.io);
+      expect(code).toBe(1);
+      expect(io.stderr.join("")).toContain("already exists");
+      await rm(tempDir, { recursive: true, force: true });
+    });
+
+    test("--force=False does not set force", async () => {
+      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-flag-"));
+      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
+      await writeFile(path.join(tempDir, "env.ts"), "existing\n", "utf8");
+      const io = createBufferedIO(tempDir);
+      const code = await runCli(["add", "env", "--output", "env.ts", "--force=False"], io.io);
+      expect(code).toBe(1);
+      expect(io.stderr.join("")).toContain("already exists");
+      await rm(tempDir, { recursive: true, force: true });
+    });
+
+    test("invalid boolean flag value returns 1", async () => {
+      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-flag-"));
+      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
+      const io = createBufferedIO(tempDir);
+      const code = await runCli(["add", "env", "--force=maybe"], io.io);
+      expect(code).toBe(1);
+      expect(io.stderr.join("")).toContain('Invalid value for --force: "maybe"');
       await rm(tempDir, { recursive: true, force: true });
     });
 

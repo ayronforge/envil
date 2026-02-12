@@ -145,4 +145,24 @@ describe("buildEnvExample", () => {
     });
     expect(output).toContain("SECRET=CHANGE_ME");
   });
+
+  test("throws clear error for non-schema values", () => {
+    expect(() =>
+      buildEnvExample({
+        server: {
+          BAD: "not-a-schema" as never,
+        },
+      }),
+    ).toThrow("envDefinition.server.BAD must be an Effect Schema");
+  });
+
+  test("throws clear error for invalid prefix values", () => {
+    expect(() =>
+      buildEnvExample({
+        prefix: {
+          server: 123 as never,
+        },
+      }),
+    ).toThrow("envDefinition.prefix.server must be a string");
+  });
 });

@@ -86,6 +86,8 @@ export function examineSchema(schema: Schema.Schema.Any): ExaminedSchema {
 }
 
 export function buildEnvExample(definition: EnvDefinition): string {
+  validateEnvDefinition(definition);
+
   const prefix = {
     server: definition.prefix?.server ?? "",
     client: definition.prefix?.client ?? "",
@@ -156,4 +158,50 @@ function stringifyDefault(examined: ExaminedSchema): string {
   if (Array.isArray(val)) return val.map(String).join(",");
   if (typeof val === "object") return JSON.stringify(val);
   return String(val);
+}
+
+function validateEnvDefinition(definition: unknown): asserts definition is EnvDefinition {
+  if (!isRecord(definition)) {
+    throw new Error("Invalid envDefinition: expected an object export.");
+  }
+
+  const errors: string[] = [];
+
+  const prefix = definition.prefix;
+  if (prefix !== undefined) {
+    if (!isRecord(prefix)) {
+      errors.push("envDefinition.prefix must be an object.");
+    } else {
+      for (const bucket of BUCKETS) {
+        const value = prefix[bucket];
+        if (value !== undefined && typeof value !== "string") {
+          errors.push(`envDefinition.prefix.${bucket} must be a string.`);
+        }
+      }
+    }
+  }
+
+  for (const bucket of BUCKETS) {
+    const bucketValue = definition[bucket];
+    if (bucketValue === undefined) continue;
+
+    if (!isRecord(bucketValue)) {
+      errors.push(`envDefinition.${bucket} must be an object mapping keys to schemas.`);
+      continue;
+    }
+
+    for (const [key, schema] of Object.entries(bucketValue)) {
+      if (!Schema.isSchema(schema)) {
+        errors.push(`envDefinition.${bucket}.${key} must be an Effect Schema.`);
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(["Invalid envDefinition:", ...errors.map((line) => `- ${line}`)].join("\n"));
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

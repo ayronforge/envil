@@ -60,6 +60,8 @@ envil add example --input src/env.ts --output .env.example --force
 
 `envil add example` supports:
 
+- `--input <path>`
+- `--output <path>`
 - `--force`
 
 Both commands support `--help` for full usage output.

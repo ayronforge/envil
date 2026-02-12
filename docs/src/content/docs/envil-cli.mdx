@@ -114,5 +114,5 @@ envil add example [options]
 | `--force`         | Overwrite output file if it exists |                                      |
 
 <Callout type="note">
-  Your `env.ts` must export an `envDefinition` object with `prefix`, `server`, `client`, and `shared` fields. The generated code from `envil add env` already follows this convention.
+  Your input file must be importable by the current runtime and export an `envDefinition` object with `prefix`, `server`, `client`, and `shared` fields.
 </Callout>
