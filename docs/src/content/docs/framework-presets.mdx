@@ -26,16 +26,16 @@ import { nextjs, vite, expo, nuxt, sveltekit, astro } from "@ayronforge/envil/pr
 
 ## Usage
 
-Spread the preset into your `createEnv` call:
+Spread the preset into your `createEnvSync` call:
 
 ### Next.js
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
+import { createEnvSync, requiredString } from "@ayronforge/envil"
 import { nextjs } from "@ayronforge/envil/presets"
 import { Schema } from "effect"
 
-export const env = createEnv({
+export const env = createEnvSync({
   ...nextjs,
   server: {
     DATABASE_URL: requiredString,
@@ -50,10 +50,10 @@ export const env = createEnv({
 ### Vite
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
+import { createEnvSync, requiredString } from "@ayronforge/envil"
 import { vite } from "@ayronforge/envil/presets"
 
-export const env = createEnv({
+export const env = createEnvSync({
   ...vite,
   server: {
     SECRET_KEY: requiredString,
@@ -73,10 +73,10 @@ export const env = createEnv({
 ### Expo
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
+import { createEnvSync, requiredString } from "@ayronforge/envil"
 import { expo } from "@ayronforge/envil/presets"
 
-export const env = createEnv({
+export const env = createEnvSync({
   ...expo,
   client: {
     API_URL: requiredString,
@@ -88,10 +88,10 @@ export const env = createEnv({
 ### Nuxt
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
+import { createEnvSync, requiredString } from "@ayronforge/envil"
 import { nuxt } from "@ayronforge/envil/presets"
 
-export const env = createEnv({
+export const env = createEnvSync({
   ...nuxt,
   client: {
     API_URL: requiredString,
@@ -103,10 +103,10 @@ export const env = createEnv({
 ### SvelteKit
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
+import { createEnvSync, requiredString } from "@ayronforge/envil"
 import { sveltekit } from "@ayronforge/envil/presets"
 
-export const env = createEnv({
+export const env = createEnvSync({
   ...sveltekit,
   client: {
     API_URL: requiredString,
@@ -118,10 +118,10 @@ export const env = createEnv({
 ### Astro
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
+import { createEnvSync, requiredString } from "@ayronforge/envil"
 import { astro } from "@ayronforge/envil/presets"
 
-export const env = createEnv({
+export const env = createEnvSync({
   ...astro,
   client: {
     API_URL: requiredString,
@@ -139,7 +139,7 @@ Presets are plain objects with a `prefix` property. For example, the Next.js pre
 export const nextjs = { prefix: { client: "NEXT_PUBLIC_" } } as const
 ```
 
-When you spread `...nextjs` into `createEnv`, it sets the `prefix` option to `{ client: "NEXT_PUBLIC_" }`. This means:
+When you spread `...nextjs` into `createEnvSync`, it sets the `prefix` option to `{ client: "NEXT_PUBLIC_" }`. This means:
 
 - **Server variables** have no prefix (read as-is)
 - **Client variables** are prefixed with `NEXT_PUBLIC_`
@@ -158,7 +158,7 @@ const myPreset = {
   },
 } as const
 
-createEnv({
+createEnvSync({
   ...myPreset,
   server: { DB_URL: requiredString },    // reads SERVER_DB_URL
   client: { API_URL: requiredString },   // reads PUBLIC_API_URL

@@ -1,70 +1,76 @@
-import { Effect } from "effect";
+import { Context, Effect, Layer, Option, Redacted } from "effect";
 
-import { ResolverError, type ResolverResult, type SecretClient } from "./types.ts";
-import { fillMissingMapValues, keyValueResultsToRecord, strictOrElse } from "./utils.ts";
+import type { ResolverAdapter, ResolverResult } from "./types.ts";
+import { resolverEntries, resolverRecord } from "./utils.ts";
 
-export { ResolverError } from "./types.ts";
-
-interface RemoteSecretsOptions<K extends string = string> {
-  secrets: Record<K, string>;
-  client: SecretClient;
-  strict?: boolean;
+/** Base contract for secret-safe custom source failures. */
+export interface SecretSourceError {
+  readonly _tag: string;
+  readonly message: string;
 }
 
-export function fromRemoteSecrets<K extends string>(
-  opts: RemoteSecretsOptions<K>,
-): Effect.Effect<ResolverResult<K>, ResolverError>;
-export function fromRemoteSecrets(
-  opts: RemoteSecretsOptions,
-): Effect.Effect<ResolverResult, ResolverError> {
+/** A sanitized failure returned by a custom secret source. */
+export class SecretSourceRequestFailed extends Error implements SecretSourceError {
+  readonly _tag = "SecretSourceRequestFailed" as const;
+
+  constructor() {
+    super("The custom secret source request failed");
+    this.name = "SecretSourceRequestFailed";
+  }
+}
+
+/** Service contract implemented by custom secret providers. */
+export interface SecretSourceService {
+  readonly get: (
+    reference: string,
+  ) => Effect.Effect<Option.Option<Redacted.Redacted<string>>, SecretSourceError>;
+}
+
+/** Effect service used only by `customSecretsAdapter`. */
+export class SecretSource extends Context.Tag("@ayronforge/envil/SecretSource")<
+  SecretSource,
+  SecretSourceService
+>() {
+  /**
+   * Builds a SecretSource Layer from a Promise callback that explicitly
+   * distinguishes absence with `Option`.
+   */
+  static fromPromise(options: {
+    readonly get: (reference: string) => Promise<Option.Option<string>>;
+  }): Layer.Layer<SecretSource> {
+    return Layer.succeed(SecretSource, {
+      get: (reference) =>
+        Effect.tryPromise({
+          try: () => options.get(reference),
+          catch: () => new SecretSourceRequestFailed(),
+        }).pipe(Effect.map(Option.map((value) => Redacted.make(value)))),
+    });
+  }
+}
+
+function resolveCustomSecrets<const Keys extends string>(options: {
+  readonly secrets: Readonly<Record<Keys, string>>;
+}): Effect.Effect<ResolverResult<Keys>, SecretSourceError, SecretSource> {
   return Effect.gen(function* () {
-    const { secrets, client, strict = false } = opts;
-    const entries = Object.entries(secrets);
-    const secretIds = entries.map(([, id]) => id);
-
-    const secretValues = new Map<string, string | undefined>();
-
-    if (client.getSecrets && secretIds.length > 1) {
-      const batchResult = yield* strictOrElse(
-        Effect.tryPromise(() => client.getSecrets!(secretIds)),
-        {
-          strict,
-          resolver: "remote",
-          message: "Failed to resolve remote secrets batch",
-          fallback: () => new Map<string, string | undefined>(),
-        },
-      );
-
-      for (const [id, value] of batchResult) {
-        secretValues.set(id, value);
-      }
-      fillMissingMapValues(secretIds, secretValues);
-    } else {
-      const results = yield* Effect.forEach(
-        secretIds,
-        (secretId) =>
-          strictOrElse(
-            Effect.tryPromise(() => client.getSecret(secretId)),
-            {
-              strict,
-              resolver: "remote",
-              message: `Failed to resolve remote secret "${secretId}"`,
-              fallback: () => undefined,
-            },
-          ).pipe(Effect.map((value) => ({ envKey: secretId, value }))),
-        { concurrency: "unbounded" },
-      );
-
-      for (const { envKey, value } of results) {
-        secretValues.set(envKey, value);
-      }
-    }
-
-    return keyValueResultsToRecord(
-      entries.map(([envKey, secretId]) => ({
-        envKey,
-        value: secretValues.get(secretId),
-      })),
+    const source = yield* SecretSource;
+    const entries = yield* Effect.forEach(
+      resolverEntries(options.secrets),
+      ([key, reference]) =>
+        source.get(reference).pipe(Effect.map((value) => [key, value] as const)),
+      { concurrency: "unbounded" },
     );
+    return resolverRecord(entries);
   });
 }
+
+/** Resolver adapter backed by the user-provided `SecretSource` service. */
+export const customSecretsAdapter: ResolverAdapter<
+  "custom",
+  string,
+  object,
+  SecretSourceError,
+  SecretSource
+> = {
+  name: "custom",
+  resolve: resolveCustomSecrets,
+};

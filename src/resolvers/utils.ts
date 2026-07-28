@@ -1,55 +1,90 @@
-import { Effect } from "effect";
+import { Effect, Option, Redacted } from "effect";
 
-import { ResolverError } from "./types.ts";
+import {
+  ResolverInitializationError,
+  ResolverRequestFailed,
+  type ResolvedSecret,
+} from "./types.ts";
 
-export function toResolverError(resolver: string, message: string, cause?: unknown): ResolverError {
-  return new ResolverError({ resolver, message, cause });
+/** Converts an optional provider string into the internal secret representation. */
+export function toResolvedSecret(value: string | undefined): ResolvedSecret {
+  return value === undefined ? Option.none() : Option.some(Redacted.make(value));
 }
 
-export function tryInitializeClient<A>(
-  resolver: string,
-  message: string,
-  initialize: () => Promise<A>,
-): Effect.Effect<A, ResolverError> {
+/** Initializes an SDK without exposing the provider's thrown value. */
+export function initializeAdapter<Client>(
+  adapter: string,
+  initialize: () => Promise<Client>,
+): Effect.Effect<Client, ResolverInitializationError> {
   return Effect.tryPromise({
     try: initialize,
-    catch: (cause) => toResolverError(resolver, message, cause),
+    catch: () =>
+      new ResolverInitializationError({
+        adapter,
+        operation: "initialize",
+        message: `Failed to initialize the ${adapter} secret adapter`,
+      }),
   });
 }
 
-export function strictOrElse<A>(
-  effect: Effect.Effect<A, unknown>,
-  options: {
-    strict: boolean;
-    resolver: string;
-    message: string;
-    fallback: () => A;
-  },
-): Effect.Effect<A, ResolverError> {
-  return options.strict
-    ? effect.pipe(
-        Effect.mapError((cause) => toResolverError(options.resolver, options.message, cause)),
-      )
-    : effect.pipe(Effect.orElseSucceed(options.fallback));
+/** Executes one provider request with reliable not-found classification. */
+export function requestSecret(
+  adapter: string,
+  operation: string,
+  request: () => Promise<string | undefined>,
+  isNotFound: (failure: unknown) => boolean,
+): Effect.Effect<ResolvedSecret, ResolverRequestFailed> {
+  return Effect.tryPromise({
+    try: request,
+    catch: (failure: unknown) => failure,
+  }).pipe(
+    Effect.matchEffect({
+      onFailure: (failure) =>
+        isNotFound(failure)
+          ? Effect.succeed(Option.none())
+          : Effect.fail(
+              new ResolverRequestFailed({
+                adapter,
+                operation,
+                message: `The ${adapter} secret request failed`,
+              }),
+            ),
+      onSuccess: (value) => Effect.succeed(toResolvedSecret(value)),
+    }),
+  );
 }
 
-export function keyValueResultsToRecord<K extends string>(
-  values: ReadonlyArray<{ envKey: K; value: string | undefined }>,
-): Record<K, string | undefined> {
-  const result = {} as Record<K, string | undefined>;
-  for (const { envKey, value } of values) {
-    result[envKey] = value;
+/** Converts logical key/value pairs into an immutable resolver record. */
+export function resolverRecord<Keys extends string>(
+  entries: ReadonlyArray<readonly [Keys, ResolvedSecret]>,
+): Readonly<Record<Keys, ResolvedSecret>> {
+  const result: Partial<Record<Keys, ResolvedSecret>> = {};
+  for (const [key, value] of entries) {
+    result[key] = value;
   }
-  return result;
+
+  // SAFETY: Every requested key is added exactly once by the adapter.
+  return Object.freeze(result) as Readonly<Record<Keys, ResolvedSecret>>;
 }
 
-export function fillMissingMapValues(
-  ids: readonly string[],
-  values: Map<string, string | undefined>,
-): void {
-  for (const id of ids) {
-    if (!values.has(id)) {
-      values.set(id, undefined);
-    }
+/** Returns typed entries while preserving a finite resolver key union. */
+export function resolverEntries<Keys extends string>(
+  values: Readonly<Record<Keys, string>>,
+): Array<[Keys, string]> {
+  // SAFETY: Object.entries preserves every own string key and string value from
+  // the input record; it only loses the finite key union in the standard type.
+  return Object.entries(values) as Array<[Keys, string]>;
+}
+
+/** Checks a property on an unknown SDK failure without retaining the failure. */
+export function hasFailureField(
+  failure: unknown,
+  field: string,
+  expected: string | number,
+): boolean {
+  if (typeof failure !== "object" || failure === null) {
+    return false;
   }
+
+  return Reflect.get(failure, field) === expected;
 }

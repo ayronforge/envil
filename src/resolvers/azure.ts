@@ -1,68 +1,74 @@
+import type { TokenCredential } from "@azure/core-auth";
 import { Effect } from "effect";
 
-import { ResolverError, type ResolverResult } from "./types.ts";
 import {
-  keyValueResultsToRecord,
-  strictOrElse,
-  toResolverError,
-  tryInitializeClient,
+  ResolverConfigurationError,
+  type ResolverAdapter,
+  type ResolverError,
+  type ResolverResult,
+} from "./types.ts";
+import {
+  hasFailureField,
+  initializeAdapter,
+  requestSecret,
+  resolverEntries,
+  resolverRecord,
 } from "./utils.ts";
 
-export { ResolverError } from "./types.ts";
-
-interface AzureKeyVaultOptions<K extends string = string> {
-  secrets: Record<K, string>;
-  vaultUrl: string;
-  credential?: unknown;
-  strict?: boolean;
+/** Azure Key Vault adapter options. */
+export interface AzureKeyVaultAdapterOptions {
+  readonly vaultUrl: string;
+  readonly credential?: TokenCredential;
 }
 
-export function fromAzureKeyVault<K extends string>(
-  opts: AzureKeyVaultOptions<K>,
-): Effect.Effect<ResolverResult<K>, ResolverError>;
-export function fromAzureKeyVault(
-  opts: AzureKeyVaultOptions,
-): Effect.Effect<ResolverResult, ResolverError> {
-  return Effect.gen(function* () {
-    const { secrets, vaultUrl, strict = false } = opts;
+function isAzureNotFound(failure: unknown): boolean {
+  return hasFailureField(failure, "statusCode", 404);
+}
 
-    if (!vaultUrl) {
-      return yield* toResolverError("azure", "vaultUrl must be provided");
+function resolveAzureSecrets<const Keys extends string>(
+  options: AzureKeyVaultAdapterOptions & {
+    readonly secrets: Readonly<Record<Keys, string>>;
+  },
+): Effect.Effect<ResolverResult<Keys>, ResolverError> {
+  return Effect.gen(function* () {
+    if (options.vaultUrl.length === 0) {
+      return yield* new ResolverConfigurationError({
+        adapter: "azure",
+        operation: "configure",
+        message: "vaultUrl is required by the Azure Key Vault adapter",
+      });
     }
 
-    const client = yield* tryInitializeClient(
-      "azure",
-      "Failed to initialize Azure Key Vault client",
-      async () => {
-        const kvModule = await import("@azure/keyvault-secrets");
-        const idModule = await import("@azure/identity");
-        const credential = opts.credential ?? new idModule.DefaultAzureCredential();
-        const sdkClient = new kvModule.SecretClient(vaultUrl, credential);
-
-        return {
-          getSecret: async (name: string) => {
-            const secret = await sdkClient.getSecret(name);
-            return secret.value;
-          },
-        };
-      },
-    );
-
-    const results = yield* Effect.forEach(
-      Object.entries(secrets),
-      ([envKey, secretName]) =>
-        strictOrElse(
-          Effect.tryPromise(() => client.getSecret(secretName)),
-          {
-            strict,
-            resolver: "azure",
-            message: `Failed to resolve secret "${secretName}" for env key "${envKey}"`,
-            fallback: () => undefined,
-          },
-        ).pipe(Effect.map((value) => ({ envKey, value }))),
+    const client = yield* initializeAdapter("azure", async () => {
+      const keyVault = await import("@azure/keyvault-secrets");
+      const identity = await import("@azure/identity");
+      const credential = options.credential ?? new identity.DefaultAzureCredential();
+      return new keyVault.SecretClient(options.vaultUrl, credential);
+    });
+    const entries = yield* Effect.forEach(
+      resolverEntries(options.secrets),
+      ([key, secretName]) =>
+        requestSecret(
+          "azure",
+          "read",
+          async () => (await client.getSecret(secretName)).value,
+          isAzureNotFound,
+        ).pipe(Effect.map((value) => [key, value] as const)),
       { concurrency: "unbounded" },
     );
 
-    return keyValueResultsToRecord(results);
+    return resolverRecord(entries);
   });
 }
+
+/** Resolver adapter for Azure Key Vault. */
+export const azureKeyVaultAdapter: ResolverAdapter<
+  "azure",
+  string,
+  AzureKeyVaultAdapterOptions,
+  ResolverError,
+  never
+> = {
+  name: "azure",
+  resolve: resolveAzureSecrets,
+};

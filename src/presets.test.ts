@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { createEnv } from "./env.ts";
+import { createEnvSync } from "./env.ts";
 import { astro, expo, nextjs, nuxt, sveltekit, vite } from "./presets.ts";
 import { requiredString } from "./schemas.ts";
 
@@ -30,7 +30,7 @@ describe("presets", () => {
   });
 
   test("nextjs preset works with createEnv", () => {
-    const env = createEnv({
+    const env = createEnvSync({
       ...nextjs,
       server: { DATABASE_URL: requiredString },
       client: { API_URL: requiredString },
@@ -42,7 +42,7 @@ describe("presets", () => {
   });
 
   test("vite preset works with createEnv", () => {
-    const env = createEnv({
+    const env = createEnvSync({
       ...vite,
       client: { API_URL: requiredString },
       runtimeEnv: { VITE_API_URL: "http://api" },
@@ -52,7 +52,7 @@ describe("presets", () => {
   });
 
   test("expo preset works with createEnv", () => {
-    const env = createEnv({
+    const env = createEnvSync({
       ...expo,
       client: { API_URL: requiredString },
       runtimeEnv: { EXPO_PUBLIC_API_URL: "http://api" },
@@ -62,7 +62,7 @@ describe("presets", () => {
   });
 
   test("nuxt preset works with createEnv", () => {
-    const env = createEnv({
+    const env = createEnvSync({
       ...nuxt,
       client: { API_URL: requiredString },
       runtimeEnv: { NUXT_PUBLIC_API_URL: "http://api" },
@@ -72,7 +72,7 @@ describe("presets", () => {
   });
 
   test("sveltekit preset works with createEnv", () => {
-    const env = createEnv({
+    const env = createEnvSync({
       ...sveltekit,
       client: { API_URL: requiredString },
       runtimeEnv: { PUBLIC_API_URL: "http://api" },
@@ -82,7 +82,7 @@ describe("presets", () => {
   });
 
   test("astro preset works with createEnv", () => {
-    const env = createEnv({
+    const env = createEnvSync({
       ...astro,
       client: { API_URL: requiredString },
       runtimeEnv: { PUBLIC_API_URL: "http://api" },

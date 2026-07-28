@@ -1,113 +1,60 @@
 ---
 title: Quickstart
-description: Install envil and create your first type-safe environment configuration in minutes.
-order: 2
+description: Install Envil and choose the correct environment creation boundary.
 ---
 
-import Callout from "@/components/docs/Callout.astro";
-import Tabs from "@/components/docs/Tabs.astro";
+```bash
+bun add @ayronforge/envil effect
+```
 
-## Prerequisites
+## Synchronous applications
 
-- **Node.js 18+** (or Bun / Deno)
-- **ESM only** — this package does not ship CommonJS builds
-- [**effect**](https://effect.website) **^3.19.11** as a peer dependency
-
-## Installation
-
-<Tabs items={["npm", "pnpm", "bun", "yarn"]} persist="pkg-manager">
-  <div>
-    ```bash
-    npm install @ayronforge/envil effect
-    ```
-  </div>
-  <div>
-    ```bash
-    pnpm add @ayronforge/envil effect
-    ```
-  </div>
-  <div>
-    ```bash
-    bun add @ayronforge/envil effect
-    ```
-  </div>
-  <div>
-    ```bash
-    yarn add @ayronforge/envil effect
-    ```
-  </div>
-</Tabs>
-
-## Step 1: Create your env config
-
-Create a file called `env.ts` (or `env.mjs`) at the root of your project:
+Use `createEnvSync` only when every value comes from the runtime environment.
 
 ```ts
-// env.ts
-import { createEnv, requiredString, port } from "@ayronforge/envil"
-import { Schema } from "effect"
+import { createEnvSync, port, redacted, url } from "@ayronforge/envil";
 
-export const env = createEnv({
+export const env = createEnvSync({
   server: {
-    DATABASE_URL: requiredString,
-    API_SECRET: Schema.Redacted(Schema.String),
+    DATABASE_URL: redacted(url),
     PORT: port,
   },
   client: {
-    NEXT_PUBLIC_APP_URL: requiredString,
+    APP_URL: url,
   },
-  shared: {
-    NODE_ENV: Schema.Literal("development", "production", "test"),
+  prefix: {
+    client: "VITE_",
   },
-})
+});
 ```
 
-## Step 2: Use your env
+`createEnvSync` rejects `resolvers` at typecheck.
 
-Import the `env` object anywhere in your app. It's fully typed:
+## Effect applications
+
+`createEnv` is the primary API and always returns an Effect, even without
+resolvers.
 
 ```ts
-import { env } from "./env"
+import { Effect } from "effect";
+import { createEnv, requiredString } from "@ayronforge/envil";
 
-// TypeScript knows:
-// env.DATABASE_URL  → string
-// env.API_SECRET    → Redacted<string>
-// env.PORT          → number
-// env.NODE_ENV      → "development" | "production" | "test"
+const program = createEnv({
+  server: { API_TOKEN: requiredString },
+});
 
-console.log(`Server running on port ${env.PORT}`)
+const env = Effect.runSync(program);
 ```
 
-## Step 3: Set your environment variables
+## Promise applications
 
-Create a `.env` file or set variables in your hosting provider:
+```ts
+import { createEnvPromise, requiredString } from "@ayronforge/envil";
 
-```bash
-DATABASE_URL=postgresql://user:pass@localhost:5432/mydb
-API_SECRET=super-secret-key
-PORT=3000
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-NODE_ENV=development
+const env = await createEnvPromise({
+  server: { API_TOKEN: requiredString },
+});
 ```
 
-## What happens on invalid env?
-
-If any variable is missing or fails validation, `createEnv` throws an `EnvValidationError` immediately:
-
-```
-EnvValidationError: Invalid environment variables:
-DATABASE_URL: Expected a string with a length of at least 1, but got undefined
-PORT: Expected Port (1-65535), but got "abc"
-```
-
-This crashes your app at startup — before any request is handled — so you catch issues immediately.
-
-<Callout type="tip" title="Framework presets">
-  Using Next.js, Vite, or Expo? Check out [Framework Presets](/envil/docs/framework-presets) for pre-configured prefix rules so you don't have to configure `NEXT_PUBLIC_` or `VITE_` prefixes manually.
-</Callout>
-
-## Next steps
-
-- Learn about [Core Concepts](/envil/docs/core-concepts) like client/server separation and the proxy model
-- Explore the [Built-in Schemas](/envil/docs/schemas) for URLs, numbers, booleans, and more
-- Set up [Cloud Secret Resolution](/envil/docs/resolvers) for production
+When an adapter leaves an Effect service unprovided, `createEnvPromise` requires
+the corresponding Layer as its second argument.

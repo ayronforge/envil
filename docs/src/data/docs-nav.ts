@@ -21,10 +21,7 @@ export const docsNav: NavSection[] = [
   },
   {
     title: "CLI",
-    items: [
-      { title: "Envil CLI", slug: "envil-cli" },
-      { title: "Directives", slug: "directives" },
-    ],
+    items: [{ title: "Envil CLI", slug: "envil-cli" }],
   },
   {
     title: "Schemas",
@@ -39,7 +36,7 @@ export const docsNav: NavSection[] = [
       { title: "Framework Presets", slug: "framework-presets" },
       { title: "Environment Composition", slug: "environment-composition" },
       { title: "Error Handling", slug: "error-handling" },
-      { title: "Safe Parsing", slug: "safe-parsing" },
+      { title: "Effect and Results", slug: "safe-parsing" },
     ],
   },
   {

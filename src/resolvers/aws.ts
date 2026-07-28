@@ -1,148 +1,179 @@
-import { Effect } from "effect";
+import { Effect, Option, Redacted } from "effect";
 
-import { ResolverError, type ResolverResult } from "./types.ts";
 import {
-  fillMissingMapValues,
-  strictOrElse,
-  toResolverError,
-  tryInitializeClient,
+  ResolverRequestFailed,
+  ResolverResponseDecodeFailed,
+  type ResolverAdapter,
+  type ResolverError,
+  type ResolverResult,
+  type ResolvedSecret,
+} from "./types.ts";
+import {
+  hasFailureField,
+  initializeAdapter,
+  requestSecret,
+  resolverEntries,
+  resolverRecord,
+  toResolvedSecret,
 } from "./utils.ts";
 
-export { ResolverError } from "./types.ts";
-
-interface AwsSecretsOptions<K extends string = string> {
-  secrets: Record<K, string>;
-  region?: string;
-  strict?: boolean;
+/** AWS Secrets Manager adapter options. */
+export interface AwsSecretsAdapterOptions {
+  readonly region?: string;
 }
 
-function createSdkClient(region?: string): Effect.Effect<
-  {
-    getSecret: (secretId: string) => Promise<string | undefined>;
-    getSecrets: (secretIds: string[]) => Promise<Map<string, string | undefined>>;
-  },
-  ResolverError
-> {
-  return tryInitializeClient("aws", "Failed to initialize AWS Secrets Manager client", async () => {
-    const sdk = await import("@aws-sdk/client-secrets-manager");
-    const sdkClient = new sdk.SecretsManagerClient(region ? { region } : {});
+interface ParsedAwsReference {
+  readonly secretId: string;
+  readonly jsonKey?: string;
+}
 
-    return {
-      getSecret: async (secretId: string) => {
-        const response = await sdkClient.send(
-          new sdk.GetSecretValueCommand({ SecretId: secretId }),
-        );
-        return response.SecretString ?? undefined;
-      },
-      getSecrets: async (secretIds: string[]) => {
-        const result = new Map<string, string | undefined>();
+function parseReference(reference: string): ParsedAwsReference {
+  const hashIndex = reference.indexOf("#");
+  if (hashIndex < 0) {
+    return { secretId: reference };
+  }
 
-        for (let i = 0; i < secretIds.length; i += 20) {
-          const batch = secretIds.slice(i, i + 20);
-          const response = await sdkClient.send(
-            new sdk.BatchGetSecretValueCommand({ SecretIdList: batch }),
-          );
+  return {
+    secretId: reference.slice(0, hashIndex),
+    jsonKey: reference.slice(hashIndex + 1),
+  };
+}
 
-          for (const secretValue of response.SecretValues ?? []) {
-            if (secretValue.Name) {
-              result.set(secretValue.Name, secretValue.SecretString ?? undefined);
-            }
-          }
+function isAwsNotFound(failure: unknown): boolean {
+  return hasFailureField(failure, "name", "ResourceNotFoundException");
+}
 
-          fillMissingMapValues(batch, result);
-        }
+function decodeAwsValue(
+  value: ResolvedSecret,
+  jsonKey: string | undefined,
+): Effect.Effect<ResolvedSecret, ResolverResponseDecodeFailed> {
+  if (jsonKey === undefined || Option.isNone(value)) {
+    return Effect.succeed(value);
+  }
 
-        return result;
-      },
-    };
+  return Effect.try({
+    try: () => {
+      const decoded: unknown = JSON.parse(Redacted.value(value.value));
+      if (typeof decoded !== "object" || decoded === null || Array.isArray(decoded)) {
+        return Option.none();
+      }
+      const fragment: unknown = Reflect.get(decoded, jsonKey);
+      return fragment === undefined ? Option.none() : toResolvedSecret(String(fragment));
+    },
+    catch: () =>
+      new ResolverResponseDecodeFailed({
+        adapter: "aws",
+        operation: "decode-json",
+        message: "An AWS secret JSON response could not be decoded",
+      }),
   });
 }
 
-export function fromAwsSecrets<K extends string>(
-  opts: AwsSecretsOptions<K>,
-): Effect.Effect<ResolverResult<K>, ResolverError>;
-export function fromAwsSecrets(
-  opts: AwsSecretsOptions,
-): Effect.Effect<ResolverResult, ResolverError> {
+async function createAwsClient(region: string | undefined) {
+  const sdk = await import("@aws-sdk/client-secrets-manager");
+  return {
+    sdk,
+    client: new sdk.SecretsManagerClient(region === undefined ? {} : { region }),
+  };
+}
+
+function resolveAwsSecrets<const Keys extends string>(
+  options: AwsSecretsAdapterOptions & {
+    readonly secrets: Readonly<Record<Keys, string>>;
+  },
+): Effect.Effect<ResolverResult<Keys>, ResolverError> {
   return Effect.gen(function* () {
-    const strict = opts.strict ?? false;
-    const client = yield* createSdkClient(opts.region);
-
-    // Group env keys by secret ID to minimize API calls.
-    const secretIdToKeys = new Map<string, { envKey: string; jsonKey?: string }[]>();
-    for (const [envKey, ref] of Object.entries(opts.secrets)) {
-      const hashIndex = ref.indexOf("#");
-      const secretId = hashIndex >= 0 ? ref.slice(0, hashIndex) : ref;
-      const jsonKey = hashIndex >= 0 ? ref.slice(hashIndex + 1) : undefined;
-
-      const existing = secretIdToKeys.get(secretId) ?? [];
-      existing.push({ envKey, jsonKey });
-      secretIdToKeys.set(secretId, existing);
-    }
-
-    const uniqueSecretIds = [...secretIdToKeys.keys()];
-    const secretValues = new Map<string, string | undefined>();
+    const { sdk, client } = yield* initializeAdapter("aws", () => createAwsClient(options.region));
+    const requested = resolverEntries(options.secrets);
+    const parsed = requested.map(([key, reference]) => [key, parseReference(reference)] as const);
+    const uniqueSecretIds = [...new Set(parsed.map(([, reference]) => reference.secretId))];
+    const values = new Map<string, ResolvedSecret>();
 
     if (uniqueSecretIds.length === 1) {
-      const secretId = uniqueSecretIds[0]!;
-      const value = yield* strictOrElse(
-        Effect.tryPromise(() => client.getSecret(secretId)),
-        {
-          strict,
-          resolver: "aws",
-          message: `Failed to resolve secret "${secretId}"`,
-          fallback: () => undefined,
-        },
-      );
-      secretValues.set(secretId, value);
-    } else {
-      const batchResult = yield* strictOrElse(
-        Effect.tryPromise(() => client.getSecrets(uniqueSecretIds)),
-        {
-          strict,
-          resolver: "aws",
-          message: "Failed to resolve AWS secrets batch",
-          fallback: () => new Map<string, string | undefined>(),
-        },
-      );
-
-      for (const [id, value] of batchResult) {
-        secretValues.set(id, value);
-      }
-      fillMissingMapValues(uniqueSecretIds, secretValues);
-    }
-
-    const result: Record<string, string | undefined> = {};
-    for (const [secretId, entries] of secretIdToKeys) {
-      const rawValue = secretValues.get(secretId);
-      for (const { envKey, jsonKey } of entries) {
-        if (rawValue === undefined) {
-          result[envKey] = undefined;
-          continue;
-        }
-
-        if (!jsonKey) {
-          result[envKey] = rawValue;
-          continue;
-        }
-
-        try {
-          const parsed = JSON.parse(rawValue) as Record<string, unknown>;
-          result[envKey] = parsed[jsonKey] !== undefined ? String(parsed[jsonKey]) : undefined;
-        } catch (cause) {
-          if (strict) {
-            return yield* toResolverError(
-              "aws",
-              `Failed to parse secret "${secretId}" as JSON while extracting key "${jsonKey}"`,
-              cause,
+      const secretId = uniqueSecretIds[0];
+      if (secretId !== undefined) {
+        const value = yield* requestSecret(
+          "aws",
+          "read",
+          async () => {
+            const response = await client.send(
+              new sdk.GetSecretValueCommand({ SecretId: secretId }),
             );
-          }
+            return response.SecretString;
+          },
+          isAwsNotFound,
+        );
+        values.set(secretId, value);
+      }
+    } else {
+      for (let offset = 0; offset < uniqueSecretIds.length; offset += 20) {
+        const batch = uniqueSecretIds.slice(offset, offset + 20);
+        const response = yield* Effect.tryPromise({
+          try: () => client.send(new sdk.BatchGetSecretValueCommand({ SecretIdList: batch })),
+          catch: () =>
+            new ResolverRequestFailed({
+              adapter: "aws",
+              operation: "read-batch",
+              message: "The AWS secret batch request failed",
+            }),
+        });
 
-          result[envKey] = undefined;
+        const batchFailures = response.Errors ?? [];
+        const unknownFailure = batchFailures.some(
+          (failure) => failure.ErrorCode !== "ResourceNotFoundException",
+        );
+        if (unknownFailure) {
+          return yield* new ResolverRequestFailed({
+            adapter: "aws",
+            operation: "read-batch",
+            message: "The AWS secret batch was only partially resolved",
+          });
+        }
+
+        for (const failure of batchFailures) {
+          if (failure.SecretId !== undefined) {
+            values.set(failure.SecretId, Option.none());
+          }
+        }
+        for (const secret of response.SecretValues ?? []) {
+          const value = toResolvedSecret(secret.SecretString);
+          if (secret.Name !== undefined) {
+            values.set(secret.Name, value);
+          }
+          if (secret.ARN !== undefined) {
+            values.set(secret.ARN, value);
+          }
+        }
+        for (const secretId of batch) {
+          if (!values.has(secretId)) {
+            return yield* new ResolverRequestFailed({
+              adapter: "aws",
+              operation: "read-batch",
+              message: "The AWS secret batch returned an incomplete response",
+            });
+          }
         }
       }
     }
 
-    return result;
+    const entries: Array<readonly [Keys, ResolvedSecret]> = [];
+    for (const [key, reference] of parsed) {
+      const value = values.get(reference.secretId) ?? Option.none();
+      entries.push([key, yield* decodeAwsValue(value, reference.jsonKey)]);
+    }
+
+    return resolverRecord(entries);
   });
 }
+
+/** Resolver adapter for AWS Secrets Manager. */
+export const awsSecretsAdapter: ResolverAdapter<
+  "aws",
+  string,
+  AwsSecretsAdapterOptions,
+  ResolverError,
+  never
+> = {
+  name: "aws",
+  resolve: resolveAwsSecrets,
+};

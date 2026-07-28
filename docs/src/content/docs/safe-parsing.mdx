@@ -1,154 +1,52 @@
 ---
-title: Safe Parsing
-description: Use safeCreateEnv to validate environment variables without throwing — get typed result objects instead.
-order: 9
+title: Effect and Results
+description: Handle Envil failures through Effect or the asResult operator.
 ---
 
-import TypeTable from "@/components/docs/TypeTable.astro";
-import Callout from "@/components/docs/Callout.astro";
-
-`safeCreateEnv` is a safe alternative to `createEnv`. Rather than crashing on validation failure, it returns a discriminated result object you can inspect.
+`createEnv` exposes expected failures in Effect's typed error channel.
 
 ```ts
-import { safeCreateEnv } from "@ayronforge/envil"
+const program = createEnv(options).pipe(
+  Effect.tapError((error) => reportSafeError(error)),
+  Effect.catchTag("EnvValidationError", recoverValidation),
+);
 ```
 
-## Without resolvers
-
-When no resolvers are configured, `safeCreateEnv` returns a result object synchronously — just like `createEnv` returns a plain object.
+Use `asResult()` when a boundary needs a discriminated value:
 
 ```ts
-import { safeCreateEnv, requiredString, port, EnvValidationError } from "@ayronforge/envil"
+import { Effect } from "effect";
+import { asResult, createEnv } from "@ayronforge/envil";
 
-const result = safeCreateEnv({
-  server: {
-    DATABASE_URL: requiredString,
-    PORT: port,
-  },
-  isServer: true,
-})
+const result = await createEnv(options).pipe(
+  asResult(),
+  Effect.runPromise,
+);
 
 if (result.success) {
-  // result.data is fully typed — same as createEnv's return
-  console.log(result.data.DATABASE_URL)
-  console.log(result.data.PORT)
+  result.data;
 } else {
-  // result.error is EnvValidationError
-  console.error("Validation failed:", result.error.errors)
+  result.error;
 }
 ```
 
-### Return type
+The result shape is:
 
 ```ts
-type Result =
-  | { success: true;  data: EnvResult<...> }
-  | { success: false; error: EnvValidationError }
+type Result<A, E> =
+  | { readonly success: true; readonly data: A }
+  | { readonly success: false; readonly error: E };
 ```
 
-## With resolvers
+`asResult()` converts only typed failures. Defects and interruptions remain
+defects and interruptions.
 
-When resolvers are present, `safeCreateEnv` returns an `Effect` that **never fails**. Both resolver errors and validation errors are captured in the result object.
+With a custom Layer, provide it before `asResult()` when Layer construction
+errors must also become result failures:
 
 ```ts
-import { Effect, Redacted } from "effect"
-import { safeCreateEnv, requiredString } from "@ayronforge/envil"
-import { fromAwsSecrets } from "@ayronforge/envil/aws"
-
-const program = safeCreateEnv({
-  server: {
-    DATABASE_URL: requiredString,
-    API_KEY: requiredString,
-  },
-  resolvers: [
-    fromAwsSecrets({
-      secrets: { API_KEY: "prod/api-key" },
-    }),
-  ],
-  isServer: true,
-})
-
-// The Effect never fails — errors are in the result
-const result = await Effect.runPromise(program)
-
-if (result.success) {
-  console.log(result.data.DATABASE_URL)
-  // API_KEY is auto-redacted from resolver
-  console.log(Redacted.value(result.data.API_KEY))
-} else {
-  // result.error is ResolverError | EnvValidationError
-  console.error(result.error.message)
-}
+createEnv(options).pipe(
+  Effect.provide(CustomSecretSourceLive),
+  asResult(),
+);
 ```
-
-### Return type
-
-```ts
-type Result = Effect.Effect<
-  | { success: true;  data: EnvResult<...> }
-  | { success: false; error: ResolverError | EnvValidationError },
-  never  // Effect error channel is never — it cannot fail
->
-```
-
-<Callout type="tip">
-  Because the Effect error channel is `never`, you don't need `Effect.catchTag` or `Effect.catchAll` — the result object handles all error cases for you.
-</Callout>
-
-## autoRedactResolver
-
-`safeCreateEnv` supports the same `autoRedactResolver` option as `createEnv`. When resolvers are present, resolver-provided values are auto-wrapped in `Redacted` by default.
-
-Pass `autoRedactResolver: false` to disable this:
-
-```ts
-const result = await Effect.runPromise(
-  safeCreateEnv({
-    server: {
-      SECRET: requiredString,
-      PLAIN: requiredString,
-    },
-    resolvers: [myResolver],
-    autoRedactResolver: false,
-    isServer: true,
-  }),
-)
-
-if (result.success) {
-  // SECRET and PLAIN are plain strings, not Redacted
-  result.data.SECRET // string
-}
-```
-
-## Exported types
-
-All result types are exported from the main package:
-
-```ts
-import type {
-  SafeCreateEnvResult,
-  SafeCreateEnvSuccess,
-  SafeCreateEnvFailure,
-} from "@ayronforge/envil"
-```
-
-<TypeTable rows={[
-  { name: "SafeCreateEnvSuccess<T>", type: "{ success: true; data: T }", description: "Success branch of the result." },
-  { name: "SafeCreateEnvFailure<E>", type: "{ success: false; error: E }", description: "Failure branch of the result." },
-  { name: "SafeCreateEnvResult<T, E>", type: "SafeCreateEnvSuccess<T> | SafeCreateEnvFailure<E>", description: "Discriminated union of success and failure." },
-]} showDefault={false} />
-
-## When to use safeCreateEnv
-
-Use `safeCreateEnv` when you want to handle validation failures gracefully rather than crashing at startup:
-
-- **Graceful degradation** — fall back to defaults or partial configs
-- **Custom error reporting** — format and send errors to your logging pipeline
-- **Conditional startup** — decide at runtime whether a missing variable is fatal
-- **Testing** — assert on specific validation failures without try/catch
-
-For most applications, `createEnv` with its fail-fast behavior is the right choice. Use `safeCreateEnv` when you need control over the error path.
-
-<Callout type="note">
-  `safeCreateEnv` accepts the exact same options as `createEnv` — the only difference is how errors are surfaced.
-</Callout>

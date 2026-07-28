@@ -1,88 +1,43 @@
 ---
-title: Custom / Remote Secrets
-description: Generic resolver for custom secret providers, testing, and unsupported integrations.
-order: 14
+title: Custom SecretSource
+description: Implement a custom secret provider as an Effect Service.
 ---
 
-import TypeTable from "@/components/docs/TypeTable.astro";
-import Callout from "@/components/docs/Callout.astro";
-
-## Overview
-
-`fromRemoteSecrets` is the generic escape hatch for custom integrations, testing, and secret providers not covered by the built-in resolvers. You provide your own `SecretClient` implementation.
+`customSecretsAdapter` is backed by the `SecretSource` Effect Service.
 
 ```ts
-import { createEnv, requiredString, fromRemoteSecrets } from "@ayronforge/envil"
-import type { SecretClient } from "@ayronforge/envil"
-import { Effect } from "effect"
+import { Effect, Option } from "effect";
+import {
+  SecretSource,
+  createEnv,
+  customSecretsAdapter,
+  requiredString,
+} from "@ayronforge/envil";
 
-const client: SecretClient = {
-  getSecret: async (id) => {
-    // Fetch from your custom provider
-    const response = await fetch(`https://secrets.example.com/v1/${id}`)
-    if (!response.ok) return undefined
-    return response.text()
+const CustomSecretSourceLive = SecretSource.fromPromise({
+  get: async (reference) => {
+    const value = await vault.get(reference);
+    return value === undefined ? Option.none() : Option.some(value);
   },
-}
+});
 
-const envEffect = createEnv({
+const program = createEnv({
   server: {
-    DATABASE_URL: requiredString,
-    API_KEY: requiredString,
+    INTERNAL_TOKEN: requiredString,
   },
-  resolvers: [
-    fromRemoteSecrets({
+  resolvers: ({ resolve }) => [
+    resolve(customSecretsAdapter, {
       secrets: {
-        DATABASE_URL: "prod/database-url",
-        API_KEY: "prod/api-key",
+        INTERNAL_TOKEN: "tenant/internal-token",
       },
-      client,
     }),
   ],
-})
-
-const env = await Effect.runPromise(envEffect)
+}).pipe(Effect.provide(CustomSecretSourceLive));
 ```
 
-No peer dependencies required — `fromRemoteSecrets` is exported directly from `@ayronforge/envil`.
+`fromPromise` requires `Option` explicitly. Present strings are redacted
+immediately, absence stays `Option.none()`, and Promise rejection becomes a
+sanitized `SecretSourceRequestFailed`.
 
-## Options
-
-<TypeTable rows={[
-  { name: "secrets", type: "Record<string, string>", required: true, description: "Map of env var names to secret identifiers passed to the client." },
-  { name: "client", type: "SecretClient", required: true, description: "Your custom client implementing the SecretClient interface." },
-  { name: "strict", type: "boolean", default: "false", description: "When true, client fetch errors fail with ResolverError instead of returning undefined." },
-]} />
-
-## SecretClient interface
-
-```ts
-interface SecretClient {
-  getSecret: (secretId: string) => Promise<string | undefined>
-  getSecrets?: (secretIds: string[]) => Promise<Map<string, string | undefined>>
-}
-```
-
-- `getSecret` — required. Fetches a single secret by ID.
-- `getSecrets` — optional. When provided and there are multiple secrets to resolve, the resolver uses this for batch fetching instead of making concurrent `getSecret` calls.
-
-## Batch optimization
-
-If your `SecretClient` implements `getSecrets`, the resolver automatically uses it when resolving more than one secret. For a single secret, `getSecret` is always used.
-
-```ts
-const batchClient: SecretClient = {
-  getSecret: async (id) => {
-    const res = await fetch(`https://secrets.example.com/v1/${id}`)
-    return res.ok ? res.text() : undefined
-  },
-  getSecrets: async (ids) => {
-    const res = await fetch("https://secrets.example.com/v1/batch", {
-      method: "POST",
-      body: JSON.stringify({ ids }),
-    })
-    const data = await res.json()
-    return new Map(Object.entries(data))
-  },
-}
-```
+Implement `SecretSource` directly with another secret-safe `SecretSourceError`
+when you need more granular typed errors.

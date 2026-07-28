@@ -57,14 +57,17 @@ export const secretManagers = [
     icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/amazonwebservices/amazonwebservices-original-wordmark.svg",
     import: "@ayronforge/envil/aws",
     description: "Resolve secrets from AWS Secrets Manager using the AWS SDK.",
-    code: `import { fromAwsSecrets } from "@ayronforge/envil/aws"
+    code: `import { createEnv, requiredString } from "@ayronforge/envil"
+import { awsSecretsAdapter } from "@ayronforge/envil/aws"
 
-fromAwsSecrets({
-  secrets: {
-    DB_PASS: "prod/db-password",
-    DB_USER: "prod/db-credentials#username",
-  },
-  region: "us-east-1",
+createEnv({
+  server: { DB_PASS: requiredString },
+  resolvers: ({ resolve }) => [
+    resolve(awsSecretsAdapter, {
+      region: "us-east-1",
+      secrets: { DB_PASS: "prod/db-password" },
+    }),
+  ],
 })`,
   },
   {
@@ -72,14 +75,17 @@ fromAwsSecrets({
     icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/azure/azure-original.svg",
     import: "@ayronforge/envil/azure",
     description: "Fetch secrets from Azure Key Vault with managed identity support.",
-    code: `import { fromAzureKeyVault } from "@ayronforge/envil/azure"
+    code: `import { createEnv, requiredString } from "@ayronforge/envil"
+import { azureKeyVaultAdapter } from "@ayronforge/envil/azure"
 
-fromAzureKeyVault({
-  secrets: {
-    DB_PASS: "db-password",
-    API_KEY: "my-api-key",
-  },
-  vaultUrl: "https://my-vault.vault.azure.net",
+createEnv({
+  server: { DB_PASS: requiredString },
+  resolvers: ({ resolve }) => [
+    resolve(azureKeyVaultAdapter, {
+      vaultUrl: "https://my-vault.vault.azure.net",
+      secrets: { DB_PASS: "db-password" },
+    }),
+  ],
 })`,
   },
   {
@@ -87,14 +93,17 @@ fromAzureKeyVault({
     icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/googlecloud/googlecloud-original.svg",
     import: "@ayronforge/envil/gcp",
     description: "Access secrets stored in Google Cloud Secret Manager.",
-    code: `import { fromGcpSecrets } from "@ayronforge/envil/gcp"
+    code: `import { createEnv, requiredString } from "@ayronforge/envil"
+import { gcpSecretsAdapter } from "@ayronforge/envil/gcp"
 
-fromGcpSecrets({
-  secrets: {
-    DB_PASS: "db-password",
-    API_KEY: "projects/my-project/secrets/api-key/versions/2",
-  },
-  projectId: "my-project",
+createEnv({
+  server: { DB_PASS: requiredString },
+  resolvers: ({ resolve }) => [
+    resolve(gcpSecretsAdapter, {
+      projectId: "my-project",
+      secrets: { DB_PASS: "db-password" },
+    }),
+  ],
 })`,
   },
   {
@@ -102,13 +111,16 @@ fromGcpSecrets({
     icon: "https://cdn.simpleicons.org/1password/3B66BC",
     import: "@ayronforge/envil/1password",
     description: "Retrieve secrets directly from 1Password vaults.",
-    code: `import { fromOnePassword } from "@ayronforge/envil/1password"
+    code: `import { createEnv, requiredString } from "@ayronforge/envil"
+import { onePasswordSecretsAdapter } from "@ayronforge/envil/1password"
 
-fromOnePassword({
-  secrets: {
-    DB_PASS: "op://vault/item/field",
-    API_KEY: "op://vault/another-item/credential",
-  },
+createEnv({
+  server: { DB_PASS: requiredString },
+  resolvers: ({ resolve }) => [
+    resolve(onePasswordSecretsAdapter, {
+      secrets: { DB_PASS: "op://vault/item/field" },
+    }),
+  ],
 })`,
   },
 ];
@@ -119,10 +131,10 @@ export const presets = [
     iconLight: "https://cdn.simpleicons.org/nextdotjs/black",
     iconDark: "https://cdn.simpleicons.org/nextdotjs/white",
     prefix: "NEXT_PUBLIC_",
-    code: `import { createEnv, postgresUrl, url } from "@ayronforge/envil"
+    code: `import { createEnvSync, postgresUrl, url } from "@ayronforge/envil"
 import { nextjs } from "@ayronforge/envil/presets"
 
-const env = createEnv({
+const env = createEnvSync({
   ...nextjs,
   server: { DATABASE_URL: postgresUrl },
   client: { API_URL: url },
@@ -133,10 +145,10 @@ const env = createEnv({
     iconLight: "https://cdn.simpleicons.org/vite/black",
     iconDark: "https://cdn.simpleicons.org/vite/white",
     prefix: "VITE_",
-    code: `import { createEnv, requiredString, url } from "@ayronforge/envil"
+    code: `import { createEnvSync, requiredString, url } from "@ayronforge/envil"
 import { vite } from "@ayronforge/envil/presets"
 
-const env = createEnv({
+const env = createEnvSync({
   ...vite,
   server: { SECRET_KEY: requiredString },
   client: { API_URL: url },
@@ -148,10 +160,10 @@ const env = createEnv({
     iconDark: "https://cdn.simpleicons.org/expo/white",
     icon: "expo",
     prefix: "EXPO_PUBLIC_",
-    code: `import { createEnv, url } from "@ayronforge/envil"
+    code: `import { createEnvSync, url } from "@ayronforge/envil"
 import { expo } from "@ayronforge/envil/presets"
 
-const env = createEnv({
+const env = createEnvSync({
   ...expo,
   client: { API_URL: url },
 })`,
@@ -161,10 +173,10 @@ const env = createEnv({
     iconLight: "https://cdn.simpleicons.org/nuxt/black",
     iconDark: "https://cdn.simpleicons.org/nuxt/white",
     prefix: "NUXT_PUBLIC_",
-    code: `import { createEnv, url } from "@ayronforge/envil"
+    code: `import { createEnvSync, url } from "@ayronforge/envil"
 import { nuxt } from "@ayronforge/envil/presets"
 
-const env = createEnv({
+const env = createEnvSync({
   ...nuxt,
   client: { API_URL: url },
 })`,
@@ -174,10 +186,10 @@ const env = createEnv({
     iconLight: "https://cdn.simpleicons.org/svelte/black",
     iconDark: "https://cdn.simpleicons.org/svelte/white",
     prefix: "PUBLIC_",
-    code: `import { createEnv, url } from "@ayronforge/envil"
+    code: `import { createEnvSync, url } from "@ayronforge/envil"
 import { sveltekit } from "@ayronforge/envil/presets"
 
-const env = createEnv({
+const env = createEnvSync({
   ...sveltekit,
   client: { API_URL: url },
 })`,
@@ -187,20 +199,20 @@ const env = createEnv({
     iconLight: "https://cdn.simpleicons.org/astro/black",
     iconDark: "https://cdn.simpleicons.org/astro/white",
     prefix: "PUBLIC_",
-    code: `import { createEnv, url } from "@ayronforge/envil"
+    code: `import { createEnvSync, url } from "@ayronforge/envil"
 import { astro } from "@ayronforge/envil/presets"
 
-const env = createEnv({
+const env = createEnvSync({
   ...astro,
   client: { API_URL: url },
 })`,
   },
 ];
 
-export const codeExample = `import { createEnv, redacted, url } from "@ayronforge/envil"
+export const codeExample = `import { createEnvSync, redacted, url } from "@ayronforge/envil"
 import { Schema } from "effect"
 
-export const env = createEnv({
+export const env = createEnvSync({
   server: {
     OPENAI_API_KEY: redacted(Schema.String),
     DATABASE_URL: Schema.String,

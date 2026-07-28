@@ -1,79 +1,83 @@
 import { Effect } from "effect";
 
-import { ResolverError, type ResolverResult } from "./types.ts";
 import {
-  keyValueResultsToRecord,
-  strictOrElse,
-  toResolverError,
-  tryInitializeClient,
-} from "./utils.ts";
+  ResolverConfigurationError,
+  ResolverRequestFailed,
+  type ResolverAdapter,
+  type ResolverError,
+  type ResolverResult,
+} from "./types.ts";
+import { initializeAdapter, resolverEntries, resolverRecord, toResolvedSecret } from "./utils.ts";
 
-export { ResolverError } from "./types.ts";
-
-interface OnePasswordOptions<K extends string = string> {
-  secrets: Record<K, string>;
-  serviceAccountToken?: string;
-  strict?: boolean;
+/** 1Password service-account adapter options. */
+export interface OnePasswordSecretsAdapterOptions {
+  readonly serviceAccountToken?: string;
 }
 
-export function fromOnePassword<K extends string>(
-  opts: OnePasswordOptions<K>,
-): Effect.Effect<ResolverResult<K>, ResolverError>;
-export function fromOnePassword(
-  opts: OnePasswordOptions,
-): Effect.Effect<ResolverResult, ResolverError> {
+function resolveOnePasswordSecrets<const Keys extends string>(
+  options: OnePasswordSecretsAdapterOptions & {
+    readonly secrets: Readonly<Record<Keys, string>>;
+  },
+): Effect.Effect<ResolverResult<Keys>, ResolverError> {
   return Effect.gen(function* () {
-    const { secrets, strict = false } = opts;
-
-    const token = opts.serviceAccountToken ?? process.env.OP_SERVICE_ACCOUNT_TOKEN;
-    if (!token) {
-      return yield* toResolverError(
-        "1password",
-        "serviceAccountToken (or OP_SERVICE_ACCOUNT_TOKEN env var) must be provided",
-      );
+    const token = options.serviceAccountToken ?? process.env.OP_SERVICE_ACCOUNT_TOKEN;
+    if (token === undefined || token.length === 0) {
+      return yield* new ResolverConfigurationError({
+        adapter: "1password",
+        operation: "configure",
+        message: "A 1Password service account token is required",
+      });
     }
 
-    const client = yield* tryInitializeClient(
-      "1password",
-      "Failed to initialize 1Password client",
-      async () => {
-        const sdk = await import("@1password/sdk");
-        const sdkClient = await sdk.createClient({
-          auth: token,
-          integrationName: "envil",
-          integrationVersion: "1.0.0",
+    const client = yield* initializeAdapter("1password", async () => {
+      const sdk = await import("@1password/sdk");
+      return sdk.createClient({
+        auth: token,
+        integrationName: "envil",
+        integrationVersion: "1.0.0",
+      });
+    });
+    const entries = resolverEntries(options.secrets);
+    const references = entries.map(([, reference]) => reference);
+    const response = yield* Effect.tryPromise({
+      try: () => client.secrets.resolveAll(references),
+      catch: () =>
+        new ResolverRequestFailed({
+          adapter: "1password",
+          operation: "read-batch",
+          message: "The 1Password secret request failed",
+        }),
+    });
+    const values = [];
+
+    for (const [key, reference] of entries) {
+      const individual = response.individualResponses[reference];
+      if (
+        individual === undefined ||
+        individual.error !== undefined ||
+        individual.content?.secret === undefined
+      ) {
+        return yield* new ResolverRequestFailed({
+          adapter: "1password",
+          operation: "read-batch",
+          message: "The 1Password secret batch was only partially resolved",
         });
-
-        return {
-          resolveAll: async (refs: string[]) => sdkClient.secrets.resolveAll(refs),
-        };
-      },
-    );
-
-    const entries = Object.entries(secrets);
-    const refs = entries.map(([, ref]) => ref);
-
-    const resolved = yield* strictOrElse(
-      Effect.tryPromise(() => client.resolveAll(refs)).pipe(
-        Effect.map((values) => values as string[] | null),
-      ),
-      {
-        strict,
-        resolver: "1password",
-        message: "Failed to resolve 1Password secrets",
-        fallback: () => null,
-      },
-    );
-
-    if (!resolved) {
-      return keyValueResultsToRecord(entries.map(([envKey]) => ({ envKey, value: undefined })));
+      }
+      values.push([key, toResolvedSecret(individual.content.secret)] as const);
     }
 
-    return keyValueResultsToRecord(
-      entries.map(([envKey], index) => ({
-        envKey,
-        value: resolved[index],
-      })),
-    );
+    return resolverRecord(values);
   });
 }
+
+/** Resolver adapter for 1Password Secrets Automation. */
+export const onePasswordSecretsAdapter: ResolverAdapter<
+  "1password",
+  string,
+  OnePasswordSecretsAdapterOptions,
+  ResolverError,
+  never
+> = {
+  name: "1password",
+  resolve: resolveOnePasswordSecrets,
+};

@@ -23,7 +23,7 @@ import { requiredString, port, boolean, url } from "@ayronforge/envil"
 import { requiredString, optional } from "@ayronforge/envil"
 import { Schema } from "effect"
 
-createEnv({
+createEnvSync({
   server: {
     API_KEY: requiredString,          // must be present and non-empty
     OPTIONAL_FLAG: optional(Schema.String),  // can be undefined
@@ -44,7 +44,7 @@ createEnv({
 ```ts
 import { number, port, positiveNumber, integer } from "@ayronforge/envil"
 
-createEnv({
+createEnvSync({
   server: {
     PORT: port,                    // 1-65535
     MAX_RETRIES: integer,          // whole number
@@ -63,7 +63,7 @@ createEnv({
 ```ts
 import { boolean } from "@ayronforge/envil"
 
-createEnv({
+createEnvSync({
   server: {
     DEBUG: boolean,       // "true" → true, "0" → false
     VERBOSE: boolean,
@@ -85,7 +85,7 @@ createEnv({
 ```ts
 import { url, postgresUrl, redisUrl } from "@ayronforge/envil"
 
-createEnv({
+createEnvSync({
   server: {
     DATABASE_URL: postgresUrl,     // postgresql://user:pass@host:5432/db
     REDIS_URL: redisUrl,           // redis://localhost:6379/0
@@ -104,7 +104,7 @@ createEnv({
 ```ts
 import { commaSeparated, commaSeparatedNumbers } from "@ayronforge/envil"
 
-createEnv({
+createEnvSync({
   server: {
     ALLOWED_ORIGINS: commaSeparated,        // "a.com, b.com" → ["a.com", "b.com"]
     RETRY_DELAYS: commaSeparatedNumbers,    // "100,200,500" → [100, 200, 500]
@@ -121,7 +121,7 @@ Creates a schema that accepts only the specified literal values:
 ```ts
 import { stringEnum } from "@ayronforge/envil"
 
-createEnv({
+createEnvSync({
   shared: {
     LOG_LEVEL: stringEnum(["debug", "info", "warn", "error"]),
     // Type: "debug" | "info" | "warn" | "error"
@@ -137,7 +137,7 @@ Parses a JSON string and validates the result against an inner schema:
 import { json } from "@ayronforge/envil"
 import { Schema } from "effect"
 
-createEnv({
+createEnvSync({
   server: {
     // JSON_CONFIG='{"retries":3,"timeout":5000}'
     JSON_CONFIG: json(Schema.Struct({
@@ -155,7 +155,7 @@ Any Effect Schema works as a validator. The built-in schemas are just convenienc
 ```ts
 import { Schema } from "effect"
 
-createEnv({
+createEnvSync({
   server: {
     PORT: Schema.NumberFromString,
     NODE_ENV: Schema.Literal("development", "production", "test"),

@@ -1,6 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
-  "exclude": ["node_modules", "build", "docs", "dist", "scripts", "**/*.test.ts"],
+  "include": ["src/**/*.ts", "type-tests/**/*.ts"],
+  "exclude": ["node_modules", "build", "docs", "dist", "scripts", "src/**/*.test.ts"],
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -17,7 +18,9 @@
     "noImplicitAny": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
-    "noUncheckedIndexedAccess": false,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
 
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,

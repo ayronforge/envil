@@ -23,7 +23,7 @@ Adds a default value to a schema, making the variable optional. If the env var i
 ```ts
 import { withDefault, port } from "@ayronforge/envil"
 
-createEnv({
+createEnvSync({
   server: {
     PORT: withDefault(port, 3000),
     // If PORT is not set, defaults to 3000
@@ -36,7 +36,7 @@ createEnv({
 ```ts
 import { withDefault, port } from "@ayronforge/envil"
 
-createEnv({
+createEnvSync({
   server: {
     PORT: port.pipe(withDefault(3000)),
   },
@@ -57,7 +57,7 @@ Makes any schema accept `undefined`, allowing the env var to be missing without 
 import { optional } from "@ayronforge/envil"
 import { Schema } from "effect"
 
-createEnv({
+createEnvSync({
   server: {
     // All of these are optional — missing vars become undefined
     DEBUG_HOST: optional(Schema.String),
@@ -78,7 +78,7 @@ Wraps a schema with Effect's `Redacted` type. This prevents accidental logging, 
 import { redacted } from "@ayronforge/envil"
 import { Redacted, Schema } from "effect"
 
-const env = createEnv({
+const env = createEnvSync({
   server: {
     API_SECRET: redacted(Schema.String),
     // Equivalent to: Schema.Redacted(Schema.String)
@@ -103,7 +103,7 @@ Parses a JSON string env var and validates the parsed result against an inner sc
 import { json } from "@ayronforge/envil"
 import { Schema } from "effect"
 
-createEnv({
+createEnvSync({
   server: {
     // FEATURE_FLAGS='{"darkMode":true,"newUI":false}'
     FEATURE_FLAGS: json(Schema.Struct({
@@ -121,7 +121,7 @@ The `json` helper is equivalent to `Schema.parseJson(schema)`. It first parses t
 If the env var is not valid JSON, or if the parsed JSON doesn't match the inner schema, validation fails:
 
 ```
-FEATURE_FLAGS: Expected valid JSON, but got '{ invalid json'
+FEATURE_FLAGS: Expected Json (actual value omitted)
 ```
 
 ## Composing helpers
@@ -132,7 +132,7 @@ Helpers can be composed together:
 import { withDefault, optional, redacted, json } from "@ayronforge/envil"
 import { Schema } from "effect"
 
-createEnv({
+createEnvSync({
   server: {
     // Optional JSON config with a default
     APP_CONFIG: withDefault(

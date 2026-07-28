@@ -1,14 +1,26 @@
-export { createEnv } from "./env.ts";
-export { ClientAccessError, EnvValidationError } from "./errors.ts";
-export { buildEnvExample, examineSchema, type ExaminedSchema } from "./introspect.ts";
-export { fromRemoteSecrets } from "./resolvers/remote.ts";
-export type { SecretClient } from "./resolvers/types.ts";
-export { safeCreateEnv } from "./safe-env.ts";
+export { createEnv, createEnvPromise, createEnvSync } from "./env.ts";
+export { ClientAccessError, EnvConfigurationError, EnvValidationError } from "./errors.ts";
+export type { EnvValidationIssue, InvalidVariableIssue, MissingVariableIssue } from "./errors.ts";
+export { asResult } from "./result.ts";
+export type { Result, ResultFailure, ResultSuccess } from "./result.ts";
+export {
+  SecretSource,
+  SecretSourceRequestFailed,
+  customSecretsAdapter,
+} from "./resolvers/remote.ts";
+export type { SecretSourceError, SecretSourceService } from "./resolvers/remote.ts";
+export {
+  ResolverConfigurationError,
+  ResolverInitializationError,
+  ResolverRequestFailed,
+  ResolverResponseDecodeFailed,
+} from "./resolvers/types.ts";
 export type {
-  SafeCreateEnvFailure,
-  SafeCreateEnvResult,
-  SafeCreateEnvSuccess,
-} from "./safe-env.ts";
+  ResolverAdapter,
+  ResolverError,
+  ResolverResult,
+  ResolvedSecret,
+} from "./resolvers/types.ts";
 export {
   boolean,
   commaSeparated,
@@ -32,3 +44,4 @@ export {
   withDefault,
 } from "./schemas.ts";
 export type { MongoUrl, MysqlUrl, PostgresUrl, RedisUrl, Url } from "./schemas.ts";
+export type { InferEnv, PrefixMap } from "./types.ts";

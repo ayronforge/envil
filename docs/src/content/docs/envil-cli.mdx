@@ -1,118 +1,59 @@
 ---
 title: Envil CLI
-description: Generate env.ts from .env.example and regenerate .env.example from env.ts using schema introspection.
-order: 9
+description: Generate environment definitions and empty examples without executing application code.
 ---
 
-import Callout from "@/components/docs/Callout.astro";
-
-The `envil` CLI provides a two-way workflow between `.env.example` files and type-safe `env.ts` definitions:
-
-- **`envil add env`** reads a `.env.example`, infers schemas from values, and writes an `env.ts` file.
-- **`envil add example`** imports your `env.ts`, introspects the schemas, and regenerates `.env.example`.
-
-No manifest or metadata comments are needed in the generated code. The schemas themselves carry all the information required for round-tripping.
-
-## `envil add env`
-
-Generates an `env.ts` file from a `.env.example`.
+The CLI has two commands:
 
 ```bash
-envil add env [options]
+envil init
+envil init --from .env
+envil init --from .env.example
+envil example --input src/env.ts
 ```
 
-**Options:**
+## init
 
-| Flag                      | Description                                                           | Default                                      |
-| ------------------------- | --------------------------------------------------------------------- | -------------------------------------------- |
-| `--input <path>`          | Input `.env.example` path                                             | `.env.example`                               |
-| `--output <path>`         | Output `env.ts` path                                                  | `src/env.ts` if `src/` exists, else `env.ts` |
-| `--framework <name>`      | Prefix preset: `nextjs`, `vite`, `expo`, `nuxt`, `sveltekit`, `astro` |                                              |
-| `--client-prefix <value>` | Client prefix override                                                |                                              |
-| `--server-prefix <value>` | Server prefix override                                                |                                              |
-| `--shared-prefix <value>` | Shared prefix override                                                |                                              |
-| `--force`                 | Overwrite output file if it exists                                    |                                              |
+Without `--from`, `envil init` writes one secure starter `env.ts`.
 
-### How inference works
+With `--from`, values stay in memory and are used only to infer schemas. The
+generated source contains no defaults and no source values. Known public
+prefixes are recognized automatically:
 
-Every assigned value in `.env.example` is used for two things:
+- `NEXT_PUBLIC_`
+- `VITE_`
+- `EXPO_PUBLIC_`
+- `NUXT_PUBLIC_`
+- `PUBLIC_`
 
-1. **Type inference** — the value determines which schema to use (e.g. `3000` on a `PORT` key becomes `port`, `true` becomes `boolean`, a URL becomes `url`).
-2. **Default value** — the value is wrapped in `withDefault(schema, value)` in the generated code, so the variable is optional at runtime.
+If more than one is present, select one with `--client-prefix`. All remaining
+keys become `server`; `init` never infers `shared`.
 
-For example, this `.env.example`:
+Common credential segments such as `PASSWORD`, `SECRET`, `TOKEN`, `API_KEY`,
+`PRIVATE_KEY`, and `ACCESS_KEY` are generated with `redacted(...)`. This is a
+conservative heuristic, so review the generated contract before using it.
+
+## example
+
+`envil example` locates the nearest `tsconfig.json`, creates a TypeScript 6
+`Program`, and inspects exported type-only Envil contracts.
+
+If the module exports one contract, it is selected automatically. With several:
 
 ```bash
-# @server
-PORT=3000
-DATABASE_URL=postgres://user:pass@localhost:5432/app
-
-# @client
-NEXT_PUBLIC_API_URL=https://example.com
+envil example --input src/env.ts --export productionEnv
 ```
 
-Generates:
+The command never imports or executes the module, reads the application's
+`process.env`, runs `createEnv`, initializes SDKs, or calls resolvers.
 
-```ts
-import { createEnv, postgresUrl, port, url, withDefault } from "@ayronforge/envil";
+The output contains empty physical keys only:
 
-export const envDefinition = {
-  prefix: {
-    server: "",
-    client: "",
-    shared: "",
-  },
-  server: {
-    DATABASE_URL: withDefault(postgresUrl, "postgres://user:pass@localhost:5432/app"),
-    PORT: withDefault(port, 3000),
-  },
-  client: {
-    NEXT_PUBLIC_API_URL: withDefault(url, "https://example.com"),
-  },
-  shared: {
-  },
-} as const;
+```env
+DATABASE_URL=
 
-export const env = createEnv(envDefinition);
+VITE_APP_URL=
 ```
 
-### Inference rules
-
-| Value pattern                       | Inferred schema         |
-| ----------------------------------- | ----------------------- |
-| `true`, `false`, `1`, `0`           | `boolean`               |
-| Integer on a `*PORT*` key (1-65535) | `port`                  |
-| Integer                             | `integer`               |
-| Decimal number                      | `number`                |
-| `http://` or `https://` URL         | `url`                   |
-| `postgres://` or `postgresql://`    | `postgresUrl`           |
-| `redis://` or `rediss://`           | `redisUrl`              |
-| `mongodb://` or `mongodb+srv://`    | `mongoUrl`              |
-| `mysql://` or `mysqls://`           | `mysqlUrl`              |
-| Comma-separated values              | `commaSeparated`        |
-| Comma-separated numbers             | `commaSeparatedNumbers` |
-| Comma-separated URLs                | `commaSeparatedUrls`    |
-| JSON object or array                | `json`                  |
-| Anything else                       | `requiredString`        |
-
-You can override inference using [directives](/envil/docs/directives).
-
-## `envil add example`
-
-Regenerates a `.env.example` from an existing `env.ts` file using schema introspection. It dynamically imports your `env.ts`, reads the `envDefinition` export, and walks the Effect Schema AST to extract type information, defaults, and wrapper metadata.
-
-```bash
-envil add example [options]
-```
-
-**Options:**
-
-| Flag              | Description                        | Default                              |
-| ----------------- | ---------------------------------- | ------------------------------------ |
-| `--input <path>`  | Input `env.ts` path                | `env.ts`, then `src/env.ts` fallback |
-| `--output <path>` | Output `.env.example` path         | `.env.example`                       |
-| `--force`         | Overwrite output file if it exists |                                      |
-
-<Callout type="note">
-  Your input file must be importable by the current runtime and export an `envDefinition` object with `prefix`, `server`, `client`, and `shared` fields.
-</Callout>
+If a physical key is widened to `string`, generation fails because no concrete
+name can be emitted.

@@ -1,78 +1,38 @@
 ---
-title: Introduction
-description: Type-safe environment variables powered by Effect Schema. Validate, transform, and manage env vars with full TypeScript inference.
-order: 1
+title: Envil
+description: Type-safe environment validation with explicit exposure and secret boundaries.
 ---
 
-import Card from "@/components/docs/Card.astro";
-import CardGroup from "@/components/docs/CardGroup.astro";
-import Callout from "@/components/docs/Callout.astro";
+Envil turns environment configuration into one typed startup boundary.
 
-`@ayronforge/envil` is a type-safe environment variable library built on [Effect Schema](https://effect.website/docs/schema/introduction). It validates your env vars at startup, gives you full TypeScript inference, and prevents client-side access to server secrets.
+The model has four parts:
 
-## Why envil?
-
-Environment variables are stringly-typed by default. A missing `DATABASE_URL` or a malformed `PORT` shouldn't crash your app deep in a request handler — it should fail **immediately** at startup with a clear error message.
-
-**envil** gives you:
-
-- **Runtime validation** — every env var is parsed through Effect Schema at startup
-- **Full type inference** — your `env` object is fully typed from your schema definitions, no manual annotations needed
-- **Client/server separation** — define `server`, `client`, and `shared` buckets; accessing a server variable on the client throws at runtime
-- **Framework presets** — pre-configured prefix rules for Next.js, Vite, and Expo
-- **Cloud secret resolution** — pull env vars from AWS Secrets Manager, GCP, Azure Key Vault, or 1Password
-- **Composable configs** — split env definitions across modules and merge them with `extends`
-
-## Quick example
+1. Schemas decode runtime strings into application values.
+2. Buckets define where each value may be exposed.
+3. Resolver adapters supply authoritative server secrets.
+4. A type-only contract describes the safe structure for inference and tooling.
 
 ```ts
-import { createEnv, port, requiredString, boolean } from "@ayronforge/envil"
-import { Schema } from "effect"
+import { createEnvSync, redacted, url } from "@ayronforge/envil";
 
-export const env = createEnv({
+export const env = createEnvSync({
   server: {
-    DATABASE_URL: requiredString,
-    PORT: port,
-    DEBUG: boolean,
+    DATABASE_URL: redacted(url),
   },
   client: {
-    NEXT_PUBLIC_API_URL: requiredString,
+    APP_URL: url,
   },
-  shared: {
-    NODE_ENV: Schema.Literal("development", "production", "test"),
+  prefix: {
+    client: "VITE_",
   },
-})
-
-// Fully typed: env.DATABASE_URL is string, env.PORT is number
-console.log(env.DATABASE_URL)
+});
 ```
 
-If any variable is missing or invalid, you get a clear error at startup:
+`server` never reaches browser code. `client` and `shared` may, so Envil rejects
+redacted schemas and resolver keys outside `server` at typecheck and runtime.
 
-```
-EnvValidationError: Invalid environment variables:
-DATABASE_URL: Expected a string with a length of at least 1, but got undefined
-PORT: Expected Port (1-65535), but got "not-a-number"
-```
+Envil never places secret values, remote references, defaults, credentials, SDK
+responses, or raw provider errors in its type contract.
 
-<CardGroup>
-  <Card title="Quickstart" href="/envil/docs/getting-started">
-    Install envil and create your first type-safe env config in minutes.
-  </Card>
-  <Card title="Core Concepts" href="/envil/docs/core-concepts">
-    Learn about validation, client/server separation, and the proxy model.
-  </Card>
-  <Card title="Built-in Schemas" href="/envil/docs/schemas">
-    Explore all the ready-to-use schemas for strings, numbers, URLs, and more.
-  </Card>
-  <Card title="Resolvers" href="/envil/docs/resolvers">
-    Pull secrets from AWS, GCP, Azure, or 1Password at startup.
-  </Card>
-  <Card title="Safe Parsing" href="/envil/docs/safe-parsing">
-    Validate env vars without throwing — get typed result objects instead.
-  </Card>
-</CardGroup>
-
-## Acknowledgements
-
-This project is heavily inspired by [T3 Env](https://env.t3.gg) by [T3 OSS](https://github.com/t3-oss/t3-env). Thanks to the T3 team for their work and contributions to open source.
+Start with the [Quickstart](/envil/docs/getting-started), then read
+[Core Concepts](/envil/docs/core-concepts).
