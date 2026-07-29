@@ -1,262 +1,517 @@
 import { describe, expect, test } from "bun:test";
-import { runInNewContext } from "node:vm";
 
-import { Cause, Effect, Option, Redacted, Schema } from "effect";
+import { Context, Effect, Option, Redacted, Result, Schema, SchemaGetter } from "effect";
 
-import { ClientAccessError, EnvConfigurationError, EnvValidationError } from "./errors.ts";
+import {
+  EnvironmentAccessError,
+  EnvConfigurationError,
+  EnvValidationError,
+  ServerEnvironmentAccessError,
+} from "./errors.ts";
+import type { ResolverAdapter, ResolverResult, ResolvedSecret } from "./resolvers/types.ts";
 import { asResult } from "./result.ts";
 
 import {
   SecretSource,
+  client,
+  configureResolver,
   createEnv,
-  createEnvPromise,
-  createEnvSync,
   customSecretsAdapter,
+  extendEnv,
+  fromEnv,
+  fromResolver,
   optional,
   redacted,
   requiredString,
+  server,
+  shared,
 } from "./index.ts";
 
-describe("environment creation boundaries", () => {
-  test("createEnv always returns an Effect", async () => {
-    const effect = createEnv({
-      server: { DATABASE_URL: requiredString },
-      runtimeEnv: { DATABASE_URL: "postgres://localhost" },
-    });
+interface RecordingResolverOptions {
+  readonly calls: Array<Readonly<Record<string, string>>>;
+}
 
-    expect(Effect.isEffect(effect)).toBe(true);
-    expect((await Effect.runPromise(effect)).DATABASE_URL).toBe("postgres://localhost");
+function resolveRecordingSecrets<const Keys extends string>(
+  options: RecordingResolverOptions & {
+    readonly referencesByKey: Readonly<Record<Keys, string>>;
+  },
+): Effect.Effect<ResolverResult<Keys>> {
+  return Effect.sync(() => {
+    options.calls.push(options.referencesByKey);
+    const result: Partial<Record<Keys, ResolvedSecret>> = {};
+
+    // SAFETY: Object.keys returns exactly the own string keys from the typed
+    // reference record; the standard library only widens their finite union.
+    for (const key of Object.keys(options.referencesByKey) as Keys[]) {
+      result[key] = Option.some(Redacted.make(`resolved:${options.referencesByKey[key]}`));
+    }
+
+    // SAFETY: Every key from the input record is populated exactly once above.
+    return Object.freeze(result) as ResolverResult<Keys>;
   });
+}
 
-  test("sync and Promise boundaries preserve decoded values", async () => {
-    const options = {
-      server: { PORT: Schema.NumberFromString },
-      runtimeEnv: { PORT: "3000" },
+const recordingResolverAdapter: ResolverAdapter<
+  "recording",
+  string,
+  RecordingResolverOptions,
+  never,
+  never
+> = {
+  name: "recording",
+  resolve: resolveRecordingSecrets,
+};
+
+describe("environment composition", () => {
+  test("rejects legacy object definitions and forged fragment shapes", () => {
+    const legacyDefinition: unknown = {
+      server: {
+        TOKEN: requiredString,
+      },
+    };
+    const forgedFragment: unknown = {
+      target: "server",
+      values: {
+        TOKEN: requiredString,
+      },
     };
 
-    expect(createEnvSync(options).PORT).toBe(3000);
-    expect((await createEnvPromise(options)).PORT).toBe(3000);
+    expect(() => Reflect.apply(createEnv, undefined, [legacyDefinition])).toThrow(
+      "createEnv accepts fragments created by server, client, and shared.",
+    );
+    expect(() => Reflect.apply(createEnv, undefined, [forgedFragment])).toThrow(
+      "createEnv accepts fragments created by server, client, and shared.",
+    );
   });
 
-  test("composition preserves inherited values and applies local overrides", () => {
-    const baseEnv = createEnvSync({
-      server: {
-        BASE_URL: requiredString,
-        SERVICE_NAME: requiredString,
-      },
-      runtimeEnv: {
-        BASE_URL: "https://base.example.com",
-        SERVICE_NAME: "base",
-      },
-    });
-    const env = createEnvSync({
-      extends: [baseEnv],
-      server: {
-        SERVICE_NAME: requiredString,
-      },
-      runtimeEnv: {
-        SERVICE_NAME: "local",
-      },
-    });
+  test("exposes independent lazy Effect properties", async () => {
+    const appEnv = createEnv(
+      shared({ APP_NAME: "Envil" }),
+      server({ URL: requiredString }, { runtimeEnv: { URL: "https://server.example.com" } }),
+      client(
+        { URL: requiredString },
+        {
+          runtimeEnv: { VITE_URL: "https://client.example.com" },
+          prefix: "VITE_",
+        },
+      ),
+    );
 
-    expect(env.BASE_URL).toBe("https://base.example.com");
-    expect(env.SERVICE_NAME).toBe("local");
+    expect(Effect.isEffect(appEnv.server)).toBe(true);
+    expect(Effect.isEffect(appEnv.client)).toBe(true);
+    expect(Effect.runSync(appEnv.server)).toEqual({
+      APP_NAME: "Envil",
+      URL: "https://client.example.com",
+    });
+    expect(await Effect.runPromise(appEnv.client)).toEqual({
+      APP_NAME: "Envil",
+      URL: "https://client.example.com",
+    });
   });
 
-  test("composition does not reapply the current prefix to resolved environments", () => {
-    const serverEnv = createEnvSync({
-      server: { PUBLIC_URL: requiredString },
-      runtimeEnv: { PUBLIC_URL: "server" },
-    });
-    const clientEnv = createEnvSync({
-      client: { URL: requiredString },
-      prefix: { client: "VITE_" },
-      runtimeEnv: { VITE_URL: "client" },
-    });
+  test("composes AppEnv values canonically through extendEnv", () => {
+    const baseEnv = createEnv(
+      shared({ APP_NAME: "Base" }),
+      server({ BASE_URL: "https://base.example.com" }),
+    );
+    const authenticationEnv = createEnv(
+      server({ AUTH_SECRET: "secret" }),
+      client({ SIGN_IN_PATH: "/sign-in" }),
+    );
+    const appEnv = baseEnv.pipe(
+      extendEnv(authenticationEnv),
+      extendEnv(
+        shared({ APP_NAME: "Application" }),
+        server({ API_URL: "https://api.example.com" }),
+      ),
+    );
 
-    const env = createEnvSync({
-      extends: [serverEnv, clientEnv],
-      prefix: { client: "PUBLIC_" },
+    expect(Effect.runSync(appEnv.server)).toEqual({
+      APP_NAME: "Application",
+      BASE_URL: "https://base.example.com",
+      AUTH_SECRET: "secret",
+      SIGN_IN_PATH: "/sign-in",
+      API_URL: "https://api.example.com",
     });
-
-    expect(env.PUBLIC_URL).toBe("server");
-    expect(env.URL).toBe("client");
+    expect(Effect.runSync(appEnv.client)).toEqual({
+      APP_NAME: "Application",
+      SIGN_IN_PATH: "/sign-in",
+    });
   });
 
-  test("each creation boundary resolves matching extends inputs", async () => {
-    const effectBase = createEnv({
-      server: { EFFECT_VALUE: requiredString },
-      runtimeEnv: { EFFECT_VALUE: "effect" },
+  test("last definition replaces schema, source, runtime, and resolver requirements", () => {
+    const calls: Array<Readonly<Record<string, string>>> = [];
+    const resolver = configureResolver(recordingResolverAdapter, { calls });
+    const baseEnv = createEnv(
+      server({
+        TOKEN: requiredString.pipe(fromResolver(resolver, "shadowed-reference")),
+      }),
+    );
+    const appEnv = baseEnv.pipe(
+      extendEnv(
+        server(
+          {
+            TOKEN: Schema.NumberFromString,
+          },
+          {
+            runtimeEnv: { APP_TOKEN: "42" },
+            prefix: "APP_",
+          },
+        ),
+      ),
+    );
+
+    expect(Effect.runSync(appEnv.server).TOKEN).toBe(42);
+    expect(calls).toEqual([]);
+
+    const crossTargetAppEnv = baseEnv.pipe(extendEnv(client({ TOKEN: "public-override" })));
+    expect(Effect.runSync(crossTargetAppEnv.server).TOKEN).toBe("public-override");
+    expect(calls).toEqual([]);
+  });
+
+  test("multiple fragments retain independent runtime sources and prefixes", () => {
+    const appEnv = createEnv(
+      server(
+        { URL: requiredString },
+        { runtimeEnv: { BASE_URL: "https://base.example.com" }, prefix: "BASE_" },
+      ),
+      server(
+        { TOKEN: requiredString },
+        { runtimeEnv: new Map([["AUTH_TOKEN", "token"]]), prefix: "AUTH_" },
+      ),
+    );
+
+    expect(Effect.runSync(appEnv.server)).toEqual({
+      URL: "https://base.example.com",
+      TOKEN: "token",
     });
-    const promiseBase = createEnvPromise({
-      server: { PROMISE_VALUE: requiredString },
-      runtimeEnv: { PROMISE_VALUE: "promise" },
+  });
+
+  test("accepts arbitrary Effect Schemas and preserves their requirements", () => {
+    class SchemaPolicy extends Context.Service<
+      SchemaPolicy,
+      { readonly accepts: (value: string) => boolean }
+    >()("test/SchemaPolicy") {}
+    const minimum = 3;
+    const arbitrarySchema = Schema.String.check(Schema.isMinLength(minimum)).pipe(
+      Schema.decode({
+        decode: SchemaGetter.checkEffect((value) =>
+          SchemaPolicy.useSync((policy) => policy.accepts(value)),
+        ),
+        encode: SchemaGetter.passthrough(),
+      }),
+      Schema.decodeTo(Schema.Number, {
+        decode: SchemaGetter.transform((value: string) => Number(value)),
+        encode: SchemaGetter.transform((value: number) => String(value)),
+      }),
+    );
+    const appEnv = createEnv(server({ PORT: arbitrarySchema }, { runtimeEnv: { PORT: "3000" } }));
+
+    expect(
+      Effect.runSync(
+        appEnv.server.pipe(
+          Effect.provideService(SchemaPolicy, {
+            accepts: (value) => value !== "forbidden",
+          }),
+        ),
+      ).PORT,
+    ).toBe(3000);
+  });
+});
+
+describe("lazy runtime boundaries", () => {
+  test("does not read runtime values until the Effect runs", () => {
+    let reads = 0;
+    const runtimeEnv = Object.defineProperty({}, "TOKEN", {
+      enumerable: true,
+      get: () => {
+        reads += 1;
+        return "value";
+      },
+    });
+    const appEnv = createEnv(server({ TOKEN: requiredString }, { runtimeEnv }));
+
+    expect(reads).toBe(0);
+    expect(Effect.runSync(appEnv.server).TOKEN).toBe("value");
+    expect(reads).toBe(1);
+  });
+
+  test("fromEnv overrides a fragment prefix", () => {
+    const appEnv = createEnv(
+      client(
+        {
+          URL: requiredString,
+          ANALYTICS_KEY: requiredString.pipe(fromEnv("PUBLIC_ANALYTICS_KEY")),
+        },
+        {
+          runtimeEnv: {
+            VITE_URL: "https://default.example.com",
+            PUBLIC_ANALYTICS_KEY: "analytics",
+          },
+          prefix: "VITE_",
+        },
+      ),
+    );
+
+    expect(Effect.runSync(appEnv.client)).toEqual({
+      URL: "https://default.example.com",
+      ANALYTICS_KEY: "analytics",
+    });
+  });
+
+  test("reads dot paths but prefers an exact JSON key", () => {
+    const nested = createEnv(
+      server(
+        { DATABASE_URL: requiredString.pipe(fromEnv("application.database.url")) },
+        {
+          runtimeEnv: {
+            application: { database: { url: "postgres://nested.example.com" } },
+          },
+        },
+      ),
+    );
+    const exact = createEnv(
+      server(
+        { URL: requiredString.pipe(fromEnv("application.url")) },
+        {
+          runtimeEnv: {
+            "application.url": "https://exact.example.com",
+            application: { url: "https://nested.example.com" },
+          },
+        },
+      ),
+    );
+
+    expect(Effect.runSync(nested.server).DATABASE_URL).toBe("postgres://nested.example.com");
+    expect(Effect.runSync(exact.server).URL).toBe("https://exact.example.com");
+  });
+
+  test("returns immutable values and rejects unknown reads", () => {
+    const appEnv = createEnv(
+      shared({ APP_NAME: "Envil" }),
+      server({ DATABASE_URL: "postgres://localhost" }),
+      client({ PUBLIC_URL: "https://example.com" }),
+    );
+
+    const clientEnv: Readonly<Record<string, unknown>> = Effect.runSync(appEnv.client);
+    expect(() => Reflect.get(clientEnv, "DATABASE_URL")).toThrow(EnvironmentAccessError);
+    expect(() => Reflect.get(clientEnv, "TYPO")).toThrow(
+      '"TYPO" is not available in the client environment.',
+    );
+    expect(() => Reflect.set(clientEnv, "APP_NAME", "Changed")).toThrow(TypeError);
+    expect({ ...clientEnv }).toEqual({
+      APP_NAME: "Envil",
+      PUBLIC_URL: "https://example.com",
+    });
+  });
+
+  test("blocks server materialization in a browser runtime", () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {},
     });
 
-    const effectEnv = await Effect.runPromise(createEnv({ extends: [effectBase] }));
-    const promiseEnv = await createEnvPromise({ extends: [promiseBase] });
+    try {
+      const appEnv = createEnv(server({ TOKEN: "secret" }));
+      const result = Effect.runSync(Effect.result(appEnv.server));
 
-    expect(effectEnv.EFFECT_VALUE).toBe("effect");
-    expect(promiseEnv.PROMISE_VALUE).toBe("promise");
+      expect(Result.isFailure(result)).toBe(true);
+      if (Result.isFailure(result)) {
+        expect(result.failure).toBeInstanceOf(ServerEnvironmentAccessError);
+      }
+    } finally {
+      if (previousWindow === undefined) {
+        Reflect.deleteProperty(globalThis, "window");
+      } else {
+        Object.defineProperty(globalThis, "window", previousWindow);
+      }
+    }
+  });
+});
+
+describe("variable sources", () => {
+  test("groups variables from the same configured resolver into one request", () => {
+    const calls: Array<Readonly<Record<string, string>>> = [];
+    const resolver = configureResolver(recordingResolverAdapter, { calls });
+    const appEnv = createEnv(
+      server({
+        FIRST: requiredString.pipe(fromResolver(resolver, "first-reference")),
+        SECOND: requiredString.pipe(fromResolver(resolver, "second-reference")),
+      }),
+    );
+
+    expect(calls).toEqual([]);
+    const env = Effect.runSync(appEnv.server);
+    expect(calls).toEqual([
+      {
+        FIRST: "first-reference",
+        SECOND: "second-reference",
+      },
+    ]);
+    expect(Redacted.value(env.FIRST)).toBe("resolved:first-reference");
+    expect(Redacted.value(env.SECOND)).toBe("resolved:second-reference");
+  });
+
+  test("supports ergonomic custom Effect resolvers at runtime", () => {
+    const calls: string[] = [];
+    const adapter: ResolverAdapter<
+      "custom-test",
+      string,
+      { readonly prefix: string },
+      never,
+      never
+    > = {
+      name: "custom-test",
+      resolve: ({ prefix, referencesByKey }) =>
+        Effect.sync(() => {
+          const result: Record<string, ResolvedSecret> = {};
+          for (const [key, reference] of Object.entries(referencesByKey)) {
+            calls.push(reference);
+            result[key] = Option.some(Redacted.make(`${prefix}:${reference}`));
+          }
+          return result;
+        }),
+    };
+    const resolver = configureResolver(adapter, { prefix: "resolved" });
+    const appEnv = createEnv(
+      server({
+        TOKEN: requiredString.pipe(fromResolver(resolver, "token-reference")),
+      }),
+    );
+
+    const env = Effect.runSync(appEnv.server);
+    expect(Redacted.value(env.TOKEN)).toBe("resolved:token-reference");
+    expect(calls).toEqual(["token-reference"]);
   });
 
   test("resolver values are authoritative and automatically redacted", async () => {
+    const source = configureResolver(customSecretsAdapter, {});
     const layer = SecretSource.fromPromise({
       get: async () => Option.some("resolved-value"),
     });
-    const env = await Effect.runPromise(
-      createEnv({
-        server: { TOKEN: requiredString },
-        runtimeEnv: { TOKEN: "runtime-value" },
-        resolvers: ({ resolve }) => [
-          resolve(customSecretsAdapter, {
-            secrets: { TOKEN: "remote-reference" },
-          }),
-        ],
-      }).pipe(Effect.provide(layer)),
+    const appEnv = createEnv(
+      server(
+        { TOKEN: requiredString.pipe(fromResolver(source, "remote-reference")) },
+        { runtimeEnv: { TOKEN: "runtime-value" } },
+      ),
     );
 
+    const env = await Effect.runPromise(appEnv.server.pipe(Effect.provide(layer)));
     expect(Redacted.isRedacted(env.TOKEN)).toBe(true);
     expect(Redacted.value(env.TOKEN)).toBe("resolved-value");
   });
 
-  test("resolver absence does not fall back to runtime values", async () => {
+  test("optional resolver absence remains undefined", async () => {
+    const source = configureResolver(customSecretsAdapter, {});
     const layer = SecretSource.fromPromise({
       get: async () => Option.none(),
     });
-    const exit = await Effect.runPromiseExit(
-      createEnv({
-        server: { TOKEN: requiredString },
-        runtimeEnv: { TOKEN: "must-not-be-used" },
-        resolvers: ({ resolve }) => [
-          resolve(customSecretsAdapter, {
-            secrets: { TOKEN: "remote-reference" },
-          }),
-        ],
-      }).pipe(Effect.provide(layer)),
+    const appEnv = createEnv(
+      server({
+        TOKEN: optional(requiredString).pipe(fromResolver(source, "remote-reference")),
+      }),
     );
 
-    expect(exit._tag).toBe("Failure");
-    expect(String(exit)).not.toContain("must-not-be-used");
-    expect(String(exit)).not.toContain("remote-reference");
-  });
-
-  test("optional resolver absence remains undefined outside Redacted", async () => {
-    const layer = SecretSource.fromPromise({
-      get: async () => Option.none(),
-    });
-    const env = await Effect.runPromise(
-      createEnv({
-        server: { TOKEN: optional(requiredString) },
-        resolvers: ({ resolve }) => [
-          resolve(customSecretsAdapter, {
-            secrets: { TOKEN: "remote-reference" },
-          }),
-        ],
-      }).pipe(Effect.provide(layer)),
-    );
-
+    const env = await Effect.runPromise(appEnv.server.pipe(Effect.provide(layer)));
     expect(env.TOKEN).toBeUndefined();
   });
 
-  test("createEnvPromise accepts the required custom Layer", async () => {
-    const env = await createEnvPromise(
-      {
-        server: { TOKEN: requiredString },
-        resolvers: ({ resolve }) => [
-          resolve(customSecretsAdapter, {
-            secrets: { TOKEN: "remote-reference" },
-          }),
-        ],
+  test("client materialization never executes server resolvers", async () => {
+    let calls = 0;
+    const source = configureResolver(customSecretsAdapter, {});
+    const layer = SecretSource.fromPromise({
+      get: async () => {
+        calls += 1;
+        return Option.some("secret");
       },
-      {
-        layer: SecretSource.fromPromise({
-          get: async () => Option.some("resolved-value"),
-        }),
-      },
+    });
+    const appEnv = createEnv(
+      server({
+        SECRET: requiredString.pipe(fromResolver(source, "remote-reference")),
+      }),
+      client({ PUBLIC: "public" }),
     );
 
-    expect(Redacted.value(env.TOKEN)).toBe("resolved-value");
+    expect(await Effect.runPromise(appEnv.client.pipe(Effect.provide(layer)))).toEqual({
+      PUBLIC: "public",
+    });
+    expect(calls).toBe(0);
+  });
+
+  test("synchronous resolver construction failures stay typed and sanitized", async () => {
+    const privateReference = "provider/private-reference";
+    const throwingAdapter: ResolverAdapter<"throwing", string, {}, never, never> = {
+      name: "throwing",
+      resolve: () => {
+        throw new Error(privateReference);
+      },
+    };
+    const resolver = configureResolver(throwingAdapter, {});
+    const appEnv = createEnv(
+      server({
+        TOKEN: requiredString.pipe(fromResolver(resolver, privateReference)),
+      }),
+    );
+
+    const result = await Effect.runPromise(appEnv.server.pipe(asResult()));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBeInstanceOf(EnvConfigurationError);
+      expect(String(result.error)).not.toContain(privateReference);
+    }
   });
 });
 
-describe("validation and security", () => {
+describe("validation and runtime backstops", () => {
   test("redacted runtime schemas remain redacted", () => {
-    const env = createEnvSync({
-      server: { TOKEN: redacted(requiredString) },
-      runtimeEnv: { TOKEN: "secret-value" },
-    });
+    const appEnv = createEnv(
+      server({ TOKEN: redacted(requiredString) }, { runtimeEnv: { TOKEN: "secret-value" } }),
+    );
 
+    const env = Effect.runSync(appEnv.server);
     expect(Redacted.isRedacted(env.TOKEN)).toBe(true);
     expect(String(env.TOKEN)).not.toContain("secret-value");
   });
 
-  test("redacted optional schemas preserve undefined outside Redacted", () => {
-    const outerRedacted = createEnvSync({
-      server: { TOKEN: redacted(optional(requiredString)) },
-      runtimeEnv: {},
-    });
-    const outerOptional = createEnvSync({
-      server: { TOKEN: optional(redacted(requiredString)) },
-      runtimeEnv: {},
-    });
-
-    expect(outerRedacted.TOKEN).toBeUndefined();
-    expect(outerOptional.TOKEN).toBeUndefined();
-  });
-
   test("validation issues never retain rejected values", () => {
     const secret = "invalid-secret-value";
+    const appEnv = createEnv(
+      server({ TOKEN: redacted(Schema.Literal("expected")) }, { runtimeEnv: { TOKEN: secret } }),
+    );
 
-    expect(() =>
-      createEnvSync({
-        server: { TOKEN: redacted(requiredString) },
-        runtimeEnv: { TOKEN: "" },
-      }),
-    ).toThrow(EnvValidationError);
-
-    try {
-      createEnvSync({
-        server: { TOKEN: redacted(Schema.Literal("expected")) },
-        runtimeEnv: { TOKEN: secret },
-        emptyStringAsUndefined: false,
-      });
-    } catch (failure: unknown) {
-      expect(String(failure)).not.toContain(secret);
-      if (failure instanceof EnvValidationError) {
-        expect(JSON.stringify(failure.issues)).not.toContain(secret);
-      }
+    const result = Effect.runSync(Effect.result(appEnv.server));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(EnvValidationError);
+      expect(String(result.failure)).not.toContain(secret);
+      expect(JSON.stringify(result.failure)).not.toContain(secret);
     }
   });
 
-  test("malformed secret JSON does not expose values or references", async () => {
+  test("malformed resolver JSON exposes neither values nor references", async () => {
     const secret = "{not-json-secret";
     const reference = "tenant/private-json";
+    const source = configureResolver(customSecretsAdapter, {});
     const layer = SecretSource.fromPromise({
       get: async () => Option.some(secret),
     });
-    const exit = await Effect.runPromiseExit(
-      createEnv({
-        server: { JSON_SECRET: Schema.parseJson(Schema.Struct({ id: Schema.String })) },
-        resolvers: ({ resolve }) => [
-          resolve(customSecretsAdapter, {
-            secrets: { JSON_SECRET: reference },
-          }),
-        ],
-      }).pipe(Effect.provide(layer)),
+    const appEnv = createEnv(
+      server({
+        JSON_SECRET: Schema.fromJsonString(Schema.Struct({ id: Schema.String })).pipe(
+          fromResolver(source, reference),
+        ),
+      }),
     );
 
+    const exit = await Effect.runPromiseExit(appEnv.server.pipe(Effect.provide(layer)));
     expect(String(exit)).not.toContain(secret);
     expect(String(exit)).not.toContain(reference);
   });
 
-  test("asResult captures typed failures", async () => {
-    const result = await Effect.runPromise(
-      createEnv({
-        server: { REQUIRED: requiredString },
-        runtimeEnv: {},
-      }).pipe(asResult()),
-    );
+  test("asResult captures typed validation failures", () => {
+    const appEnv = createEnv(server({ REQUIRED: requiredString }, { runtimeEnv: {} }));
+    const result = Effect.runSync(appEnv.server.pipe(asResult()));
 
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -264,204 +519,52 @@ describe("validation and security", () => {
     }
   });
 
-  test("browser access to server keys is blocked", () => {
-    const env = createEnvSync({
-      server: { SECRET: requiredString },
-      client: { PUBLIC: requiredString },
-      runtimeEnv: { SECRET: "secret", PUBLIC: "public" },
-      isServer: false,
-    });
+  test("reports a missing client runtime source when JavaScript bypasses the types", () => {
+    const fragment: unknown = Reflect.apply(client, undefined, [{ PUBLIC: requiredString }]);
+    const appEnv: unknown = Reflect.apply(createEnv, undefined, [fragment]);
+    if (typeof appEnv !== "object" || appEnv === null) {
+      throw new Error("Expected an AppEnv with a client Effect");
+    }
+    const clientEffect = Reflect.get(appEnv, "client");
+    if (!Effect.isEffect(clientEffect)) {
+      throw new Error("Expected an AppEnv with a client Effect");
+    }
 
-    expect(env.PUBLIC).toBe("public");
-    expect(() => env.SECRET).toThrow(ClientAccessError);
+    const result = Effect.runSync(Effect.result(clientEffect));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(EnvConfigurationError);
+      expect(String(result.failure)).toContain('client variable "PUBLIC" needs runtimeEnv');
+    }
   });
 
-  test("client creation never calls server resolvers", async () => {
-    let calls = 0;
-    const layer = SecretSource.fromPromise({
-      get: async () => {
-        calls += 1;
-        return Option.some("secret");
-      },
-    });
-    const env = await Effect.runPromise(
-      createEnv({
-        server: { SECRET: requiredString },
-        client: { PUBLIC: requiredString },
-        runtimeEnv: { PUBLIC: "public" },
-        isServer: false,
-        resolvers: ({ resolve }) => [
-          resolve(customSecretsAdapter, {
-            secrets: { SECRET: "remote-reference" },
-          }),
-        ],
-      }).pipe(Effect.provide(layer)),
+  test("applies cross-target last-wins precedence to the complete server context", () => {
+    const appEnv = createEnv(
+      server({ URL: requiredString }, { runtimeEnv: { URL: "server" } }),
+      client({ URL: requiredString }, { runtimeEnv: { URL: "client" } }),
     );
 
-    expect(env.PUBLIC).toBe("public");
-    expect(calls).toBe(0);
+    expect(Effect.runSync(appEnv.server).URL).toBe("client");
+    expect(Effect.runSync(appEnv.client).URL).toBe("client");
   });
 
-  test("the environment is immutable", () => {
-    const env = createEnvSync({
-      server: { VALUE: requiredString },
-      runtimeEnv: { VALUE: "one" },
-    });
-
-    expect(() => Reflect.set(env, "VALUE", "two")).toThrow(TypeError);
-  });
-});
-
-describe("runtime invariant backstops for JavaScript consumers", () => {
-  test("rejects extends inputs from a different creation boundary", async () => {
-    const effectBase = createEnv({
-      server: { EFFECT_VALUE: requiredString },
-      runtimeEnv: { EFFECT_VALUE: "effect" },
-    });
-    const promiseBase = createEnvPromise({
-      server: { PROMISE_VALUE: requiredString },
-      runtimeEnv: { PROMISE_VALUE: "promise" },
-    });
-
-    expect(() => Reflect.apply(createEnvSync, undefined, [{ extends: [effectBase] }])).toThrow(
-      EnvConfigurationError,
+  test("explains duplicate runtime mappings after last-wins resolution", () => {
+    const appEnv = createEnv(
+      server(
+        {
+          FIRST: requiredString.pipe(fromEnv("TOKEN")),
+          SECOND: requiredString.pipe(fromEnv("TOKEN")),
+        },
+        { runtimeEnv: { TOKEN: "value" } },
+      ),
     );
-    await expect(
-      Reflect.apply(createEnvPromise, undefined, [{ extends: [effectBase] }]),
-    ).rejects.toBeInstanceOf(EnvConfigurationError);
 
-    const effect: unknown = Reflect.apply(createEnv, undefined, [{ extends: [promiseBase] }]);
-    if (!Effect.isEffect(effect)) {
-      throw new Error("Expected createEnv to return an Effect");
+    const result = Effect.runSync(Effect.result(appEnv.server));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(String(result.failure)).toContain(
+        '"FIRST" and "SECOND" both read "TOKEN" in the server environment.',
+      );
     }
-    const exit = await Effect.runPromiseExit(effect);
-    expect(exit._tag).toBe("Failure");
-    if (exit._tag === "Failure") {
-      const failure = Option.getOrUndefined(Cause.failureOption(exit.cause));
-      expect(failure).toBeInstanceOf(EnvConfigurationError);
-    }
-  });
-
-  test("rejects arbitrary objects passed to extends", async () => {
-    const arbitraryObject = new Date();
-
-    expect(() => Reflect.apply(createEnvSync, undefined, [{ extends: [arbitraryObject] }])).toThrow(
-      EnvConfigurationError,
-    );
-    await expect(
-      Reflect.apply(createEnvPromise, undefined, [{ extends: [arbitraryObject] }]),
-    ).rejects.toBeInstanceOf(EnvConfigurationError);
-
-    const effect: unknown = Reflect.apply(createEnv, undefined, [{ extends: [arbitraryObject] }]);
-    if (!Effect.isEffect(effect)) {
-      throw new Error("Expected createEnv to return an Effect");
-    }
-    const exit = await Effect.runPromiseExit(effect);
-    expect(exit._tag).toBe("Failure");
-    if (exit._tag === "Failure") {
-      const failure = Option.getOrUndefined(Cause.failureOption(exit.cause));
-      expect(failure).toBeInstanceOf(EnvConfigurationError);
-    }
-  });
-
-  test("recognizes Promises created in another realm", async () => {
-    const foreignPromise: unknown = runInNewContext("Promise.resolve({})");
-    const effect: unknown = Reflect.apply(createEnv, undefined, [{ extends: [foreignPromise] }]);
-
-    if (!Effect.isEffect(effect)) {
-      throw new Error("Expected createEnv to return an Effect");
-    }
-
-    const exit = await Effect.runPromiseExit(effect);
-    expect(exit._tag).toBe("Failure");
-    if (exit._tag === "Failure") {
-      const failure = Option.getOrUndefined(Cause.failureOption(exit.cause));
-      expect(failure).toBeInstanceOf(EnvConfigurationError);
-      expect(String(failure)).toContain("not Promises");
-    }
-
-    expect(() => Reflect.apply(createEnvSync, undefined, [{ extends: [foreignPromise] }])).toThrow(
-      "resolved environment values only",
-    );
-  });
-
-  test("rejects logical bucket collisions", () => {
-    const options = {
-      server: { DUPLICATE: requiredString },
-      client: { DUPLICATE: requiredString },
-      runtimeEnv: { DUPLICATE: "value" },
-    };
-
-    expect(() => Reflect.apply(createEnvSync, undefined, [options])).toThrow(EnvConfigurationError);
-  });
-
-  test("rejects physical prefix collisions", () => {
-    const options = {
-      server: { PUBLIC_URL: requiredString },
-      client: { URL: requiredString },
-      prefix: { client: "PUBLIC_" },
-      runtimeEnv: { PUBLIC_URL: "value" },
-    };
-
-    expect(() => Reflect.apply(createEnvSync, undefined, [options])).toThrow(EnvConfigurationError);
-  });
-
-  test("rejects redacted public schemas", () => {
-    const options = {
-      client: { TOKEN: redacted(requiredString) },
-      runtimeEnv: { TOKEN: "value" },
-    };
-
-    expect(() => Reflect.apply(createEnvSync, undefined, [options])).toThrow(EnvConfigurationError);
-  });
-
-  test("rejects duplicate resolver keys", async () => {
-    const secret = Option.some(Redacted.make("value"));
-    const definition = (adapterName: string) => ({
-      adapterName,
-      keys: ["TOKEN"],
-      effect: Effect.succeed({ TOKEN: secret }),
-    });
-    const effect: unknown = Reflect.apply(createEnv, undefined, [
-      {
-        server: { TOKEN: requiredString },
-        resolvers: () => [definition("one"), definition("two")],
-      },
-    ]);
-
-    expect(Effect.isEffect(effect)).toBe(true);
-    if (Effect.isEffect(effect)) {
-      const exit = await Effect.runPromiseExit(effect);
-      expect(exit._tag).toBe("Failure");
-      if (exit._tag === "Failure") {
-        const failure = Option.getOrUndefined(Cause.failureOption(exit.cause));
-        expect(failure).toBeInstanceOf(EnvConfigurationError);
-        expect(String(failure)).toContain("more than one resolver");
-      }
-    }
-  });
-
-  test("rejects incomplete resolver results instead of falling back", async () => {
-    const effect: unknown = Reflect.apply(createEnv, undefined, [
-      {
-        server: { TOKEN: requiredString },
-        runtimeEnv: { TOKEN: "must-not-be-used" },
-        resolvers: () => [
-          {
-            adapterName: "broken",
-            keys: ["TOKEN"],
-            effect: Effect.succeed({}),
-          },
-        ],
-      },
-    ]);
-
-    if (!Effect.isEffect(effect)) {
-      throw new Error("Expected createEnv to return an Effect");
-    }
-
-    const exit = await Effect.runPromiseExit(effect);
-    expect(exit._tag).toBe("Failure");
-    expect(String(exit)).not.toContain("must-not-be-used");
   });
 });

@@ -1,0 +1,144 @@
+---
+title: Build and Runtime Security
+description: Physically remove server fragments from client bundles without interpreting application code.
+---
+
+import Callout from "@/components/docs/Callout.astro";
+
+Envil protects the server/client boundary at three levels:
+
+1. `appEnv.client` and `appEnv.server` have different output and requirement
+   types.
+2. Runtime evaluation selects only definitions available to the current target.
+3. Build plugins remove complete `server(...)` expressions from client module
+   graphs before bundling.
+
+The returned environment is also protected by an immutable Proxy. Reading a
+value that was not materialized produces an `EnvironmentAccessError`; executing
+`appEnv.server` in a proven client build produces a
+`ServerEnvironmentAccessError`.
+
+## Core behavior without a plugin
+
+Without a build plugin, Envil detects ordinary browser, Node, and Bun runtimes:
+
+- Browsers are client runtimes.
+- Node and Bun are server runtimes.
+- Ambiguous runtimes fail closed when `appEnv.server` executes.
+
+The check is lazy. If it fails, Envil does not read the server runtime source or
+execute its resolvers.
+
+<Callout type="warning" title="Runtime protection is not bundle pruning">
+  Core runtime checks prevent server values from being materialized in the
+  browser, but cannot control which source modules a bundler includes. Use a
+  build plugin when server definitions and their dependency graph must be
+  physically absent.
+</Callout>
+
+## Compiler boundary
+
+The compiler treats `server(...)` as a target intrinsic. In a client transform,
+it replaces the complete call expression with `undefined` before the bundler
+follows the resulting module graph:
+
+```ts
+const appEnv = createEnv(
+  shared({ APP_NAME: "My App" }),
+  server(makeServerDefinitions()),
+  client(
+    {
+      ...publicSchemas,
+      APP_URL: makePublicUrlSchema(),
+    },
+    { runtimeEnv: import.meta.env },
+  ),
+);
+```
+
+The client transform removes `server(makeServerDefinitions())` as one unit. It
+does not execute or statically interpret `makeServerDefinitions`, Effect
+Schemas, spreads, resolver adapters, or imported helpers. The server transform
+keeps every target because `appEnv.server` exposes the complete environment.
+
+This boundary is what makes arbitrary Effect Schema and custom resolver code
+compatible with compilation: surviving code remains ordinary runtime code with
+its original references and requirements.
+
+<Callout type="note" title="What tree shaking still owns">
+  Once a server fragment expression is removed, the bundler decides which now
+  unreachable imports and modules can be discarded. Envil marks its package as
+  side-effect free, but cannot promise removal of unrelated top-level side
+  effects inside an application or dependency module.
+</Callout>
+
+## Vite
+
+```ts title="vite.config.ts"
+import { defineConfig } from "vite";
+import envil from "@ayronforge/envil/plugins/vite";
+
+export default defineConfig({
+  plugins: [envil()],
+});
+```
+
+Vite identifies client and SSR graphs for each transform. The plugin injects
+the exact runtime target, prunes server fragments only from client graphs, and
+excludes Envil from dependency pre-bundling so the transform is not skipped.
+
+## Rollup and Rolldown
+
+```ts title="rollup.config.ts"
+import envil from "@ayronforge/envil/plugins/rollup";
+
+export default {
+  plugins: [envil({ target: "client" })],
+};
+```
+
+Use `@ayronforge/envil/plugins/rolldown` with the same options for Rolldown.
+
+## webpack and Rspack
+
+```ts title="webpack.config.ts"
+import EnvilPlugin from "@ayronforge/envil/plugins/webpack";
+
+export default {
+  plugins: [EnvilPlugin({ target: "client" })],
+};
+```
+
+Use `@ayronforge/envil/plugins/rspack` for Rspack.
+
+## esbuild
+
+```ts
+import envil from "@ayronforge/envil/plugins/esbuild";
+
+await build({
+  plugins: [envil({ target: "client" })],
+});
+```
+
+Generic bundler adapters default to `client` so an omitted target fails closed.
+Pass `target: "server"` explicitly for a server build.
+
+## What the Proxy guarantees
+
+```ts
+const clientEnvironment = await Effect.runPromise(appEnv.client);
+
+clientEnvironment.PUBLIC_URL; // available
+clientEnvironment.DATABASE_URL; // TypeScript error; runtime error if bypassed
+```
+
+Enumeration, object spread, and JSON serialization expose only materialized
+values. Mutation, deletion, and property redefinition are rejected.
+
+## Security boundary
+
+Envil prevents accidental cross-target access and composition. It cannot make a
+hard-coded literal secret safe. Production secrets should come from a server
+runtime source or resolver. Resolver values are authoritative, automatically
+redacted, and never executed by the client Effect.

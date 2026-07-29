@@ -1,0 +1,117 @@
+---
+import { Check, ArrowRight } from "lucide-react";
+import {
+  siEsbuild,
+  siRollupdotjs,
+  siVite,
+  siWebpack,
+  type SimpleIcon,
+} from "simple-icons";
+import CodeBlock from "./CodeBlock.astro";
+
+interface BuildTool {
+  readonly name: string;
+  readonly icon: SimpleIcon;
+}
+
+const buildTools: ReadonlyArray<BuildTool> = [
+  { name: "Vite", icon: siVite },
+  { name: "Rollup", icon: siRollupdotjs },
+  { name: "webpack", icon: siWebpack },
+  { name: "esbuild", icon: siEsbuild },
+];
+
+const viteConfig = `import { defineConfig } from "vite"
+import envil from "@ayronforge/envil/plugins/vite"
+
+export default defineConfig({
+  plugins: [envil()],
+})`;
+---
+
+<section class="relative pb-28 px-6 lg:px-12">
+  <div class="max-w-6xl mx-auto">
+    <div class="security-panel overflow-hidden rounded-2xl">
+      <div class="grid lg:grid-cols-[0.9fr_1.1fr]">
+        <div class="p-7 sm:p-10 lg:p-12 flex flex-col justify-between">
+          <div>
+            <h2 class="text-3xl sm:text-4xl font-extrabold tracking-tight mb-5 text-wrap-balance">
+              The runtime boundary your bundler can prove
+            </h2>
+            <p class="text-muted text-base sm:text-lg leading-relaxed max-w-xl">
+              Keep one composable environment. Envil removes server fragments from client builds,
+              injects an exact runtime target, and keeps the Proxy as a final runtime backstop.
+            </p>
+
+            <ul class="mt-8 space-y-3" aria-label="Build safety guarantees">
+              <li class="flex items-start gap-3 text-sm leading-relaxed">
+                <Check className="w-4 h-4 text-secondary mt-0.5 shrink-0" strokeWidth={2.5} />
+                Complete server expressions are removed before the client graph is bundled.
+              </li>
+              <li class="flex items-start gap-3 text-sm leading-relaxed">
+                <Check className="w-4 h-4 text-secondary mt-0.5 shrink-0" strokeWidth={2.5} />
+                Running <code>appEnv.server</code> in a client build fails before reading runtime values.
+              </li>
+              <li class="flex items-start gap-3 text-sm leading-relaxed">
+                <Check className="w-4 h-4 text-secondary mt-0.5 shrink-0" strokeWidth={2.5} />
+                Schemas and custom resolver adapters remain ordinary runtime code.
+              </li>
+            </ul>
+          </div>
+
+          <a
+            href={`${import.meta.env.BASE_URL}/docs/build-security`}
+            class="group inline-flex items-center gap-2 mt-9 text-sm font-semibold text-secondary w-fit"
+          >
+            Read the security model
+            <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+          </a>
+        </div>
+
+        <div class="bg-[#0E1319] p-5 sm:p-8 lg:p-10 flex flex-col justify-center">
+          <CodeBlock code={viteConfig} />
+
+          <div class="flex flex-wrap gap-x-6 gap-y-4 mt-8" aria-label="Supported build integrations">
+            {
+              buildTools.map(({ name, icon }) => (
+                <div class="flex items-center gap-2.5 text-[#F1EDE4]">
+                  <svg
+                    viewBox="0 0 24 24"
+                    class="w-5 h-5 shrink-0"
+                    fill={`#${icon.hex}`}
+                    role="img"
+                    aria-label={`${name} logo`}
+                  >
+                    <path d={icon.path} />
+                  </svg>
+                  <span class="text-xs font-medium text-white/70">{name}</span>
+                </div>
+              ))
+            }
+            <div class="flex items-center gap-2.5 text-[#F1EDE4]">
+              <img
+                src="https://assets.rspack.dev/rspack/rspack-logo.svg"
+                alt="Rspack logo"
+                class="w-5 h-5 shrink-0 object-contain"
+                loading="lazy"
+              />
+              <span class="text-xs font-medium text-white/70">Rspack</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .security-panel {
+    border: 1px solid color-mix(in srgb, var(--color-primary) 10%, transparent);
+    background: color-mix(in srgb, var(--color-card) 92%, var(--color-secondary) 8%);
+  }
+
+  :global([data-theme="dark"]) .security-panel {
+    border-color: rgba(255, 255, 255, 0.08);
+    background: var(--color-card);
+  }
+</style>

@@ -14,7 +14,9 @@ export class SecretSourceRequestFailed extends Error implements SecretSourceErro
   readonly _tag = "SecretSourceRequestFailed" as const;
 
   constructor() {
-    super("The custom secret source request failed");
+    super(
+      "The custom secret source could not read a secret. Check the source implementation and try again.",
+    );
     this.name = "SecretSourceRequestFailed";
   }
 }
@@ -27,10 +29,9 @@ export interface SecretSourceService {
 }
 
 /** Effect service used only by `customSecretsAdapter`. */
-export class SecretSource extends Context.Tag("@ayronforge/envil/SecretSource")<
-  SecretSource,
-  SecretSourceService
->() {
+export class SecretSource extends Context.Service<SecretSource, SecretSourceService>()(
+  "@ayronforge/envil/SecretSource",
+) {
   /**
    * Builds a SecretSource Layer from a Promise callback that explicitly
    * distinguishes absence with `Option`.
@@ -49,12 +50,12 @@ export class SecretSource extends Context.Tag("@ayronforge/envil/SecretSource")<
 }
 
 function resolveCustomSecrets<const Keys extends string>(options: {
-  readonly secrets: Readonly<Record<Keys, string>>;
+  readonly referencesByKey: Readonly<Record<Keys, string>>;
 }): Effect.Effect<ResolverResult<Keys>, SecretSourceError, SecretSource> {
   return Effect.gen(function* () {
     const source = yield* SecretSource;
     const entries = yield* Effect.forEach(
-      resolverEntries(options.secrets),
+      resolverEntries(options.referencesByKey),
       ([key, reference]) =>
         source.get(reference).pipe(Effect.map((value) => [key, value] as const)),
       { concurrency: "unbounded" },

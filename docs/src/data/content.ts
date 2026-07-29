@@ -1,4 +1,11 @@
+import { siAstro, siExpo, siNuxt, siSvelte, siVite, type SimpleIcon } from "simple-icons";
+
 import pkg from "../../../package.json";
+
+function brandIcon(icon: SimpleIcon, color = icon.hex): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#${color}"><path d="${icon.path}"/></svg>`;
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
 
 export const site = {
   name: "envil",
@@ -27,15 +34,15 @@ export const features = [
   },
   {
     name: "Client Safety",
-    headline: "Client/Server Separation",
+    headline: "Guarded Runtime Boundaries",
     description:
-      "Define server-only and client-safe variables separately. Accessing server vars on the client throws at runtime — no secrets leaked, even in agent-generated output.",
+      "Independent Effects, typed outputs, and a defensive Proxy prevent client code from reading or materializing server values.",
   },
   {
     name: "Presets",
     headline: "Framework Presets",
     description:
-      "Pre-configured setups for Next.js, Vite, Expo, and more. Get the right prefix rules and runtime env settings out of the box.",
+      "Prefix presets for Vite, Expo, Nuxt, SvelteKit, and Astro compose directly with client fragment options.",
   },
   {
     name: "Secret Managers",
@@ -47,7 +54,7 @@ export const features = [
     name: "Composable",
     headline: "Composable & Extensible",
     description:
-      "Compose multiple env configs with `extends`. Build shared base configs and layer service-specific vars on top — ideal for multi-agent architectures.",
+      "Compose target-aware fragments with extendEnv, map individual variables with fromEnv or fromResolver, and keep public shared values explicit.",
   },
 ];
 
@@ -57,174 +64,171 @@ export const secretManagers = [
     icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/amazonwebservices/amazonwebservices-original-wordmark.svg",
     import: "@ayronforge/envil/aws",
     description: "Resolve secrets from AWS Secrets Manager using the AWS SDK.",
-    code: `import { createEnv, requiredString } from "@ayronforge/envil"
+    code: `import { configureResolver, createEnv, fromResolver, requiredString, server } from "@ayronforge/envil"
 import { awsSecretsAdapter } from "@ayronforge/envil/aws"
 
-createEnv({
-  server: { DB_PASS: requiredString },
-  resolvers: ({ resolve }) => [
-    resolve(awsSecretsAdapter, {
-      region: "us-east-1",
-      secrets: { DB_PASS: "prod/db-password" },
-    }),
-  ],
-})`,
+const aws = configureResolver(awsSecretsAdapter, { region: "us-east-1" })
+
+const appEnv = createEnv(
+  server({
+    DB_PASS: requiredString.pipe(fromResolver(aws, "prod/db-password")),
+  }),
+)`,
   },
   {
     name: "Azure Key Vault",
     icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/azure/azure-original.svg",
     import: "@ayronforge/envil/azure",
     description: "Fetch secrets from Azure Key Vault with managed identity support.",
-    code: `import { createEnv, requiredString } from "@ayronforge/envil"
+    code: `import { configureResolver, createEnv, fromResolver, requiredString, server } from "@ayronforge/envil"
 import { azureKeyVaultAdapter } from "@ayronforge/envil/azure"
 
-createEnv({
-  server: { DB_PASS: requiredString },
-  resolvers: ({ resolve }) => [
-    resolve(azureKeyVaultAdapter, {
-      vaultUrl: "https://my-vault.vault.azure.net",
-      secrets: { DB_PASS: "db-password" },
-    }),
-  ],
-})`,
+const azure = configureResolver(azureKeyVaultAdapter, {
+  vaultUrl: "https://my-vault.vault.azure.net",
+})
+
+const appEnv = createEnv(
+  server({
+    DB_PASS: requiredString.pipe(fromResolver(azure, "db-password")),
+  }),
+)`,
   },
   {
     name: "GCP Secret Manager",
     icon: "https://cdn.jsdelivr.net/gh/devicons/devicon@latest/icons/googlecloud/googlecloud-original.svg",
     import: "@ayronforge/envil/gcp",
     description: "Access secrets stored in Google Cloud Secret Manager.",
-    code: `import { createEnv, requiredString } from "@ayronforge/envil"
+    code: `import { configureResolver, createEnv, fromResolver, requiredString, server } from "@ayronforge/envil"
 import { gcpSecretsAdapter } from "@ayronforge/envil/gcp"
 
-createEnv({
-  server: { DB_PASS: requiredString },
-  resolvers: ({ resolve }) => [
-    resolve(gcpSecretsAdapter, {
-      projectId: "my-project",
-      secrets: { DB_PASS: "db-password" },
-    }),
-  ],
-})`,
+const gcp = configureResolver(gcpSecretsAdapter, { projectId: "my-project" })
+
+const appEnv = createEnv(
+  server({
+    DB_PASS: requiredString.pipe(fromResolver(gcp, "db-password")),
+  }),
+)`,
   },
   {
     name: "1Password",
     icon: "https://cdn.simpleicons.org/1password/3B66BC",
     import: "@ayronforge/envil/1password",
     description: "Retrieve secrets directly from 1Password vaults.",
-    code: `import { createEnv, requiredString } from "@ayronforge/envil"
+    code: `import { configureResolver, createEnv, fromResolver, requiredString, server } from "@ayronforge/envil"
 import { onePasswordSecretsAdapter } from "@ayronforge/envil/1password"
 
-createEnv({
-  server: { DB_PASS: requiredString },
-  resolvers: ({ resolve }) => [
-    resolve(onePasswordSecretsAdapter, {
-      secrets: { DB_PASS: "op://vault/item/field" },
-    }),
-  ],
-})`,
+const onePassword = configureResolver(onePasswordSecretsAdapter, {})
+
+const appEnv = createEnv(
+  server({
+    DB_PASS: requiredString.pipe(
+      fromResolver(onePassword, "op://vault/item/field"),
+    ),
+  }),
+)`,
   },
 ];
 
 export const presets = [
   {
-    name: "Next.js",
-    iconLight: "https://cdn.simpleicons.org/nextdotjs/black",
-    iconDark: "https://cdn.simpleicons.org/nextdotjs/white",
-    prefix: "NEXT_PUBLIC_",
-    code: `import { createEnvSync, postgresUrl, url } from "@ayronforge/envil"
-import { nextjs } from "@ayronforge/envil/presets"
-
-const env = createEnvSync({
-  ...nextjs,
-  server: { DATABASE_URL: postgresUrl },
-  client: { API_URL: url },
-})`,
-  },
-  {
     name: "Vite",
-    iconLight: "https://cdn.simpleicons.org/vite/black",
-    iconDark: "https://cdn.simpleicons.org/vite/white",
+    iconLight: brandIcon(siVite),
+    iconDark: brandIcon(siVite),
     prefix: "VITE_",
-    code: `import { createEnvSync, requiredString, url } from "@ayronforge/envil"
+    code: `import { client, createEnv, requiredString, server, url } from "@ayronforge/envil"
 import { vite } from "@ayronforge/envil/presets"
 
-const env = createEnvSync({
-  ...vite,
-  server: { SECRET_KEY: requiredString },
-  client: { API_URL: url },
-})`,
+const appEnv = createEnv(
+  server({ SECRET_KEY: requiredString }),
+  client(
+    { API_URL: url },
+    { ...vite, runtimeEnv: import.meta.env },
+  ),
+)`,
   },
   {
     name: "Expo",
-    iconLight: "https://cdn.simpleicons.org/expo/black",
-    iconDark: "https://cdn.simpleicons.org/expo/white",
+    iconLight: brandIcon(siExpo),
+    iconDark: brandIcon(siExpo, "FFFFFF"),
     icon: "expo",
     prefix: "EXPO_PUBLIC_",
-    code: `import { createEnvSync, url } from "@ayronforge/envil"
+    code: `import { client, createEnv, url } from "@ayronforge/envil"
 import { expo } from "@ayronforge/envil/presets"
 
-const env = createEnvSync({
-  ...expo,
-  client: { API_URL: url },
-})`,
+const appEnv = createEnv(
+  client(
+    { API_URL: url },
+    { ...expo, runtimeEnv: process.env },
+  ),
+)`,
   },
   {
     name: "Nuxt",
-    iconLight: "https://cdn.simpleicons.org/nuxt/black",
-    iconDark: "https://cdn.simpleicons.org/nuxt/white",
+    iconLight: brandIcon(siNuxt),
+    iconDark: brandIcon(siNuxt),
     prefix: "NUXT_PUBLIC_",
-    code: `import { createEnvSync, url } from "@ayronforge/envil"
+    code: `import { client, createEnv, url } from "@ayronforge/envil"
 import { nuxt } from "@ayronforge/envil/presets"
 
-const env = createEnvSync({
-  ...nuxt,
-  client: { API_URL: url },
-})`,
+const appEnv = createEnv(
+  client(
+    { API_URL: url },
+    { ...nuxt, runtimeEnv: process.env },
+  ),
+)`,
   },
   {
     name: "SvelteKit",
-    iconLight: "https://cdn.simpleicons.org/svelte/black",
-    iconDark: "https://cdn.simpleicons.org/svelte/white",
+    iconLight: brandIcon(siSvelte),
+    iconDark: brandIcon(siSvelte),
     prefix: "PUBLIC_",
-    code: `import { createEnvSync, url } from "@ayronforge/envil"
+    code: `import { client, createEnv, url } from "@ayronforge/envil"
 import { sveltekit } from "@ayronforge/envil/presets"
 
-const env = createEnvSync({
-  ...sveltekit,
-  client: { API_URL: url },
-})`,
+const appEnv = createEnv(
+  client(
+    { API_URL: url },
+    { ...sveltekit, runtimeEnv: import.meta.env },
+  ),
+)`,
   },
   {
     name: "Astro",
-    iconLight: "https://cdn.simpleicons.org/astro/black",
-    iconDark: "https://cdn.simpleicons.org/astro/white",
+    iconLight: brandIcon(siAstro),
+    iconDark: brandIcon(siAstro),
     prefix: "PUBLIC_",
-    code: `import { createEnvSync, url } from "@ayronforge/envil"
+    code: `import { client, createEnv, url } from "@ayronforge/envil"
 import { astro } from "@ayronforge/envil/presets"
 
-const env = createEnvSync({
-  ...astro,
-  client: { API_URL: url },
-})`,
+const appEnv = createEnv(
+  client(
+    { API_URL: url },
+    { ...astro, runtimeEnv: import.meta.env },
+  ),
+)`,
   },
 ];
 
-export const codeExample = `import { createEnvSync, redacted, url } from "@ayronforge/envil"
-import { Schema } from "effect"
+export const codeExample = `import { client, createEnv, postgresUrl, redacted, requiredString, server, shared, url } from "@ayronforge/envil"
 
-export const env = createEnvSync({
-  server: {
-    OPENAI_API_KEY: redacted(Schema.String),
-    DATABASE_URL: Schema.String,
-    VECTOR_STORE_URL: url,
-  },
-  client: {
-    NEXT_PUBLIC_APP_URL: url,
-  },
-  shared: {
-    NODE_ENV: Schema.Literal("development", "production", "test"),
-  },
-})`;
+export const appEnv = createEnv(
+  shared({
+    APP_NAME: "My App",
+  }),
+  server({
+    OPENAI_API_KEY: redacted(requiredString),
+    DATABASE_URL: redacted(postgresUrl),
+  }),
+  client(
+    {
+      APP_URL: url,
+    },
+    {
+      runtimeEnv: import.meta.env,
+      prefix: "VITE_",
+    },
+  ),
+)`;
 
 export const agentFeatures = [
   {
@@ -245,6 +249,6 @@ export const agentFeatures = [
   {
     headline: "Modular Design",
     description:
-      "Compose, layer, and override configs across services and environments. Base credentials, tool-specific keys, and deployment overrides — all validated, all typed, all composable.",
+      "Compose target-aware fragments and attach each runtime or resolver source directly to the definition that owns it.",
   },
 ];

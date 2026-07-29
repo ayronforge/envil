@@ -1,52 +1,58 @@
 ---
 title: Effect and Results
-description: Handle Envil failures through Effect or the asResult operator.
+description: Run app environments and handle typed, secret-safe failures.
 ---
 
-`createEnv` exposes expected failures in Effect's typed error channel.
-
-```ts
-const program = createEnv(options).pipe(
-  Effect.tapError((error) => reportSafeError(error)),
-  Effect.catchTag("EnvValidationError", recoverValidation),
-);
-```
-
-Use `asResult()` when a boundary needs a discriminated value:
+`appEnv.server` and `appEnv.client` expose expected failures through
+Effect's typed error channel.
 
 ```ts
 import { Effect } from "effect";
-import { asResult, createEnv } from "@ayronforge/envil";
 
-const result = await createEnv(options).pipe(
-  asResult(),
-  Effect.runPromise,
+const program = appEnv.server.pipe(
+  Effect.catchTag("EnvValidationError", (error) =>
+    Effect.logError(error.message),
+  ),
+);
+```
+
+Resolver errors remain precise and may be handled independently:
+
+```ts
+appEnv.server.pipe(
+  Effect.catchTags({
+    ResolverConfigurationError: handleResolverConfiguration,
+    ResolverInitializationError: handleResolverInitialization,
+    ResolverRequestFailed: handleResolverRequest,
+    ResolverResponseDecodeFailed: handleResolverResponse,
+  }),
+);
+```
+
+## Convert expected failures to a result
+
+```ts
+import { Effect } from "effect";
+import { asResult } from "@ayronforge/envil";
+
+const result = await Effect.runPromise(
+  appEnv.server.pipe(asResult()),
 );
 
-if (result.success) {
-  result.data;
-} else {
-  result.error;
+if (!result.success) {
+  console.error(result.error.message);
 }
 ```
 
-The result shape is:
+`asResult()` converts only typed failures. Defects and interruptions retain
+their normal Effect semantics.
+
+## Choose the runner at the boundary
 
 ```ts
-type Result<A, E> =
-  | { readonly success: true; readonly data: A }
-  | { readonly success: false; readonly error: E };
+const syncEnvironment = Effect.runSync(appEnv.server);
+const asyncEnvironment = await Effect.runPromise(appEnv.server);
 ```
 
-`asResult()` converts only typed failures. Defects and interruptions remain
-defects and interruptions.
-
-With a custom Layer, provide it before `asResult()` when Layer construction
-errors must also become result failures:
-
-```ts
-createEnv(options).pipe(
-  Effect.provide(CustomSecretSourceLive),
-  asResult(),
-);
-```
+The same environment Effect supports either runner. An Effect containing an
+asynchronous resolver must be run asynchronously.

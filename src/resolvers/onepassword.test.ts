@@ -30,12 +30,13 @@ describe("onePasswordSecretsAdapter", () => {
     delete process.env.OP_SERVICE_ACCOUNT_TOKEN;
     const exit = await Effect.runPromiseExit(
       onePasswordSecretsAdapter.resolve({
-        secrets: { TOKEN: "op://private/item/field" },
+        referencesByKey: { TOKEN: "op://private/item/field" },
       }),
     );
 
     expect(exit._tag).toBe("Failure");
     expect(String(exit)).toContain("ResolverConfigurationError");
+    expect(String(exit)).toContain('Set "serviceAccountToken"');
     expect(String(exit)).not.toContain("op://private/item/field");
   });
 
@@ -57,7 +58,7 @@ describe("onePasswordSecretsAdapter", () => {
     const result = await Effect.runPromise(
       onePasswordSecretsAdapter.resolve({
         serviceAccountToken: "token",
-        secrets: { TOKEN: reference },
+        referencesByKey: { TOKEN: reference },
       }),
     );
 
@@ -86,7 +87,7 @@ describe("onePasswordSecretsAdapter", () => {
     const exit = await Effect.runPromiseExit(
       onePasswordSecretsAdapter.resolve({
         serviceAccountToken: "token",
-        secrets: {
+        referencesByKey: {
           FIRST: firstReference,
           SECOND: secondReference,
         },
@@ -104,7 +105,7 @@ describe("onePasswordSecretsAdapter", () => {
     const exit = await Effect.runPromiseExit(
       onePasswordSecretsAdapter.resolve({
         serviceAccountToken: "token",
-        secrets: { TOKEN: "op://private/item/field" },
+        referencesByKey: { TOKEN: "op://private/item/field" },
       }),
     );
 

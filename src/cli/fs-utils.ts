@@ -1,4 +1,4 @@
-import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export async function pathExists(filePath: string): Promise<boolean> {
@@ -39,27 +39,35 @@ export async function getDefaultExampleInputPath(cwd: string): Promise<string> {
 
 export async function ensureWritableTarget(targetPath: string, force: boolean): Promise<void> {
   if (!force && (await pathExists(targetPath))) {
-    throw new Error(`Target file "${targetPath}" already exists. Use --force to overwrite.`);
+    throw new Error(`"${targetPath}" already exists. Use --force if you want to replace it.`);
   }
 }
 
 export async function readTextFileOrThrow(filePath: string, label: string): Promise<string> {
   try {
     return await readFile(filePath, "utf8");
-  } catch (error) {
-    throw new Error(`Unable to read ${label} at "${filePath}": ${String(error)}`);
+  } catch {
+    throw new Error(
+      `Could not read ${label} at "${filePath}". Check that the file exists and is readable.`,
+    );
   }
 }
 
 export async function writeFileAtomic(targetPath: string, contents: string): Promise<void> {
   const directory = path.dirname(targetPath);
-  await mkdir(directory, { recursive: true });
-
   const tempPath = path.join(
     directory,
     `.envil-tmp-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
   );
 
-  await writeFile(tempPath, contents, "utf8");
-  await rename(tempPath, targetPath);
+  try {
+    await mkdir(directory, { recursive: true });
+    await writeFile(tempPath, contents, "utf8");
+    await rename(tempPath, targetPath);
+  } catch {
+    await rm(tempPath, { force: true }).catch(() => undefined);
+    throw new Error(
+      `Could not write "${targetPath}". Check that the destination is writable and try again.`,
+    );
+  }
 }

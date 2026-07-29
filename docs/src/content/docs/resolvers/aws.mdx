@@ -1,36 +1,38 @@
 ---
 title: AWS Secrets Manager
-description: Resolve server secrets with the isolated AWS adapter.
+description: Source server variables from AWS Secrets Manager.
 ---
-
-Install the optional peer:
 
 ```bash
 bun add @aws-sdk/client-secrets-manager
 ```
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/envil";
+import {
+  configureResolver,
+  createEnv,
+  fromResolver,
+  requiredString,
+  server,
+} from "@ayronforge/envil";
 import { awsSecretsAdapter } from "@ayronforge/envil/aws";
 
-export const env = createEnv({
-  server: {
-    DATABASE_PASSWORD: requiredString,
-  },
-  resolvers: ({ resolve }) => [
-    resolve(awsSecretsAdapter, {
-      region: "us-east-1",
-      secrets: {
-        DATABASE_PASSWORD: "production/database#password",
-      },
-    }),
-  ],
+const aws = configureResolver(awsSecretsAdapter, {
+  region: "us-east-1",
 });
+
+export const appEnv = createEnv(
+  server({
+    DATABASE_PASSWORD: requiredString.pipe(
+      fromResolver(aws, "production/database#password"),
+    ),
+  }),
+);
 ```
 
-The `#field` suffix safely extracts a JSON object field. Malformed JSON becomes
-`ResolverResponseDecodeFailed` without retaining the value or reference.
+Append `#field` to read one JSON field from a secret. Variables using the same
+configured `aws` value are resolved together. AWS batch requests are split into
+groups of at most 20 secret IDs.
 
-AWS batch requests preserve provider batching. Reliable
-`ResourceNotFoundException` responses become `Option.none()`; partial or
-operational batch failures remain errors.
+A reliable not-found response becomes `Option.none()`. Other provider failures
+remain typed resolver errors.

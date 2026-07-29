@@ -1,43 +1,45 @@
 ---
 title: Resolver Adapters
-description: Resolve authoritative server secrets with schema-bound adapters.
+description: Attach authoritative secret providers directly to server variables.
 ---
 
-Resolvers are configured through a schema-bound callback:
+Configure provider-wide options once, then attach references to individual
+schemas with `fromResolver`:
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/envil";
+import {
+  configureResolver,
+  createEnv,
+  fromResolver,
+  requiredString,
+  server,
+} from "@ayronforge/envil";
 import { awsSecretsAdapter } from "@ayronforge/envil/aws";
-import { gcpSecretsAdapter } from "@ayronforge/envil/gcp";
 
-export const env = createEnv({
-  server: {
-    DATABASE_PASSWORD: requiredString,
-    STRIPE_SECRET_KEY: requiredString,
-  },
-  resolvers: ({ resolve }) => [
-    resolve(awsSecretsAdapter, {
-      region: "us-east-1",
-      secrets: {
-        DATABASE_PASSWORD: "production/database#password",
-      },
-    }),
-    resolve(gcpSecretsAdapter, {
-      projectId: "my-project",
-      secrets: {
-        STRIPE_SECRET_KEY: "stripe-secret-key",
-      },
-    }),
-  ],
+const aws = configureResolver(awsSecretsAdapter, {
+  region: "us-east-1",
 });
+
+export const appEnv = createEnv(
+  server({
+    DATABASE_PASSWORD: requiredString.pipe(
+      fromResolver(aws, "production/database#password"),
+    ),
+    STRIPE_API_KEY: requiredString.pipe(
+      fromResolver(aws, "production/stripe#api-key"),
+    ),
+  }),
+);
 ```
 
-`resolve` autocompletes only `server` keys, preserves adapter-specific options,
-and carries adapter errors and Effect requirements into the final Effect.
+Resolver-backed values:
 
-Resolver values are authoritative. `Option.none()` means the secret does not
-exist; Envil never falls back to `process.env`. Duplicate resolver keys are
-rejected at typecheck and runtime.
+- are allowed only in server fragments;
+- are authoritative and never fall back to the runtime environment;
+- are automatically wrapped in Effect `Redacted`;
+- preserve schema optionality;
+- contribute their precise errors and Effect requirements to `appEnv.server`;
+- are grouped by configured resolver so adapters can batch requests.
 
-Provider SDKs are dynamically imported by their own subpath adapter. Importing
-AWS never loads Azure, GCP, or 1Password.
+The provider reference is never included in validation errors, resolver errors,
+CLI output, or type-only CLI metadata.

@@ -24,12 +24,13 @@ describe("azureKeyVaultAdapter", () => {
     const exit = await Effect.runPromiseExit(
       azureKeyVaultAdapter.resolve({
         vaultUrl: "",
-        secrets: { TOKEN: "remote-reference" },
+        referencesByKey: { TOKEN: "remote-reference" },
       }),
     );
 
     expect(exit._tag).toBe("Failure");
     expect(String(exit)).toContain("ResolverConfigurationError");
+    expect(String(exit)).toContain('Set "vaultUrl"');
     expect(String(exit)).not.toContain("remote-reference");
   });
 
@@ -39,7 +40,7 @@ describe("azureKeyVaultAdapter", () => {
     const result = await Effect.runPromise(
       azureKeyVaultAdapter.resolve({
         vaultUrl: "https://vault.example.com",
-        secrets: { TOKEN: "missing-secret" },
+        referencesByKey: { TOKEN: "missing-secret" },
       }),
     );
 
@@ -57,7 +58,7 @@ describe("azureKeyVaultAdapter", () => {
     const result = await Effect.runPromise(
       azureKeyVaultAdapter.resolve({
         vaultUrl: "https://vault.example.com",
-        secrets: { TOKEN: "token" },
+        referencesByKey: { TOKEN: "token" },
       }),
     );
 
@@ -73,7 +74,7 @@ describe("azureKeyVaultAdapter", () => {
     const exit = await Effect.runPromiseExit(
       azureKeyVaultAdapter.resolve({
         vaultUrl: "https://private-vault.example.com",
-        secrets: { TOKEN: "private-reference" },
+        referencesByKey: { TOKEN: "private-reference" },
       }),
     );
 

@@ -1,43 +1,68 @@
 ---
 title: Environment Composition
-description: Compose already-created environment values with extends.
+description: Compose independent server contexts through one canonical extension path.
 ---
 
-`extends` combines validated environment values while preserving their bucket
-metadata and client-access protection.
+Fragments let each module own its values and runtime options:
 
 ```ts
-// database-env.ts
-import { createEnvSync, port, redacted, url } from "@ayronforge/envil";
+import {
+  createEnv,
+  extendEnv,
+  port,
+  postgresUrl,
+  server,
+  shared,
+} from "@ayronforge/envil";
 
-export const databaseEnv = createEnvSync({
-  server: {
-    DATABASE_URL: redacted(url),
-    DB_PORT: port,
-  },
-});
+export const baseEnv = createEnv(
+  shared({ APP_NAME: "My App" }),
+  server({ DATABASE_URL: postgresUrl }),
+);
+
+export const serviceEnv = createEnv(
+  server({ SERVICE_NAME: "payments" }),
+);
+
+export const appEnv = baseEnv.pipe(
+  extendEnv(serviceEnv),
+  extendEnv(server({ PORT: port })),
+);
 ```
+
+`extendEnv` accepts AppEnv values and individual fragments. It is the canonical
+way to compose an existing environment; `createEnv` accepts only fragments.
+This keeps ordering explicit and gives `pipe` one predictable extension model.
+
+## Last definition wins
+
+Composition is applied from left to right:
 
 ```ts
-// env.ts
-import { createEnvSync, requiredString } from "@ayronforge/envil";
-import { databaseEnv } from "./database-env";
-
-export const env = createEnvSync({
-  extends: [databaseEnv],
-  server: {
-    APP_NAME: requiredString,
-  },
-});
+const appEnv = baseEnv.pipe(
+  extendEnv(server({ PORT: port })),
+  extendEnv(
+    server(
+      { PORT: positiveInt },
+      { runtimeEnv: deploymentEnv, prefix: "APP_" },
+    ),
+  ),
+);
 ```
 
-Each extended environment is validated at its own creation boundary. A key may
-not appear in different buckets across the composed metadata.
+The second `PORT` is the entire winning definition. Its schema, source,
+`runtimeEnv`, prefix, redaction, errors, and Effect requirements replace the
+earlier definition. Envil does not merge pieces of duplicate definitions, and
+a resolver owned only by a shadowed definition is never initialized.
 
-`InferEnv<typeof env>` includes both inherited and locally defined values. The
-same composed contract is used by `envil example`.
+Server and client may use the same property name. A server output includes both
+targets, so the later fragment among `server(...)`, `client(...)`, and
+`shared(...)` wins for that key there. A client output considers only client and
+shared fragments.
 
-Each creation boundary can also compose unresolved environments of its own
-modality: `createEnv` resolves Effects, `createEnvPromise` awaits Promises, and
-`createEnvSync` accepts resolved values only. Resolved environment values can be
-composed at any boundary.
+## No file-layout convention
+
+Fragments may be declared inline, exported from feature modules, returned by
+ordinary factories, or assembled with spreads. Envil imposes no filename or
+directory convention. The compiler only uses the explicit `server(...)`
+boundary; it does not interpret the expressions inside it.

@@ -16,7 +16,7 @@ export interface OnePasswordSecretsAdapterOptions {
 
 function resolveOnePasswordSecrets<const Keys extends string>(
   options: OnePasswordSecretsAdapterOptions & {
-    readonly secrets: Readonly<Record<Keys, string>>;
+    readonly referencesByKey: Readonly<Record<Keys, string>>;
   },
 ): Effect.Effect<ResolverResult<Keys>, ResolverError> {
   return Effect.gen(function* () {
@@ -25,7 +25,8 @@ function resolveOnePasswordSecrets<const Keys extends string>(
       return yield* new ResolverConfigurationError({
         adapter: "1password",
         operation: "configure",
-        message: "A 1Password service account token is required",
+        message:
+          'Set "serviceAccountToken" or OP_SERVICE_ACCOUNT_TOKEN before using the 1Password resolver.',
       });
     }
 
@@ -37,7 +38,7 @@ function resolveOnePasswordSecrets<const Keys extends string>(
         integrationVersion: "1.0.0",
       });
     });
-    const entries = resolverEntries(options.secrets);
+    const entries = resolverEntries(options.referencesByKey);
     const references = entries.map(([, reference]) => reference);
     const response = yield* Effect.tryPromise({
       try: () => client.secrets.resolveAll(references),
@@ -45,7 +46,8 @@ function resolveOnePasswordSecrets<const Keys extends string>(
         new ResolverRequestFailed({
           adapter: "1password",
           operation: "read-batch",
-          message: "The 1Password secret request failed",
+          message:
+            "1Password could not read the requested secrets. Check the service account token and vault access.",
         }),
     });
     const values = [];
@@ -60,7 +62,8 @@ function resolveOnePasswordSecrets<const Keys extends string>(
         return yield* new ResolverRequestFailed({
           adapter: "1password",
           operation: "read-batch",
-          message: "The 1Password secret batch was only partially resolved",
+          message:
+            "1Password did not return every requested secret. Check that each reference exists and is accessible.",
         });
       }
       values.push([key, toResolvedSecret(individual.content.secret)] as const);

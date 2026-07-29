@@ -1,67 +1,144 @@
 ---
 title: Core Concepts
-description: Buckets, logical keys, physical keys, redaction, and type-only contracts.
+description: Target-aware fragments, arbitrary Effect Schemas, runtime sources, and type inference.
 ---
 
-## Buckets and exposure
+## Target-aware fragments
 
-- `server` contains values that must stay on the server.
-- `client` contains values intentionally exposed to client bundles.
-- `shared` contains unprefixed values that may execute in both environments.
-
-A logical key may exist in only one bucket. Redacted schemas and resolver keys
-are server-only.
-
-## Logical and physical keys
-
-Schemas and resolvers use logical keys:
-
-```txt
-APP_URL
-DATABASE_PASSWORD
-```
-
-Runtime environment objects use physical keys after bucket prefixes:
-
-```txt
-VITE_APP_URL
-APP_DATABASE_PASSWORD
-```
+`server`, `client`, and `shared` create immutable definitions. They do not read
+configuration when declared:
 
 ```ts
-prefix: {
-  server: "APP_",
-  client: "VITE_",
-}
+const appEnv = createEnv(
+  shared({ APP_NAME: "My App" }),
+  server(serverValues),
+  client(clientValues, {
+    runtimeEnv: import.meta.env,
+    prefix: "VITE_",
+  }),
+);
 ```
 
-Envil rejects physical collisions after prefixes are applied. Resolver
-configuration always uses logical, unprefixed server keys.
+`appEnv.client` resolves client and shared fragments. `appEnv.server` resolves
+server, client, and shared fragments so the server has the complete application
+configuration.
 
-## Redaction
+Fragments are the unit of composition and compilation. Their contents remain
+ordinary TypeScript expressions, so values may come from object spreads,
+factories, imported schemas, and custom resolver adapters.
 
-`redacted(schema)` decodes to `Redacted<T>`. Resolver-derived values are
-redacted automatically and cannot opt out.
+## Any Effect Schema
 
-For optional resolver values, the result is:
+Every variable definition may use any Effect Schema, including transforms,
+refinements, asynchronous decoding, and schemas with context requirements.
+Schema errors and requirements are preserved in the resulting Effect type:
 
 ```ts
-Redacted<string> | undefined
+const serverConfig = server({
+  DATABASE_URL: postgresUrl,
+  PORT: port,
+});
 ```
 
-It is never `Redacted<string | undefined>`.
+Static values are also accepted in server and client fragments. `shared` is
+reserved for public static values available in both outputs; schemas and
+redacted values are rejected there.
+
+## Runtime names and sources
+
+By default, a schema reads its property name with the fragment prefix:
+
+```ts
+client(
+  {
+    API_URL: url, // reads VITE_API_URL
+  },
+  {
+    runtimeEnv: import.meta.env,
+    prefix: "VITE_",
+  },
+);
+```
+
+`fromEnv` maps one property to an exact external name:
+
+```ts
+ANALYTICS_KEY: requiredString.pipe(
+  fromEnv("PUBLIC_ANALYTICS_KEY"),
+)
+```
+
+Each fragment owns its `runtimeEnv`, `prefix`, and
+`emptyStringAsUndefined` options. Independently authored fragments therefore
+keep their original runtime source when composed.
+
+Runtime values may come from an ordinary object, a `ReadonlyMap`, or parsed
+JSON. Dot-separated `fromEnv` names navigate nested objects:
+
+```ts
+server(
+  {
+    DATABASE_URL: postgresUrl.pipe(fromEnv("database.url")),
+  },
+  {
+    runtimeEnv: {
+      database: {
+        url: "postgres://user:pass@localhost:5432/app",
+      },
+    },
+  },
+);
+```
+
+For objects, an exact key such as `"database.url"` takes precedence over the
+equivalent nested path. Map keys are always exact.
+
+## Resolver sources
+
+`fromResolver` makes a configured resolver authoritative for one server
+variable. A resolver adapter is ordinary runtime code: Envil batches references
+that use the same configured resolver, validates the returned values with their
+original schemas, and redacts resolver-backed outputs automatically.
+
+## Composition and precedence
+
+Compose an existing environment with `pipe(extendEnv(...))`:
+
+```ts
+const appEnv = baseEnv.pipe(
+  extendEnv(featureEnv),
+  extendEnv(server({ PORT: port })),
+);
+```
+
+Inputs are applied from left to right. If the same key appears more than once in
+one runtime context, the last complete definition wins, including its value,
+schema, source, runtime options, errors, and Effect requirements. A shadowed
+resolver is not executed.
 
 ## Type inference
 
 ```ts
-import type { InferEnv } from "@ayronforge/envil";
+import type {
+  InferClientEnv,
+  InferEnv,
+  InferServerEnv,
+} from "@ayronforge/envil";
 
-type Environment = InferEnv<typeof env>;
+type ServerEnvironment = InferServerEnv<typeof appEnv>;
+type ClientEnvironment = InferClientEnv<typeof appEnv>;
+type ServerEffectValue = InferEnv<typeof appEnv.server>;
 ```
 
-`InferEnv` returns the complete decoded environment type. It works with an
-Effect, Promise, synchronous value, or awaited value, includes composed
-environments, and preserves `Redacted<T>` values.
+## Runtime access guards
 
-Envil retains additional structural metadata internally for CLI inspection.
-That metadata is phantom: no `__envilContract` property exists at runtime.
+Materialized environments are immutable Proxies. An unknown property does not
+silently return `undefined`; Envil reports whether the property is unavailable
+in the current target.
+
+`appEnv.server` also verifies the runtime when its Effect executes. Browser and
+plugin-marked client builds receive a `ServerEnvironmentAccessError` before
+server fragments or resolvers are evaluated.
+
+Use the [build plugins](/envil/docs/build-security) to make the runtime target
+exact and physically remove server fragment expressions from client bundles.

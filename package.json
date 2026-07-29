@@ -25,9 +25,47 @@
     "envil": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist/cli.d.ts",
+    "dist/cli.js",
+    "dist/cli.js.map",
+    "dist/env.d.ts",
+    "dist/errors.d.ts",
+    "dist/index.d.ts",
+    "dist/index.js",
+    "dist/index.js.map",
+    "dist/presets.d.ts",
+    "dist/presets.js",
+    "dist/presets.js.map",
+    "dist/resolvers",
+    "dist/result.d.ts",
+    "dist/runtime-target.d.ts",
+    "dist/schema-metadata.d.ts",
+    "dist/schemas.d.ts",
+    "dist/types.d.ts",
+    "dist/variable-source.d.ts",
+    "dist/plugins/esbuild.d.ts",
+    "dist/plugins/esbuild.js",
+    "dist/plugins/esbuild.js.map",
+    "dist/plugins/rolldown.d.ts",
+    "dist/plugins/rolldown.js",
+    "dist/plugins/rolldown.js.map",
+    "dist/plugins/rollup.d.ts",
+    "dist/plugins/rollup.js",
+    "dist/plugins/rollup.js.map",
+    "dist/plugins/rspack.d.ts",
+    "dist/plugins/rspack.js",
+    "dist/plugins/rspack.js.map",
+    "dist/plugins/transform.d.ts",
+    "dist/plugins/unplugin.d.ts",
+    "dist/plugins/vite.d.ts",
+    "dist/plugins/vite.js",
+    "dist/plugins/vite.js.map",
+    "dist/plugins/webpack.d.ts",
+    "dist/plugins/webpack.js",
+    "dist/plugins/webpack.js.map"
   ],
   "type": "module",
+  "sideEffects": false,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -54,6 +92,30 @@
     "./1password": {
       "types": "./dist/resolvers/onepassword.d.ts",
       "import": "./dist/resolvers/onepassword.js"
+    },
+    "./plugins/vite": {
+      "types": "./dist/plugins/vite.d.ts",
+      "import": "./dist/plugins/vite.js"
+    },
+    "./plugins/rollup": {
+      "types": "./dist/plugins/rollup.d.ts",
+      "import": "./dist/plugins/rollup.js"
+    },
+    "./plugins/rolldown": {
+      "types": "./dist/plugins/rolldown.d.ts",
+      "import": "./dist/plugins/rolldown.js"
+    },
+    "./plugins/webpack": {
+      "types": "./dist/plugins/webpack.d.ts",
+      "import": "./dist/plugins/webpack.js"
+    },
+    "./plugins/rspack": {
+      "types": "./dist/plugins/rspack.d.ts",
+      "import": "./dist/plugins/rspack.js"
+    },
+    "./plugins/esbuild": {
+      "types": "./dist/plugins/esbuild.d.ts",
+      "import": "./dist/plugins/esbuild.js"
     }
   },
   "scripts": {
@@ -70,22 +132,31 @@
     "test": "bun test",
     "test:coverage": "bun test --coverage"
   },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "typescript6": "npm:typescript@6.0.3",
+    "unplugin": "2.3.11"
+  },
   "devDependencies": {
     "@1password/sdk": "0.3.1",
     "@aws-sdk/client-secrets-manager": "3.984.0",
     "@azure/identity": "4.13.0",
     "@azure/keyvault-secrets": "4.10.0",
     "@google-cloud/secret-manager": "6.1.1",
+    "@rspack/core": "^2.1.7",
     "@types/bun": "^1.3.8",
     "@types/node": "^25.2.1",
+    "effect": "4.0.0-beta.102",
+    "esbuild": "^0.28.1",
+    "esbuild-loader": "^4.5.0",
     "oxfmt": "^0.24.0",
     "oxlint": "^1.39.0",
     "oxlint-tsgolint": "^0.11.0",
-    "typescript": "7.0.2"
-  },
-  "dependencies": {
-    "dotenv": "^17.4.2",
-    "typescript6": "npm:typescript@6.0.3"
+    "rolldown": "^1.2.1",
+    "rollup": "^4.62.3",
+    "typescript": "7.0.2",
+    "vite": "6.4.1",
+    "webpack": "^5.109.2"
   },
   "peerDependencies": {
     "@1password/sdk": "^0.3.1",
@@ -93,7 +164,7 @@
     "@azure/identity": "^4.13.0",
     "@azure/keyvault-secrets": "^4.10.0",
     "@google-cloud/secret-manager": "^6.1.1",
-    "effect": "^3.19.11"
+    "effect": "4.0.0-beta.102"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-secrets-manager": {

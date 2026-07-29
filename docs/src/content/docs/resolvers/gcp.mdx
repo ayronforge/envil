@@ -1,6 +1,6 @@
 ---
 title: GCP Secret Manager
-description: Resolve server secrets with the isolated GCP adapter.
+description: Source server variables from GCP Secret Manager.
 ---
 
 ```bash
@@ -8,25 +8,28 @@ bun add @google-cloud/secret-manager
 ```
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/envil";
+import {
+  configureResolver,
+  createEnv,
+  fromResolver,
+  requiredString,
+  server,
+} from "@ayronforge/envil";
 import { gcpSecretsAdapter } from "@ayronforge/envil/gcp";
 
-export const env = createEnv({
-  server: {
-    STRIPE_SECRET_KEY: requiredString,
-  },
-  resolvers: ({ resolve }) => [
-    resolve(gcpSecretsAdapter, {
-      projectId: "my-project",
-      version: "latest",
-      secrets: {
-        STRIPE_SECRET_KEY: "stripe-secret-key",
-      },
-    }),
-  ],
+const gcp = configureResolver(gcpSecretsAdapter, {
+  projectId: "my-project",
+  version: "latest",
 });
+
+export const appEnv = createEnv(
+  server({
+    API_TOKEN: requiredString.pipe(
+      fromResolver(gcp, "api-token"),
+    ),
+  }),
+);
 ```
 
-Fully qualified resource names do not require `projectId`. GCP gRPC not-found
-code `5` becomes `Option.none()`; other failures remain
-`ResolverRequestFailed`. Payload bytes are decoded as UTF-8.
+Short references require `projectId`. Fully qualified references beginning with
+`projects/` may omit it. GCP not-found responses become `Option.none()`.

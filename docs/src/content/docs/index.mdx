@@ -1,38 +1,43 @@
 ---
 title: Envil
-description: Type-safe environment validation with explicit exposure and secret boundaries.
+description: Type-safe environment validation with composable runtime boundaries.
 ---
 
-Envil turns environment configuration into one typed startup boundary.
+Envil composes target-aware environment fragments and exposes two lazy Effect
+programs:
 
-The model has four parts:
-
-1. Schemas decode runtime strings into application values.
-2. Buckets define where each value may be exposed.
-3. Resolver adapters supply authoritative server secrets.
-4. A type-only contract describes the safe structure for inference and tooling.
+- `appEnv.server` materializes server, client, and shared definitions.
+- `appEnv.client` materializes client and shared definitions.
 
 ```ts
-import { createEnvSync, redacted, url } from "@ayronforge/envil";
+import {
+  client,
+  createEnv,
+  redacted,
+  server,
+  shared,
+  url,
+} from "@ayronforge/envil";
 
-export const env = createEnvSync({
-  server: {
+export const appEnv = createEnv(
+  shared({
+    APP_NAME: "My App",
+  }),
+  server({
     DATABASE_URL: redacted(url),
-  },
-  client: {
-    APP_URL: url,
-  },
-  prefix: {
-    client: "VITE_",
-  },
-});
+  }),
+  client(
+    {
+      APP_URL: url,
+    },
+    {
+      runtimeEnv: import.meta.env,
+      prefix: "VITE_",
+    },
+  ),
+);
 ```
 
-`server` never reaches browser code. `client` and `shared` may, so Envil rejects
-redacted schemas and resolver keys outside `server` at typecheck and runtime.
-
-Envil never places secret values, remote references, defaults, credentials, SDK
-responses, or raw provider errors in its type contract.
-
-Start with the [Quickstart](/envil/docs/getting-started), then read
-[Core Concepts](/envil/docs/core-concepts).
+Nothing is read, decoded, or resolved until the selected Effect runs. Fragments
+can be authored independently and combined with `extendEnv`; when definitions
+overlap, the last complete definition wins.

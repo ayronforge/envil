@@ -50,25 +50,29 @@ function parseFlags(
   for (let index = 0; index < args.length; index += 1) {
     const token = args[index];
     if (token === undefined || !token.startsWith("--")) {
-      throw new Error("Unexpected CLI argument");
+      throw new Error(
+        `Unexpected argument${token === undefined ? "" : ` "${token}"`}. Run "envil --help" to see the available commands and options.`,
+      );
     }
     const equalsIndex = token.indexOf("=");
     const name = token.slice(2, equalsIndex < 0 ? undefined : equalsIndex);
     const expected = specification[name];
     if (expected === undefined) {
-      throw new Error(`Unknown option "--${name}"`);
+      throw new Error(
+        `Unknown option "--${name}". Run the command with --help to see its available options.`,
+      );
     }
     const inlineValue = equalsIndex < 0 ? undefined : token.slice(equalsIndex + 1);
     if (expected === "boolean") {
       if (inlineValue !== undefined) {
-        throw new Error(`Boolean option "--${name}" does not accept a value`);
+        throw new Error(`Use "--${name}" without a value.`);
       }
       parsed[name] = true;
       continue;
     }
     const value = inlineValue ?? args[index + 1];
     if (value === undefined || value.startsWith("--")) {
-      throw new Error(`Option "--${name}" requires a value`);
+      throw new Error(`Option "--${name}" needs a value. Pass it immediately after the option.`);
     }
     parsed[name] = value;
     if (inlineValue === undefined) {
@@ -128,7 +132,9 @@ async function runInit(options: InitOptions, io: CliIO): Promise<void> {
     const inputPath = resolveFromCwd(cwd, options.from);
     const basename = path.basename(inputPath);
     if (basename !== ".env" && basename !== ".env.example") {
-      throw new Error("envil init --from accepts only .env or .env.example");
+      throw new Error(
+        `--from must point to a file named ".env" or ".env.example". Received "${basename}".`,
+      );
     }
     const dotenv = await readTextFileOrThrow(inputPath, "dotenv input");
     source = generateEnvSourceFromDotenv(dotenv, options.clientPrefix);
@@ -184,9 +190,17 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
       return 0;
     }
 
-    throw new Error(`Unknown command "${command}"`);
+    throw new Error(
+      `Unknown command "${command}". Run "envil --help" to see the available commands.`,
+    );
   } catch (failure: unknown) {
-    runtimeIO.stderr(`${failure instanceof Error ? failure.message : "Envil CLI failed"}\n`);
+    runtimeIO.stderr(
+      `${
+        failure instanceof Error
+          ? failure.message
+          : 'Envil could not complete the command. Run "envil --help" and try again.'
+      }\n`,
+    );
     return 1;
   }
 }

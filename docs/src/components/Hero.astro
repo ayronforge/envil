@@ -86,24 +86,19 @@ import { site } from "../data/content.ts";
                         >
                     </div>
                     <pre
-                        class="px-5 py-5 text-[13px] leading-relaxed overflow-x-auto"><code class="text-[#F1EDE4]"><span class="tok-kw">import</span> <span class="tok-punct">{"{"}</span> createEnv<span class="tok-punct">,</span> redacted<span class="tok-punct">,</span> url <span class="tok-punct">{"}"}</span> <span class="tok-kw">from</span> <span class="tok-str">"@ayronforge/envil"</span>
-<span class="tok-kw">import</span> <span class="tok-punct">{"{"}</span> Schema <span class="tok-punct">{"}"}</span> <span class="tok-kw">from</span> <span class="tok-str">"effect"</span>
+                        class="px-5 py-5 text-[13px] leading-relaxed overflow-x-auto"><code class="text-[#F1EDE4]"><span class="tok-kw">import</span> <span class="tok-punct">{"{"}</span> client<span class="tok-punct">,</span> createEnv<span class="tok-punct">,</span> redacted<span class="tok-punct">,</span> requiredString<span class="tok-punct">,</span> server<span class="tok-punct">,</span> shared<span class="tok-punct">,</span> url <span class="tok-punct">{"}"}</span> <span class="tok-kw">from</span> <span class="tok-str">"@ayronforge/envil"</span>
 
-<span class="tok-kw">export const</span> env <span class="tok-punct">=</span> <span class="tok-fn">createEnv</span><span class="tok-punct">({"{"}</span>
-  <span class="tok-prop">server</span><span class="tok-punct">:</span> <span class="tok-punct">{"{"}</span>
-    <span class="tok-prop">OPENAI_API_KEY</span><span class="tok-punct">:</span> <span class="tok-fn">redacted</span><span class="tok-punct">(</span><span class="tok-fn">Schema.String</span><span class="tok-punct">),</span>
-    <span class="tok-prop">DATABASE_URL</span><span class="tok-punct">:</span> <span class="tok-fn">Schema.String</span><span class="tok-punct">,</span>
-    <span class="tok-prop">VECTOR_STORE_URL</span><span class="tok-punct">:</span> <span class="tok-fn">url</span><span class="tok-punct">,</span>
-  <span class="tok-punct">{"}"},</span>
-  <span class="tok-prop">client</span><span class="tok-punct">:</span> <span class="tok-punct">{"{"}</span>
-    <span class="tok-prop">NEXT_PUBLIC_APP_URL</span><span class="tok-punct">:</span> <span class="tok-fn">url</span><span class="tok-punct">,</span>
-  <span class="tok-punct">{"}"},</span>
-  <span class="tok-prop">shared</span><span class="tok-punct">:</span> <span class="tok-punct">{"{"}</span>
-    <span class="tok-prop">NODE_ENV</span><span class="tok-punct">:</span> <span class="tok-fn">Schema.Literal</span><span class="tok-punct">(</span>
-      <span class="tok-str">"development"</span><span class="tok-punct">,</span> <span class="tok-str">"production"</span><span class="tok-punct">,</span> <span class="tok-str">"test"</span>
-    <span class="tok-punct">),</span>
-  <span class="tok-punct">{"}"},</span>
-<span class="tok-punct">{"}"})</span></code></pre>
+<span class="tok-kw">export const</span> appEnv <span class="tok-punct">=</span> <span class="tok-fn">createEnv</span><span class="tok-punct">(</span>
+  <span class="tok-fn">shared</span><span class="tok-punct">({"{"}</span> <span class="tok-prop">APP_NAME</span><span class="tok-punct">:</span> <span class="tok-str">"My App"</span> <span class="tok-punct">{"}"}),</span>
+  <span class="tok-fn">server</span><span class="tok-punct">({"{"}</span>
+    <span class="tok-prop">OPENAI_API_KEY</span><span class="tok-punct">:</span> <span class="tok-fn">redacted</span><span class="tok-punct">(</span><span class="tok-fn">requiredString</span><span class="tok-punct">),</span>
+    <span class="tok-prop">DATABASE_URL</span><span class="tok-punct">:</span> <span class="tok-fn">redacted</span><span class="tok-punct">(</span><span class="tok-fn">requiredString</span><span class="tok-punct">),</span>
+  <span class="tok-punct">{"}"}),</span>
+  <span class="tok-fn">client</span><span class="tok-punct">(</span>
+    <span class="tok-punct">{"{"}</span> <span class="tok-prop">APP_URL</span><span class="tok-punct">:</span> <span class="tok-fn">url</span> <span class="tok-punct">{"}"},</span>
+    <span class="tok-punct">{"{"}</span> <span class="tok-prop">runtimeEnv</span><span class="tok-punct">:</span> import.meta.env<span class="tok-punct">,</span> <span class="tok-prop">prefix</span><span class="tok-punct">:</span> <span class="tok-str">"VITE_"</span> <span class="tok-punct">{"}"},</span>
+  <span class="tok-punct">),</span>
+<span class="tok-punct">)</span></code></pre>
                 </div>
             </div>
         </div>

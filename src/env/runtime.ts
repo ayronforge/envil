@@ -1,340 +1,470 @@
-import { Either, Option, Redacted, Schema } from "effect";
+import { Effect, Option, Redacted, Result, Schema } from "effect";
 
 import {
-  ClientAccessError,
+  EnvironmentAccessError,
   EnvConfigurationError,
   EnvValidationError,
   type EnvValidationIssue,
 } from "../errors.ts";
-import { resolvePrefixMap } from "../prefix.ts";
+import type { AnyConfiguredResolver, ResolverResult } from "../resolvers/types.ts";
+import { assertServerRuntime, type RuntimeTarget } from "../runtime-target.ts";
 import { getSchemaIdentifier, isRedactedSchema } from "../schema-metadata.ts";
-import type { AnyEnv, EnvOptions, PrefixMap, SchemaDict } from "../types.ts";
+import type { AnyEnvFragment, AnySchema, RuntimeEnv } from "../types.ts";
+import { isSourcedVariable, type VariableSource } from "../variable-source.ts";
 
-interface EnvMeta {
-  readonly serverKeys: ReadonlySet<string>;
-  readonly clientKeys: ReadonlySet<string>;
-  readonly sharedKeys: ReadonlySet<string>;
+interface VariablePlan {
+  readonly _tag: "variable";
+  readonly key: string;
+  readonly runtimeKey: string | undefined;
+  readonly schema: AnySchema;
+  readonly source: VariableSource | undefined;
+  readonly fragmentTarget: "server" | "client";
+  readonly runtimeEnv: RuntimeEnv | undefined;
+  readonly emptyStringAsUndefined: boolean | undefined;
 }
 
-interface AggregatedKeys {
-  readonly serverKeys: Set<string>;
-  readonly clientKeys: Set<string>;
-  readonly sharedKeys: Set<string>;
+interface StaticPlan {
+  readonly _tag: "static";
+  readonly key: string;
+  readonly value: unknown;
 }
 
-type EnvCategory = keyof Required<PrefixMap>;
+type EnvironmentEntryPlan = VariablePlan | StaticPlan;
 
-/** Erased options consumed by the internal environment runtime. */
-export type RuntimeOptions = EnvOptions<
-  SchemaDict,
-  SchemaDict,
-  SchemaDict,
-  readonly AnyEnv[],
-  string | PrefixMap | undefined
->;
-
-const envMetaStore = new WeakMap<object, EnvMeta>();
-
-/** Returns whether a value was created by this Envil runtime. */
-export function isEnvValue(value: unknown): value is AnyEnv {
-  return typeof value === "object" && value !== null && envMetaStore.has(value);
+interface ResolverGroup {
+  readonly resolver: AnyConfiguredResolver;
+  readonly referencesByKey: Record<string, unknown>;
 }
 
-function addToSet(target: Set<string>, values: Iterable<string>): void {
-  for (const value of values) {
-    target.add(value);
+interface RuntimeConfiguredResolver extends AnyConfiguredResolver {
+  readonly resolve: (
+    referencesByKey: Readonly<Record<string, unknown>>,
+  ) => Effect.Effect<ResolverResult, unknown, unknown>;
+}
+
+function configurationFailure(message: string): EnvConfigurationError {
+  return new EnvConfigurationError(message);
+}
+
+function splitVariableDefinition(definition: unknown):
+  | {
+      readonly schema: AnySchema;
+      readonly source: VariableSource | undefined;
+    }
+  | undefined {
+  if (isSourcedVariable(definition)) {
+    return { schema: definition.schema, source: definition.source };
   }
-}
-
-function getEnvMeta(env: unknown): EnvMeta | undefined {
-  if (!isEnvValue(env)) {
+  if (!Schema.isSchema(definition)) {
     return undefined;
   }
 
-  return envMetaStore.get(env);
+  // SAFETY: Public fragment contracts accept any Effect Schema. This runtime
+  // branch authenticates the value as an Effect Schema after erasure.
+  return { schema: definition as AnySchema, source: undefined };
 }
 
-function normalizeRuntimeEnv(
-  runtimeEnv: Readonly<Record<string, string | undefined>>,
-  emptyStringAsUndefined: boolean | undefined,
-): Readonly<Record<string, string | undefined>> {
-  if (!emptyStringAsUndefined) {
-    return runtimeEnv;
+function createVariablePlan(
+  fragment: AnyEnvFragment,
+  key: string,
+  schema: AnySchema,
+  source: VariableSource | undefined,
+): VariablePlan {
+  if (fragment.target === "client" && source?._tag === "resolver") {
+    throw configurationFailure(
+      `"${key}" uses fromResolver() in a client fragment. Move it to a server fragment.`,
+    );
+  }
+  if (fragment.target === "client" && isRedactedSchema(schema)) {
+    throw configurationFailure(
+      `"${key}" is redacted in a client fragment, which is public. Move it to a server fragment.`,
+    );
   }
 
-  return Object.fromEntries(
-    Object.entries(runtimeEnv).map(([key, value]) => [key, value === "" ? undefined : value]),
-  );
+  const runtimeKey =
+    source?._tag === "resolver"
+      ? undefined
+      : source?._tag === "env"
+        ? source.name
+        : `${fragment.prefix ?? ""}${key}`;
+  if (runtimeKey !== undefined && runtimeKey.length === 0) {
+    throw configurationFailure(
+      `"${key}" uses an empty environment variable name. Pass a name to fromEnv().`,
+    );
+  }
+
+  return {
+    _tag: "variable",
+    key,
+    runtimeKey,
+    schema,
+    source,
+    fragmentTarget: fragment.target === "client" ? "client" : "server",
+    runtimeEnv: fragment.runtimeEnv,
+    emptyStringAsUndefined: fragment.emptyStringAsUndefined,
+  };
 }
 
-function aggregateEnvKeys(
-  server: SchemaDict,
-  client: SchemaDict,
-  shared: SchemaDict,
-  extendsEnvs: readonly AnyEnv[],
-): AggregatedKeys {
-  const serverKeys = new Set<string>(Object.keys(server));
-  const clientKeys = new Set<string>(Object.keys(client));
-  const sharedKeys = new Set<string>(Object.keys(shared));
+function createEnvironmentPlans(
+  target: RuntimeTarget,
+  fragments: ReadonlyArray<AnyEnvFragment>,
+): ReadonlyArray<EnvironmentEntryPlan> {
+  const plans = new Map<string, EnvironmentEntryPlan>();
 
-  for (const extendedEnv of extendsEnvs) {
-    const metadata = getEnvMeta(extendedEnv);
-    if (metadata === undefined) {
+  for (const fragment of fragments) {
+    if (target === "client" && fragment.target === "server") {
       continue;
     }
-    addToSet(serverKeys, metadata.serverKeys);
-    addToSet(clientKeys, metadata.clientKeys);
-    addToSet(sharedKeys, metadata.sharedKeys);
+
+    for (const [key, definition] of Object.entries(fragment.values)) {
+      if (fragment.target === "shared") {
+        if (Redacted.isRedacted(definition) || Schema.isSchema(definition)) {
+          throw configurationFailure(
+            `"${key}" is not a static public value. Move schemas and sensitive values out of shared().`,
+          );
+        }
+        plans.set(key, { _tag: "static", key, value: definition });
+        continue;
+      }
+
+      const variable = splitVariableDefinition(definition);
+      if (variable === undefined) {
+        if (fragment.target === "client" && Redacted.isRedacted(definition)) {
+          throw configurationFailure(
+            `"${key}" is redacted in a client fragment, which is public. Move it to a server fragment.`,
+          );
+        }
+        plans.set(key, { _tag: "static", key, value: definition });
+        continue;
+      }
+
+      plans.set(key, createVariablePlan(fragment, key, variable.schema, variable.source));
+    }
   }
 
-  return { serverKeys, clientKeys, sharedKeys };
-}
-
-function assertNoLogicalCollisions(keys: AggregatedKeys): void {
-  for (const key of keys.serverKeys) {
-    if (keys.clientKeys.has(key) || keys.sharedKeys.has(key)) {
-      throw new EnvConfigurationError(
-        `Environment variable "${key}" is configured in more than one bucket`,
+  const runtimeOwners = new Map<string, string>();
+  for (const plan of plans.values()) {
+    if (plan._tag === "static" || plan.runtimeKey === undefined) {
+      continue;
+    }
+    const previous = runtimeOwners.get(plan.runtimeKey);
+    if (previous !== undefined) {
+      throw configurationFailure(
+        `"${previous}" and "${plan.key}" both read "${plan.runtimeKey}" in the ${target} environment. Rename one property or map it with fromEnv().`,
       );
     }
+    runtimeOwners.set(plan.runtimeKey, plan.key);
   }
 
-  for (const key of keys.clientKeys) {
-    if (keys.sharedKeys.has(key)) {
-      throw new EnvConfigurationError(
-        `Environment variable "${key}" is configured in more than one bucket`,
-      );
+  return [...plans.values()];
+}
+
+function groupResolverVariables(plans: ReadonlyArray<VariablePlan>): ReadonlyArray<ResolverGroup> {
+  const groups = new Map<AnyConfiguredResolver, ResolverGroup>();
+
+  for (const plan of plans) {
+    if (plan.source?._tag !== "resolver") {
+      continue;
     }
-  }
-}
-
-function assertNoPhysicalCollisions(
-  server: SchemaDict,
-  client: SchemaDict,
-  shared: SchemaDict,
-  prefixMap: Required<PrefixMap>,
-): void {
-  const physicalKeys = new Map<string, string>();
-
-  for (const [bucket, schemas] of [
-    ["server", server],
-    ["client", client],
-    ["shared", shared],
-  ] as const) {
-    for (const logicalKey of Object.keys(schemas)) {
-      const physicalKey = `${prefixMap[bucket]}${logicalKey}`;
-      const previous = physicalKeys.get(physicalKey);
-      if (previous !== undefined) {
-        throw new EnvConfigurationError(
-          `Physical environment key "${physicalKey}" is produced by both ${previous} and ${bucket}.${logicalKey}`,
-        );
-      }
-      physicalKeys.set(physicalKey, `${bucket}.${logicalKey}`);
-    }
-  }
-}
-
-function assertNoPublicSecrets(client: SchemaDict, shared: SchemaDict): void {
-  for (const [bucket, schemas] of [
-    ["client", client],
-    ["shared", shared],
-  ] as const) {
-    for (const [key, schema] of Object.entries(schemas)) {
-      if (isRedactedSchema(schema)) {
-        throw new EnvConfigurationError(
-          `Redacted schema "${key}" cannot be configured in the ${bucket} bucket`,
-        );
-      }
-    }
-  }
-}
-
-function selectSchemaForRuntime(
-  isServer: boolean,
-  server: SchemaDict,
-  client: SchemaDict,
-  shared: SchemaDict,
-): SchemaDict {
-  return isServer ? { ...server, ...client, ...shared } : { ...client, ...shared };
-}
-
-function getKeyCategory(key: string, client: SchemaDict, shared: SchemaDict): EnvCategory {
-  if (key in client) {
-    return "client";
-  }
-  if (key in shared) {
-    return "shared";
-  }
-  return "server";
-}
-
-function parseSchemaValues(
-  schema: SchemaDict,
-  options: {
-    readonly client: SchemaDict;
-    readonly shared: SchemaDict;
-    readonly runtimeEnv: Readonly<Record<string, string | undefined>>;
-    readonly prefixMap: Required<PrefixMap>;
-    readonly resolvedSecrets: ReadonlyMap<string, Option.Option<Redacted.Redacted<string>>>;
-  },
-): { readonly values: Record<string, unknown>; readonly issues: EnvValidationIssue[] } {
-  const values: Record<string, unknown> = {};
-  const issues: EnvValidationIssue[] = [];
-
-  for (const [key, validator] of Object.entries(schema)) {
-    const category = getKeyCategory(key, options.client, options.shared);
-    const runtimeKey = `${options.prefixMap[category]}${key}`;
-    const resolvedSecret = category === "server" ? options.resolvedSecrets.get(key) : undefined;
-    const rawValue =
-      resolvedSecret === undefined
-        ? options.runtimeEnv[runtimeKey]
-        : Option.match(resolvedSecret, {
-            onNone: () => undefined,
-            onSome: Redacted.value,
-          });
-    const parsed = Schema.decodeUnknownEither(validator)(rawValue);
-
-    if (Either.isLeft(parsed)) {
-      const schemaIdentifier = getSchemaIdentifier(validator);
-      issues.push({
-        _tag: rawValue === undefined ? "MissingVariable" : "InvalidVariable",
-        key: runtimeKey,
-        ...(schemaIdentifier === undefined ? {} : { schemaIdentifier }),
-        sensitive: resolvedSecret !== undefined || isRedactedSchema(validator),
+    const existing = groups.get(plan.source.resolver);
+    if (existing === undefined) {
+      groups.set(plan.source.resolver, {
+        resolver: plan.source.resolver,
+        referencesByKey: { [plan.key]: plan.source.reference },
       });
       continue;
     }
-
-    const decoded =
-      Redacted.isRedacted(parsed.right) && Redacted.value(parsed.right) === undefined
-        ? undefined
-        : parsed.right;
-    values[key] =
-      resolvedSecret !== undefined && decoded !== undefined && !Redacted.isRedacted(decoded)
-        ? Redacted.make(decoded)
-        : decoded;
+    existing.referencesByKey[plan.key] = plan.source.reference;
   }
 
-  return { values, issues };
+  return [...groups.values()];
 }
 
-function mergeExtendedEnvs(
-  extendsEnvs: readonly AnyEnv[],
-  parsedValues: Record<string, unknown>,
-): Record<string, unknown> {
-  const mergedValues: Record<string, unknown> = {};
-
-  for (const extendedEnv of extendsEnvs) {
-    for (const [key, value] of Object.entries(extendedEnv)) {
-      mergedValues[key] = value;
-    }
-  }
-
-  for (const [key, value] of Object.entries(parsedValues)) {
-    mergedValues[key] = value;
-  }
-
-  return mergedValues;
-}
-
-function createClientBlockedKeys(aggregated: AggregatedKeys): Set<string> {
-  const blockedKeys = new Set<string>();
-
-  for (const key of aggregated.serverKeys) {
-    blockedKeys.add(key);
-  }
-
-  return blockedKeys;
-}
-
-function createReadOnlyEnv<Output extends AnyEnv>(
-  envValues: Record<string, unknown>,
-  options: {
-    readonly isServer: boolean;
-    readonly clientBlockedKeys: ReadonlySet<string>;
-  },
-): Output {
-  const frozenValues = Object.freeze(envValues);
-  const env = new Proxy(frozenValues, {
-    get(target, property) {
-      if (typeof property !== "string") {
-        return Reflect.get(target, property);
-      }
-      if (!options.isServer && options.clientBlockedKeys.has(property)) {
-        throw new ClientAccessError(property);
+function runResolverGroup(
+  group: ResolverGroup,
+): Effect.Effect<readonly [ResolverGroup, ResolverResult], unknown, unknown> {
+  return Effect.try({
+    try: () => {
+      const candidate: unknown = group.resolver;
+      if (
+        typeof candidate !== "object" ||
+        candidate === null ||
+        typeof Reflect.get(candidate, "resolve") !== "function"
+      ) {
+        throw configurationFailure(
+          `Resolver "${group.resolver.name}" is not configured correctly. Create it with configureResolver().`,
+        );
       }
 
-      return Reflect.get(target, property);
+      // SAFETY: fromResolver constrains every stored reference to the
+      // configured resolver's reference type. Grouping only changes the keys.
+      return (candidate as RuntimeConfiguredResolver).resolve(group.referencesByKey);
     },
-    set() {
-      throw new TypeError("Environment object is read-only");
-    },
-    deleteProperty() {
-      throw new TypeError("Environment object is read-only");
-    },
-    defineProperty() {
-      throw new TypeError("Environment object is read-only");
-    },
-  });
-
-  // SAFETY: The schemas were decoded above, the object is immutable, and the
-  // EnvContractCarrier field is deliberately phantom and absent at runtime.
-  return env as Output;
-}
-
-/** Validates, composes, and protects one runtime environment value. */
-export function buildEnv(
-  options: RuntimeOptions,
-  resolvedSecrets: ReadonlyMap<string, Option.Option<Redacted.Redacted<string>>>,
-): AnyEnv {
-  const extendsEnvs = options.extends ?? [];
-  const runtimeEnv = normalizeRuntimeEnv(
-    options.runtimeEnv ?? process.env,
-    options.emptyStringAsUndefined,
+    catch: (failure: unknown) =>
+      failure instanceof EnvConfigurationError
+        ? failure
+        : configurationFailure(
+            `Resolver "${group.resolver.name}" could not be configured. Check its options and try again.`,
+          ),
+  }).pipe(
+    Effect.flatMap((effect) => effect),
+    Effect.map((result) => [group, result] as const),
   );
-  const isServer = options.isServer ?? typeof window === "undefined";
-  const server = options.server ?? {};
-  const client = options.client ?? {};
-  const shared = options.shared ?? {};
-  const aggregated = aggregateEnvKeys(server, client, shared, extendsEnvs);
-  const prefixMap = resolvePrefixMap(options.prefix);
+}
 
-  assertNoLogicalCollisions(aggregated);
-  assertNoPhysicalCollisions(server, client, shared, prefixMap);
-  assertNoPublicSecrets(client, shared);
+function collectResolvedValues(
+  groups: ReadonlyArray<readonly [ResolverGroup, ResolverResult]>,
+): ReadonlyMap<string, Option.Option<Redacted.Redacted<string>>> {
+  const values = new Map<string, Option.Option<Redacted.Redacted<string>>>();
 
-  for (const key of resolvedSecrets.keys()) {
-    if (!(key in server)) {
-      throw new EnvConfigurationError(
-        `Resolver key "${key}" is not configured in the server bucket`,
-      );
+  for (const [group, result] of groups) {
+    for (const key of Object.keys(group.referencesByKey)) {
+      const value = result[key];
+      if (value === undefined || !Option.isOption(value)) {
+        throw configurationFailure(
+          `Resolver "${group.resolver.name}" did not return "${key}". Check the resolver implementation and try again.`,
+        );
+      }
+      values.set(key, value);
     }
   }
 
-  const runtimeSchema = selectSchemaForRuntime(isServer, server, client, shared);
-  const { values: parsedValues, issues } = parseSchemaValues(runtimeSchema, {
-    client,
-    shared,
-    runtimeEnv,
-    prefixMap,
-    resolvedSecrets,
-  });
+  return values;
+}
 
-  if (issues.length > 0) {
-    throw new EnvValidationError(issues);
+function readNestedObjectValue(
+  runtimeEnv: Readonly<Record<string, unknown>>,
+  key: string,
+): unknown {
+  if (Object.hasOwn(runtimeEnv, key)) {
+    return Reflect.get(runtimeEnv, key);
   }
 
-  const mergedValues = mergeExtendedEnvs(extendsEnvs, parsedValues);
-  const env = createReadOnlyEnv(mergedValues, {
-    isServer,
-    clientBlockedKeys: createClientBlockedKeys(aggregated),
-  });
+  let current: unknown = runtimeEnv;
+  for (const segment of key.split(".")) {
+    if (typeof current !== "object" || current === null || !Object.hasOwn(current, segment)) {
+      return undefined;
+    }
+    current = Reflect.get(current, segment);
+  }
+  return current;
+}
 
-  envMetaStore.set(env, {
-    serverKeys: aggregated.serverKeys,
-    clientKeys: aggregated.clientKeys,
-    sharedKeys: aggregated.sharedKeys,
-  });
+function isRuntimeMap(runtimeEnv: RuntimeEnv): runtimeEnv is ReadonlyMap<string, unknown> {
+  return (
+    runtimeEnv instanceof Map ||
+    ("get" in runtimeEnv &&
+      typeof Reflect.get(runtimeEnv, "get") === "function" &&
+      "has" in runtimeEnv &&
+      typeof Reflect.get(runtimeEnv, "has") === "function")
+  );
+}
 
-  return env;
+function readRuntimeValue(runtimeEnv: RuntimeEnv, key: string): unknown {
+  return isRuntimeMap(runtimeEnv) ? runtimeEnv.get(key) : readNestedObjectValue(runtimeEnv, key);
+}
+
+function defaultServerRuntimeEnv(): RuntimeEnv {
+  if (typeof process === "undefined") {
+    throw configurationFailure(
+      "No server runtime environment is available. Pass runtimeEnv to server().",
+    );
+  }
+  return process.env;
+}
+
+function validateRuntimeEnv(runtimeEnv: unknown): asserts runtimeEnv is RuntimeEnv {
+  if (
+    runtimeEnv instanceof Map ||
+    (typeof runtimeEnv === "object" && runtimeEnv !== null && !Array.isArray(runtimeEnv))
+  ) {
+    return;
+  }
+
+  throw configurationFailure(
+    "runtimeEnv must be an environment object, parsed JSON object, or Map.",
+  );
+}
+
+function runtimeEnvForPlan(plan: VariablePlan): RuntimeEnv {
+  const runtimeEnv: unknown =
+    plan.runtimeEnv ??
+    (plan.fragmentTarget === "server"
+      ? defaultServerRuntimeEnv()
+      : (() => {
+          throw configurationFailure(
+            `The client variable "${plan.key}" needs runtimeEnv. Pass the client runtime object, such as import.meta.env.`,
+          );
+        })());
+  validateRuntimeEnv(runtimeEnv);
+  return runtimeEnv;
+}
+
+function rawValue(
+  plan: VariablePlan,
+  resolvedValues: ReadonlyMap<string, Option.Option<Redacted.Redacted<string>>>,
+): unknown {
+  if (plan.source?._tag === "resolver") {
+    const resolved = resolvedValues.get(plan.key);
+    return resolved === undefined
+      ? undefined
+      : Option.match(resolved, {
+          onNone: () => undefined,
+          onSome: Redacted.value,
+        });
+  }
+
+  const value =
+    plan.runtimeKey === undefined
+      ? undefined
+      : readRuntimeValue(runtimeEnvForPlan(plan), plan.runtimeKey);
+  return plan.emptyStringAsUndefined && value === "" ? undefined : value;
+}
+
+interface VariableInput {
+  readonly plan: VariablePlan;
+  readonly input: unknown;
+}
+
+function readVariableInputs(
+  plans: ReadonlyArray<VariablePlan>,
+  resolvedValues: ReadonlyMap<string, Option.Option<Redacted.Redacted<string>>>,
+): ReadonlyArray<VariableInput> {
+  return plans.map((plan) => ({
+    plan,
+    input: rawValue(plan, resolvedValues),
+  }));
+}
+
+function decodeVariableInputs(
+  inputs: ReadonlyArray<VariableInput>,
+): Effect.Effect<ReadonlyMap<string, unknown>, EnvValidationError, unknown> {
+  return Effect.forEach(inputs, ({ plan, input }) =>
+    Schema.decodeUnknownEffect(plan.schema)(input).pipe(
+      Effect.result,
+      Effect.map((result) => ({ input, plan, result })),
+    ),
+  ).pipe(
+    Effect.flatMap((results) => {
+      const values = new Map<string, unknown>();
+      const issues: EnvValidationIssue[] = [];
+
+      for (const { input, plan, result } of results) {
+        if (Result.isFailure(result)) {
+          const schemaIdentifier = getSchemaIdentifier(plan.schema);
+          issues.push({
+            _tag: input === undefined ? "MissingVariable" : "InvalidVariable",
+            key: plan.runtimeKey ?? plan.key,
+            ...(schemaIdentifier === undefined ? {} : { schemaIdentifier }),
+            sensitive: plan.source?._tag === "resolver" || isRedactedSchema(plan.schema),
+          });
+          continue;
+        }
+
+        const decoded =
+          Redacted.isRedacted(result.success) && Redacted.value(result.success) === undefined
+            ? undefined
+            : result.success;
+        values.set(
+          plan.key,
+          plan.source?._tag === "resolver" && decoded !== undefined && !Redacted.isRedacted(decoded)
+            ? Redacted.make(decoded)
+            : decoded,
+        );
+      }
+
+      return issues.length > 0
+        ? Effect.fail(new EnvValidationError(issues))
+        : Effect.succeed(values);
+    }),
+  );
+}
+
+function createReadOnlyEnvironment(
+  target: RuntimeTarget,
+  plans: ReadonlyArray<EnvironmentEntryPlan>,
+  parsedValues: ReadonlyMap<string, unknown>,
+): Readonly<Record<string, unknown>> {
+  const mutableValues: Record<string, unknown> = {};
+  Object.setPrototypeOf(mutableValues, null);
+  for (const plan of plans) {
+    mutableValues[plan.key] = plan._tag === "static" ? plan.value : parsedValues.get(plan.key);
+  }
+  const values = Object.freeze(mutableValues);
+  return new Proxy(values, {
+    get(environment, property, receiver) {
+      if (typeof property !== "string") {
+        return Reflect.get(environment, property, receiver);
+      }
+      if (Object.hasOwn(environment, property)) {
+        return Reflect.get(environment, property, receiver);
+      }
+      if (property === "then" || property === "toJSON" || property === "__esModule") {
+        return undefined;
+      }
+      throw new EnvironmentAccessError(target, property);
+    },
+    set(_environment, property) {
+      throw new TypeError(
+        `"${String(property)}" cannot be changed because environment values are read-only. Update its source and run the Effect again.`,
+      );
+    },
+    deleteProperty(_environment, property) {
+      throw new TypeError(
+        `"${String(property)}" cannot be removed because environment values are read-only. Update the definition and run the Effect again.`,
+      );
+    },
+    defineProperty(_environment, property) {
+      throw new TypeError(
+        `"${String(property)}" cannot be redefined because environment values are read-only. Update the definition and run the Effect again.`,
+      );
+    },
+  });
+}
+
+/** Lazily resolves one target from an immutable environment fragment plan. */
+export function buildEnvironmentEffect(
+  target: RuntimeTarget,
+  fragments: ReadonlyArray<AnyEnvFragment>,
+): Effect.Effect<Readonly<Record<string, unknown>>, unknown, unknown> {
+  return Effect.try({
+    try: () => {
+      if (target === "server") {
+        assertServerRuntime();
+      }
+      const plans = createEnvironmentPlans(target, fragments);
+      const variables = plans.filter((plan): plan is VariablePlan => plan._tag === "variable");
+      return {
+        plans,
+        variables,
+        resolverGroups: groupResolverVariables(variables),
+      };
+    },
+    catch: (failure: unknown) =>
+      failure instanceof EnvConfigurationError
+        ? failure
+        : configurationFailure(
+            `Envil could not prepare the ${target} environment. Check its fragments and try again.`,
+          ),
+  }).pipe(
+    Effect.flatMap(({ plans, variables, resolverGroups }) =>
+      Effect.forEach(resolverGroups, runResolverGroup, {
+        concurrency: "unbounded",
+      }).pipe(
+        Effect.flatMap((resolverResults) =>
+          Effect.try({
+            try: () => readVariableInputs(variables, collectResolvedValues(resolverResults)),
+            catch: (failure: unknown) =>
+              failure instanceof EnvConfigurationError
+                ? failure
+                : configurationFailure(
+                    `Envil could not read the ${target} environment. Check its runtime sources and try again.`,
+                  ),
+          }),
+        ),
+        Effect.flatMap(decodeVariableInputs),
+        Effect.map((parsedValues) => createReadOnlyEnvironment(target, plans, parsedValues)),
+      ),
+    ),
+  );
 }

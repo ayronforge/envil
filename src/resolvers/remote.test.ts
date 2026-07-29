@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { Effect, Option, Redacted } from "effect";
+import { Cause, Effect, Option, Redacted } from "effect";
 
 import { SecretSource, SecretSourceRequestFailed, customSecretsAdapter } from "./remote.ts";
 
@@ -12,7 +12,7 @@ describe("SecretSource", () => {
     const result = await Effect.runPromise(
       customSecretsAdapter
         .resolve({
-          secrets: { TOKEN: "remote-reference" },
+          referencesByKey: { TOKEN: "remote-reference" },
         })
         .pipe(Effect.provide(layer)),
     );
@@ -31,7 +31,7 @@ describe("SecretSource", () => {
     const result = await Effect.runPromise(
       customSecretsAdapter
         .resolve({
-          secrets: { TOKEN: "remote-reference" },
+          referencesByKey: { TOKEN: "remote-reference" },
         })
         .pipe(Effect.provide(layer)),
     );
@@ -49,13 +49,17 @@ describe("SecretSource", () => {
     const exit = await Effect.runPromiseExit(
       customSecretsAdapter
         .resolve({
-          secrets: { TOKEN: "private-reference" },
+          referencesByKey: { TOKEN: "private-reference" },
         })
         .pipe(Effect.provide(layer)),
     );
 
     expect(exit._tag).toBe("Failure");
     expect(String(exit)).toContain("SecretSourceRequestFailed");
+    if (exit._tag === "Failure") {
+      const failure = Option.getOrUndefined(Cause.findErrorOption(exit.cause));
+      expect(String(failure)).toContain("Check the source implementation and try again");
+    }
     expect(String(exit)).not.toContain(secret);
     expect(String(exit)).not.toContain("private-reference");
   });
@@ -66,7 +70,7 @@ describe("SecretSource", () => {
     });
     const exit = await Effect.runPromiseExit(
       customSecretsAdapter
-        .resolve({ secrets: { TOKEN: "reference" } })
+        .resolve({ referencesByKey: { TOKEN: "reference" } })
         .pipe(Effect.provideService(SecretSource, layer)),
     );
 

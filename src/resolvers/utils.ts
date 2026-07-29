@@ -22,7 +22,7 @@ export function initializeAdapter<Client>(
       new ResolverInitializationError({
         adapter,
         operation: "initialize",
-        message: `Failed to initialize the ${adapter} secret adapter`,
+        message: `Could not start the ${adapter} secret resolver. Check that its SDK and credentials are configured, then try again.`,
       }),
   });
 }
@@ -46,7 +46,7 @@ export function requestSecret(
               new ResolverRequestFailed({
                 adapter,
                 operation,
-                message: `The ${adapter} secret request failed`,
+                message: `The ${adapter} resolver could not read a secret. Check provider access and try again.`,
               }),
             ),
       onSuccess: (value) => Effect.succeed(toResolvedSecret(value)),

@@ -1,174 +1,199 @@
-import { Function, Schema } from "effect";
+import { Function, Schema, SchemaGetter } from "effect";
 
-export const REDACTED_ANNOTATION = Symbol.for("@ayronforge/envil/redacted");
+export const REDACTED_ANNOTATION = "@ayronforge/envil/redacted";
+
+function withDefaultSchema<S extends Schema.Top>(
+  schema: S,
+  defaultValue: NonNullable<Schema.Schema.Type<S>>,
+) {
+  return Schema.UndefinedOr(schema).pipe(
+    Schema.decodeTo(Schema.toType(schema), {
+      decode: SchemaGetter.transform<S["Type"], S["Type"] | undefined>(
+        (value) => value ?? defaultValue,
+      ),
+      encode: SchemaGetter.transform<S["Type"] | undefined, S["Type"]>((value) => value),
+    }),
+  );
+}
 
 export const withDefault: {
-  <S extends Schema.Schema.Any>(
+  <S extends Schema.Top>(
     defaultValue: NonNullable<Schema.Schema.Type<S>>,
-  ): (
-    schema: S,
-  ) => Schema.transform<
-    Schema.UndefinedOr<S>,
-    Schema.SchemaClass<NonNullable<Schema.Schema.Type<S>>>
-  >;
-  <S extends Schema.Schema.Any>(
+  ): (schema: S) => ReturnType<typeof withDefaultSchema<S>>;
+  <S extends Schema.Top>(
     schema: S,
     defaultValue: NonNullable<Schema.Schema.Type<S>>,
-  ): Schema.transform<
-    Schema.UndefinedOr<S>,
-    Schema.SchemaClass<NonNullable<Schema.Schema.Type<S>>>
-  >;
-} = Function.dual(
-  2,
-  <S extends Schema.Schema.Any>(schema: S, defaultValue: NonNullable<Schema.Schema.Type<S>>) => {
-    const withDefaultSchema = Schema.transform(
-      Schema.UndefinedOr(schema),
-      Schema.typeSchema(schema),
-      {
-        decode: (value) => value ?? defaultValue,
-        encode: (value) => value,
-      },
-    ) as Schema.transform<
-      Schema.UndefinedOr<S>,
-      Schema.SchemaClass<NonNullable<Schema.Schema.Type<S>>>
-    >;
+  ): ReturnType<typeof withDefaultSchema<S>>;
+} = Function.dual(2, withDefaultSchema);
 
-    return withDefaultSchema;
-  },
-);
+export const optional = <S extends Schema.Top>(schema: S) => Schema.UndefinedOr(schema);
 
-export const optional = <S extends Schema.Schema.Any>(schema: S) => Schema.UndefinedOr(schema);
-
-export const redacted = <S extends Schema.Schema.Any>(schema: S) =>
-  Schema.Redacted(schema).annotations({
+export const redacted = <S extends Schema.Top>(schema: S) =>
+  Schema.RedactedFromValue(schema).annotate({
     [REDACTED_ANNOTATION]: true,
-  } as Record<PropertyKey, unknown>);
+  });
 
-export const requiredString = Schema.String.pipe(Schema.minLength(1)).annotations({
-  identifier: "RequiredString",
-} as Record<PropertyKey, unknown>);
-
-export const boolean = Schema.transform(
-  Schema.String.pipe(
-    Schema.filter((s) => ["true", "false", "1", "0"].includes(s.toLowerCase()), {
-      identifier: "BooleanString",
-      message: () => "Expected 'true', 'false', '1', or '0'",
-    }),
-  ),
-  Schema.Boolean,
-  {
-    decode: (s) => s.toLowerCase() === "true" || s === "1",
-    encode: (b) => (b ? "true" : "false"),
-  },
+export const requiredString = Schema.String.check(
+  Schema.isMinLength(1, {
+    identifier: "RequiredString",
+    message: "Enter a non-empty value",
+  }),
 );
 
-export const integer = Schema.NumberFromString.pipe(Schema.int()).annotations({
+const booleanString = Schema.String.check(
+  Schema.makeFilter<string>((value) => ["true", "false", "1", "0"].includes(value.toLowerCase()), {
+    identifier: "BooleanString",
+    message: "Use one of: true, false, 1, or 0",
+  }),
+);
+
+export const boolean = booleanString.pipe(
+  Schema.decodeTo(Schema.Boolean, {
+    decode: SchemaGetter.transform(
+      (value: string) => value.toLowerCase() === "true" || value === "1",
+    ),
+    encode: SchemaGetter.transform((value: boolean) => (value ? "true" : "false")),
+  }),
+);
+
+const strictNumberFromString = Schema.String.check(
+  Schema.makeFilter<string>((value) => value.trim().length > 0 && Number.isFinite(Number(value))),
+).pipe(
+  Schema.decodeTo(Schema.Number, {
+    decode: SchemaGetter.transform((value: string) => Number(value)),
+    encode: SchemaGetter.transform((value: number) => String(value)),
+  }),
+);
+
+export const integer = strictNumberFromString.check(Schema.isInt()).annotate({
   identifier: "Integer",
-} as Record<PropertyKey, unknown>);
+});
 
-export const number = Schema.NumberFromString.annotations({
+export const number = strictNumberFromString.annotate({
   identifier: "Number",
-} as Record<PropertyKey, unknown>);
+});
 
-export const positiveNumber = Schema.NumberFromString.pipe(Schema.positive()).annotations({
+export const positiveNumber = strictNumberFromString.check(Schema.isGreaterThan(0)).annotate({
   identifier: "PositiveNumber",
 });
 
-export const nonNegativeNumber = Schema.NumberFromString.pipe(Schema.nonNegative()).annotations({
-  identifier: "NonNegativeNumber",
-});
+export const nonNegativeNumber = strictNumberFromString
+  .check(Schema.isGreaterThanOrEqualTo(0))
+  .annotate({
+    identifier: "NonNegativeNumber",
+  });
 
-export const port = Schema.NumberFromString.pipe(
-  Schema.int(),
-  Schema.between(1, 65535),
-).annotations({
-  identifier: "Port",
-} as Record<PropertyKey, unknown>);
+export const port = strictNumberFromString
+  .check(Schema.isInt(), Schema.isBetween({ minimum: 1, maximum: 65535 }))
+  .annotate({
+    identifier: "Port",
+  });
 
-export const url = Schema.String.pipe(
-  Schema.filter(
-    (s) => {
-      try {
-        new URL(s);
-        return s.startsWith("http://") || s.startsWith("https://");
-      } catch {
-        return false;
-      }
+export const url = Schema.String.check(
+  Schema.makeFilter<string>(
+    (value) => URL.canParse(value) && (value.startsWith("http://") || value.startsWith("https://")),
+    {
+      identifier: "Url",
+      message: 'Use a full HTTP or HTTPS URL, such as "https://example.com"',
     },
-    { identifier: "Url", message: () => "Expected a valid HTTP or HTTPS URL" },
   ),
 );
 export type Url = Schema.Schema.Type<typeof url>;
 
-export const postgresUrl = Schema.String.pipe(
-  Schema.filter((s) => s.startsWith("postgres://") || s.startsWith("postgresql://"), {
-    identifier: "PostgresUrl",
-    message: () => "Expected a valid PostgreSQL connection URL",
+export const postgresUrl = Schema.String.check(
+  Schema.makeFilter<string>(
+    (value) => value.startsWith("postgres://") || value.startsWith("postgresql://"),
+    {
+      identifier: "PostgresUrl",
+      message: "Use a complete PostgreSQL connection URL",
+    },
+  ),
+  Schema.isPattern(/^(postgres|postgresql):\/\/[^:]+:[^@]+@[^:]+:\d+\/.+$/, {
+    message: "Include username, password, host, port, and database name",
   }),
-  Schema.pattern(/^(postgres|postgresql):\/\/[^:]+:[^@]+@[^:]+:\d+\/.+$/),
 );
 export type PostgresUrl = Schema.Schema.Type<typeof postgresUrl>;
 
-export const redisUrl = Schema.String.pipe(
-  Schema.filter((s) => s.startsWith("redis://") || s.startsWith("rediss://"), {
-    identifier: "RedisUrl",
-    message: () => "Expected a valid Redis connection URL",
+export const redisUrl = Schema.String.check(
+  Schema.makeFilter<string>(
+    (value) => value.startsWith("redis://") || value.startsWith("rediss://"),
+    {
+      identifier: "RedisUrl",
+      message: "Use a complete Redis connection URL",
+    },
+  ),
+  Schema.isPattern(/^rediss?:\/\/(?:[^:]+:[^@]+@)?[^:]+(?::\d+)?(?:\/\d+)?$/, {
+    message: "Check the Redis host, optional credentials, port, and database number",
   }),
-  Schema.pattern(/^rediss?:\/\/(?:[^:]+:[^@]+@)?[^:]+(?::\d+)?(?:\/\d+)?$/),
 );
 export type RedisUrl = Schema.Schema.Type<typeof redisUrl>;
 
-export const mongoUrl = Schema.String.pipe(
-  Schema.filter((s) => s.startsWith("mongodb://") || s.startsWith("mongodb+srv://"), {
-    identifier: "MongoUrl",
-    message: () => "Expected a valid MongoDB connection URL",
+export const mongoUrl = Schema.String.check(
+  Schema.makeFilter<string>(
+    (value) => value.startsWith("mongodb://") || value.startsWith("mongodb+srv://"),
+    {
+      identifier: "MongoUrl",
+      message: "Use a complete MongoDB connection URL",
+    },
+  ),
+  Schema.isPattern(/^mongodb(\+srv)?:\/\/(?:[^:]+:[^@]+@)?[^/]+(?:\/[^?]*)?(?:\?.*)?$/, {
+    message: "Check the MongoDB host, optional credentials, database, and query parameters",
   }),
-  Schema.pattern(/^mongodb(\+srv)?:\/\/(?:[^:]+:[^@]+@)?[^/]+(?:\/[^?]*)?(?:\?.*)?$/),
 );
 export type MongoUrl = Schema.Schema.Type<typeof mongoUrl>;
 
-export const mysqlUrl = Schema.String.pipe(
-  Schema.filter((s) => s.startsWith("mysql://") || s.startsWith("mysqls://"), {
-    identifier: "MysqlUrl",
-    message: () => "Expected a valid MySQL connection URL",
+export const mysqlUrl = Schema.String.check(
+  Schema.makeFilter<string>(
+    (value) => value.startsWith("mysql://") || value.startsWith("mysqls://"),
+    {
+      identifier: "MysqlUrl",
+      message: "Use a complete MySQL connection URL",
+    },
+  ),
+  Schema.isPattern(/^mysqls?:\/\/[^:]+:[^@]+@[^:]+:\d+\/.+$/, {
+    message: "Include username, password, host, port, and database name",
   }),
-  Schema.pattern(/^mysqls?:\/\/[^:]+:[^@]+@[^:]+:\d+\/.+$/),
 );
 export type MysqlUrl = Schema.Schema.Type<typeof mysqlUrl>;
 
-export const commaSeparated = Schema.transform(
-  Schema.String,
-  Schema.mutable(Schema.Array(Schema.String)),
-  {
-    decode: (s) => s.split(",").map((x) => x.trim()),
-    encode: (a) => a.join(","),
-  },
+export const commaSeparated = Schema.String.pipe(
+  Schema.decodeTo(Schema.mutable(Schema.Array(Schema.String)), {
+    decode: SchemaGetter.transform((value: string) =>
+      value.split(",").map((entry) => entry.trim()),
+    ),
+    encode: SchemaGetter.transform((value: Array<string>) => value.join(",")),
+  }),
 );
 
-export const commaSeparatedNumbers = Schema.transform(
-  Schema.String,
-  Schema.mutable(Schema.Array(Schema.Number)),
-  {
-    decode: (s) =>
-      s.split(",").map((x) => {
-        const n = Number(x.trim());
-        if (Number.isNaN(n)) throw new Error(`"${x.trim()}" is not a valid number`);
-        return n;
-      }),
-    encode: (a) => a.join(","),
-  },
+export const commaSeparatedNumbers = Schema.String.check(
+  Schema.makeFilter<string>(
+    (value) =>
+      value
+        .split(",")
+        .every((entry) => entry.trim().length > 0 && Number.isFinite(Number(entry.trim()))),
+    {
+      message: 'Use a comma-separated list of numbers, such as "1, 2, 3"',
+    },
+  ),
+).pipe(
+  Schema.decodeTo(Schema.mutable(Schema.Array(strictNumberFromString)), {
+    decode: SchemaGetter.transform((value: string) =>
+      value.split(",").map((entry) => entry.trim()),
+    ),
+    encode: SchemaGetter.transform((value: Array<string>) => value.join(",")),
+  }),
 );
 
-export const commaSeparatedUrls = Schema.transform(
-  Schema.String,
-  Schema.mutable(Schema.Array(url)),
-  {
-    decode: (s) => s.split(",").map((x) => Schema.decodeUnknownSync(url)(x.trim())),
-    encode: (a) => a.join(","),
-  },
+export const commaSeparatedUrls = Schema.String.pipe(
+  Schema.decodeTo(Schema.mutable(Schema.Array(url)), {
+    decode: SchemaGetter.transform((value: string) =>
+      value.split(",").map((entry) => entry.trim()),
+    ),
+    encode: SchemaGetter.transform((value: Array<string>) => value.join(",")),
+  }),
 );
 
 export const stringEnum = <T extends readonly [string, ...string[]]>(values: T) =>
-  Schema.Literal(...values);
+  Schema.Literals(values);
 
-export const json = <S extends Schema.Schema.Any>(schema: S) => Schema.parseJson(schema);
+export const json = <S extends Schema.Top>(schema: S) => Schema.fromJsonString(schema);

@@ -1,14 +1,8 @@
 import { parse } from "dotenv";
 
-import type { Bucket, SchemaKind } from "./types.ts";
+import type { EnvironmentTarget, SchemaKind } from "./types.ts";
 
-const KNOWN_CLIENT_PREFIXES = [
-  "NEXT_PUBLIC_",
-  "VITE_",
-  "EXPO_PUBLIC_",
-  "NUXT_PUBLIC_",
-  "PUBLIC_",
-] as const;
+const KNOWN_CLIENT_PREFIXES = ["VITE_", "EXPO_PUBLIC_", "NUXT_PUBLIC_", "PUBLIC_"] as const;
 
 interface ParsedVariable {
   readonly runtimeKey: string;
@@ -16,7 +10,7 @@ interface ParsedVariable {
 }
 
 interface GeneratedVariable {
-  readonly bucket: Exclude<Bucket, "shared">;
+  readonly target: EnvironmentTarget;
   readonly logicalKey: string;
   readonly schema: string;
 }
@@ -37,7 +31,9 @@ function detectClientPrefix(
     variables.some((variable) => variable.runtimeKey.startsWith(prefix)),
   );
   if (detected.length > 1) {
-    throw new Error("Multiple known client prefixes were found; select one with --client-prefix");
+    throw new Error(
+      `Found multiple client prefixes: ${detected.map((prefix) => `"${prefix}"`).join(", ")}. Use --client-prefix <prefix> to choose one.`,
+    );
   }
   return detected[0] ?? "";
 }
@@ -95,7 +91,12 @@ function quoteKey(key: string): string {
 }
 
 function generateSource(variables: ReadonlyArray<GeneratedVariable>, clientPrefix: string): string {
-  const helpers = new Set<string>(["createEnvSync"]);
+  const helpers = new Set<string>(["createEnv"]);
+  for (const target of ["server", "client"] as const) {
+    if (variables.some((variable) => variable.target === target)) {
+      helpers.add(target);
+    }
+  }
   for (const variable of variables) {
     const baseSchema = variable.schema.startsWith("redacted(")
       ? variable.schema.slice("redacted(".length, -1)
@@ -108,50 +109,60 @@ function generateSource(variables: ReadonlyArray<GeneratedVariable>, clientPrefi
   const lines = [
     `import { ${[...helpers].sort().join(", ")} } from "@ayronforge/envil";`,
     "",
-    "export const env = createEnvSync({",
+    "export const appEnv = createEnv(",
   ];
 
-  for (const bucket of ["server", "client"] as const) {
-    const bucketVariables = variables
-      .filter((variable) => variable.bucket === bucket)
+  for (const target of ["server", "client"] as const) {
+    const targetVariables = variables
+      .filter((variable) => variable.target === target)
       .sort((left, right) => left.logicalKey.localeCompare(right.logicalKey));
-    if (bucketVariables.length === 0) {
+    if (targetVariables.length === 0) {
       continue;
     }
-    lines.push(`  ${bucket}: {`);
-    for (const variable of bucketVariables) {
-      lines.push(`    ${quoteKey(variable.logicalKey)}: ${variable.schema},`);
+    lines.push(`  ${target}(`, "    {");
+    for (const variable of targetVariables) {
+      lines.push(`      ${quoteKey(variable.logicalKey)}: ${variable.schema},`);
     }
-    lines.push("  },", "");
+    lines.push("    },");
+    if (target === "client") {
+      const runtimeExpression =
+        clientPrefix === "VITE_" || clientPrefix === "PUBLIC_" ? "import.meta.env" : "process.env";
+      lines.push("    {", `      runtimeEnv: ${runtimeExpression},`);
+      if (clientPrefix.length > 0) {
+        lines.push(`      prefix: ${JSON.stringify(clientPrefix)},`);
+      }
+      lines.push("    },");
+    }
+    lines.push("  ),", "");
   }
 
-  if (clientPrefix.length > 0) {
-    lines.push("  prefix: {", `    client: ${JSON.stringify(clientPrefix)},`, "  },");
-  } else if (lines[lines.length - 1] === "") {
+  if (lines[lines.length - 1] === "") {
     lines.pop();
   }
-  lines.push("});", "");
+  lines.push(");", "");
   return lines.join("\n");
 }
 
 /** Generates the safe default `env.ts` starter. */
 export function generateDefaultEnvSource(): string {
   return [
-    'import { createEnvSync, redacted, url } from "@ayronforge/envil";',
+    'import { client, createEnv, redacted, server, url } from "@ayronforge/envil";',
     "",
-    "export const env = createEnvSync({",
-    "  server: {",
+    "export const appEnv = createEnv(",
+    "  server({",
     "    DATABASE_URL: redacted(url),",
-    "  },",
+    "  }),",
     "",
-    "  client: {",
-    "    APP_URL: url,",
-    "  },",
-    "",
-    "  prefix: {",
-    '    client: "VITE_",',
-    "  },",
-    "});",
+    "  client(",
+    "    {",
+    "      APP_URL: url,",
+    "    },",
+    "    {",
+    "      runtimeEnv: import.meta.env,",
+    '      prefix: "VITE_",',
+    "    },",
+    "  }),",
+    ");",
     "",
   ].join("\n");
 }
@@ -168,25 +179,20 @@ export function generateEnvSourceFromDotenv(source: string, explicitClientPrefix
       ? variable.runtimeKey.slice(clientPrefix.length)
       : variable.runtimeKey;
     if (logicalKey.length === 0) {
-      throw new Error("A client-prefixed dotenv key has no logical name");
+      throw new Error(
+        `"${variable.runtimeKey}" contains only the client prefix and no variable name. Rename it to include a name, such as "${variable.runtimeKey}API_URL".`,
+      );
     }
     const kind = inferSchemaKind(variable.runtimeKey, variable.value);
-    const schema = !isClient && isSensitiveKey(logicalKey) ? `redacted(${kind})` : kind;
+    const connectionUrl =
+      kind === "postgresUrl" || kind === "redisUrl" || kind === "mongoUrl" || kind === "mysqlUrl";
+    const schema =
+      !isClient && (isSensitiveKey(logicalKey) || connectionUrl) ? `redacted(${kind})` : kind;
     return {
-      bucket: isClient ? "client" : "server",
+      target: isClient ? "client" : "server",
       logicalKey,
       schema,
     };
   });
-  const logicalKeys = new Set<string>();
-  for (const variable of variables) {
-    if (logicalKeys.has(variable.logicalKey)) {
-      throw new Error(
-        `Logical environment key "${variable.logicalKey}" would be generated in more than one bucket`,
-      );
-    }
-    logicalKeys.add(variable.logicalKey);
-  }
-
   return generateSource(variables, clientPrefix);
 }

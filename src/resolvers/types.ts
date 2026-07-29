@@ -3,7 +3,7 @@ import { Data, type Effect, type Option, type Redacted } from "effect";
 /** A resolved secret is either present and redacted or legitimately absent. */
 export type ResolvedSecret = Option.Option<Redacted.Redacted<string>>;
 
-/** Logical environment values returned by a resolver adapter. */
+/** Application values returned by a resolver adapter. */
 export type ResolverResult<Keys extends string = string> = Readonly<Record<Keys, ResolvedSecret>>;
 
 interface ResolverFailureFields {
@@ -44,7 +44,7 @@ export type ResolverError =
  *
  * @template Name Stable, secret-safe adapter name used in inferred contracts.
  * @template Reference Provider-specific secret reference.
- * @template Options Provider-specific options excluding the `secrets` map.
+ * @template Options Provider-specific options excluding `referencesByKey`.
  * @template Error Typed adapter failures.
  * @template Requirements Effect services required by the adapter.
  */
@@ -58,7 +58,7 @@ export interface ResolverAdapter<
   readonly name: Name;
   readonly resolve: <const Keys extends string>(
     options: Options & {
-      readonly secrets: Readonly<Record<Keys, Reference>>;
+      readonly referencesByKey: Readonly<Record<Keys, Reference>>;
     },
   ) => Effect.Effect<ResolverResult<Keys>, Error, Requirements>;
 }
@@ -67,6 +67,60 @@ export interface ResolverAdapter<
 export interface AnyResolverAdapter {
   readonly name: string;
 }
+
+/** Minimal marker shared by configured resolver instances. */
+export interface AnyConfiguredResolver {
+  readonly name: string;
+}
+
+/**
+ * A resolver adapter with provider options configured once and references
+ * supplied later by individual variables.
+ */
+export interface ConfiguredResolver<
+  Name extends string,
+  Reference,
+  Error,
+  Requirements,
+> extends AnyConfiguredResolver {
+  readonly name: Name;
+  readonly resolve: <const Keys extends string>(
+    referencesByKey: Readonly<Record<Keys, Reference>>,
+  ) => Effect.Effect<ResolverResult<Keys>, Error, Requirements>;
+}
+
+/** Extracts the reference accepted by a configured resolver. */
+export type ConfiguredResolverReference<Resolver> =
+  Resolver extends ConfiguredResolver<
+    infer _Name,
+    infer Reference,
+    infer _Error,
+    infer _Requirements
+  >
+    ? Reference
+    : never;
+
+/** Extracts the typed error produced by a configured resolver. */
+export type ConfiguredResolverError<Resolver> =
+  Resolver extends ConfiguredResolver<
+    infer _Name,
+    infer _Reference,
+    infer Error,
+    infer _Requirements
+  >
+    ? Error
+    : never;
+
+/** Extracts the Effect requirements of a configured resolver. */
+export type ConfiguredResolverRequirements<Resolver> =
+  Resolver extends ConfiguredResolver<
+    infer _Name,
+    infer _Reference,
+    infer _Error,
+    infer Requirements
+  >
+    ? Requirements
+    : never;
 
 /** Extracts the stable name carried by an adapter. */
 export type AdapterName<Adapter> =
@@ -127,18 +181,3 @@ export type AdapterRequirements<Adapter> =
   >
     ? Requirements
     : never;
-
-/**
- * A configured adapter retained by `createEnv` until resolver execution.
- *
- * Its generic parameters are also the type-only source metadata used by the
- * environment contract.
- */
-export interface ResolverDefinition<Name extends string, Keys extends string, Error, Requirements> {
-  readonly adapterName: Name;
-  readonly keys: ReadonlyArray<Keys>;
-  readonly effect: Effect.Effect<ResolverResult<Keys>, Error, Requirements>;
-}
-
-/** Any configured resolver definition. */
-export type AnyResolverDefinition = ResolverDefinition<string, string, unknown, unknown>;

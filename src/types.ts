@@ -1,27 +1,96 @@
-import type { Brand, Effect, Redacted, Schema } from "effect";
+import type { Effect, Pipeable, Redacted, Schema } from "effect";
 
-import type { PrefixMap } from "./prefix.ts";
+import type { EnvConfigurationError, EnvValidationError } from "./errors.ts";
 import type {
-  AdapterError,
-  AdapterName,
-  AdapterOptions,
-  AdapterReference,
-  AdapterRequirements,
-  AnyResolverAdapter,
-  AnyResolverDefinition,
-  ResolverDefinition,
+  AnyConfiguredResolver,
+  ConfiguredResolverError,
+  ConfiguredResolverRequirements,
 } from "./resolvers/types.ts";
+import type {
+  EnvVariableSource,
+  ResolverVariableSource,
+  SourcedVariable,
+  VariableSource,
+} from "./variable-source.ts";
 
-/** Any context-free Effect Schema accepted in an environment bucket. */
-export type AnySchema = Schema.Schema.AnyNoContext;
+/** Any Effect Schema accepted in an environment fragment. */
+export type AnySchema = Schema.Top;
 
-/** A logical environment bucket keyed by unprefixed variable names. */
-export type SchemaDict = Record<string, AnySchema>;
+/** One environment variable schema, optionally paired with an explicit source. */
+export type VariableDefinition = AnySchema | SourcedVariable<AnySchema, VariableSource>;
 
-declare const ENVIL_ENV_BRAND: unique symbol;
+/** Values declared by one server, client, or shared fragment. */
+export type EnvValues = Readonly<Record<string, unknown>>;
 
-/** Any Envil environment accepted for composition. */
-export type AnyEnv = Readonly<object> & EnvContractCarrier<AnyEnvContract>;
+/**
+ * Runtime values supplied as an object, parsed JSON object, or Map.
+ *
+ * Object sources support exact keys and dot-separated paths into nested JSON.
+ * Map sources always use exact keys.
+ */
+export type RuntimeEnv = Readonly<Record<string, unknown>> | ReadonlyMap<string, unknown>;
+
+/** Runtime targeted by an environment fragment. */
+export type EnvFragmentTarget = "server" | "client" | "shared";
+
+declare const ENV_FRAGMENT_BRAND: unique symbol;
+declare const APP_ENV_BRAND: unique symbol;
+declare const APP_ENV_TYPES: unique symbol;
+
+/**
+ * One immutable environment fragment.
+ *
+ * Values may contain any Effect Schema or static value. Runtime options belong
+ * to the fragment so independently authored contexts remain composable.
+ */
+export interface EnvFragment<
+  Target extends EnvFragmentTarget,
+  Values extends EnvValues,
+  Prefix extends string | undefined,
+  Runtime extends RuntimeEnv | undefined,
+> {
+  readonly target: Target;
+  readonly values: Values;
+  readonly prefix: Prefix;
+  readonly runtimeEnv: Runtime;
+  readonly emptyStringAsUndefined: boolean | undefined;
+  readonly [ENV_FRAGMENT_BRAND]: {
+    readonly target: Target;
+    readonly values: Values;
+    readonly prefix: Prefix;
+    readonly runtime: Runtime;
+  };
+}
+
+/** Any environment fragment after its public generics are erased. */
+export type AnyEnvFragment = EnvFragment<
+  EnvFragmentTarget,
+  EnvValues,
+  string | undefined,
+  RuntimeEnv | undefined
+>;
+
+interface VariableEntry<
+  Definition extends VariableDefinition,
+  Prefix extends string | undefined,
+  Target extends "server" | "client",
+> {
+  readonly _tag: "variable";
+  readonly definition: Definition;
+  readonly prefix: Prefix;
+  readonly target: Target;
+}
+
+interface StaticEntry<Value, Target extends EnvFragmentTarget> {
+  readonly _tag: "static";
+  readonly value: Value;
+  readonly target: Target;
+}
+
+type AnyDefinitionEntry =
+  | VariableEntry<VariableDefinition, string | undefined, "server" | "client">
+  | StaticEntry<unknown, EnvFragmentTarget>;
+type DefinitionEntries = Readonly<Record<string, AnyDefinitionEntry>>;
 
 type NonUndefined<Value> = Exclude<Value, undefined>;
 type OptionalityValue<Value> = Value extends Redacted.Redacted<infer Inner> ? Inner : Value;
@@ -41,59 +110,70 @@ type NormalizeSchemaOutput<Value> =
       ? Redacted.Redacted<Exclude<Inner, undefined>> | undefined
       : Value
     : Value;
-type ResolverKeys<Definition> =
-  Definition extends ResolverDefinition<infer _Name, infer Keys, infer _Error, infer _Requirements>
-    ? Keys
+
+type SchemaOf<Variable> =
+  Variable extends SourcedVariable<infer SchemaValue, infer _Source>
+    ? SchemaValue
+    : Variable extends AnySchema
+      ? Variable
+      : never;
+type SourceOf<Variable> =
+  Variable extends SourcedVariable<infer _SchemaValue, infer Source> ? Source : never;
+type ResolverOf<Variable> = [SourceOf<Variable>] extends [never]
+  ? never
+  : SourceOf<Variable> extends ResolverVariableSource<
+        infer Resolver extends AnyConfiguredResolver,
+        infer _Reference
+      >
+    ? Resolver
     : never;
-type ResolverName<Definition> =
-  Definition extends ResolverDefinition<infer Name, infer _Keys, infer _Error, infer _Requirements>
-    ? Name
-    : never;
-type SourceForKey<
-  Key extends string,
-  Resolvers extends readonly AnyResolverDefinition[],
-> = Resolvers[number] extends infer Definition
-  ? Definition extends AnyResolverDefinition
-    ? Key extends ResolverKeys<Definition>
-      ? ResolverName<Definition>
-      : never
-    : never
-  : never;
-type IsResolved<Key extends string, Resolvers extends readonly AnyResolverDefinition[]> = [
-  SourceForKey<Key, Resolvers>,
+
+type VariableOutput<Variable extends VariableDefinition> =
+  ResolverOf<Variable> extends never
+    ? NormalizeSchemaOutput<Schema.Schema.Type<SchemaOf<Variable>>>
+    : IsOptional<SchemaOf<Variable>> extends true
+      ? Redact<Unredacted<Schema.Schema.Type<SchemaOf<Variable>>>> | undefined
+      : Redact<Unredacted<Schema.Schema.Type<SchemaOf<Variable>>>>;
+
+type EntryOutput<Entry> =
+  Entry extends VariableEntry<infer Definition, infer _Prefix, infer _Target>
+    ? VariableOutput<Definition>
+    : Entry extends StaticEntry<infer Value, infer _Target>
+      ? Value
+      : never;
+
+type Simplify<Value> = { readonly [Key in keyof Value]: Value[Key] };
+type ContextOutput<Entries extends DefinitionEntries> = Simplify<{
+  readonly [Key in keyof Entries]: EntryOutput<Entries[Key]>;
+}>;
+
+type PrefixValue<Prefix extends string | undefined> = Prefix extends string ? Prefix : "";
+type RuntimeKey<Variable, Key extends string, Prefix extends string | undefined> = [
+  SourceOf<Variable>,
 ] extends [never]
-  ? false
-  : true;
+  ? `${PrefixValue<Prefix>}${Key}`
+  : SourceOf<Variable> extends EnvVariableSource<infer Name>
+    ? Name
+    : SourceOf<Variable> extends ResolverVariableSource<
+          infer _Resolver extends AnyConfiguredResolver,
+          infer _Reference
+        >
+      ? ""
+      : `${PrefixValue<Prefix>}${Key}`;
+type SourceName<Variable> = [SourceOf<Variable>] extends [never]
+  ? "env"
+  : SourceOf<Variable> extends ResolverVariableSource<
+        infer Resolver extends AnyConfiguredResolver,
+        infer _Reference
+      >
+    ? Resolver["name"]
+    : "env";
 
-type PrefixForBucket<
-  Prefix extends string | PrefixMap | undefined,
-  Bucket extends keyof PrefixMap,
-> = Prefix extends string
-  ? Prefix
-  : Prefix extends PrefixMap
-    ? Prefix[Bucket] extends string
-      ? Prefix[Bucket]
-      : ""
-    : "";
-
-type RuntimeKey<
-  Key extends string,
-  Bucket extends keyof PrefixMap,
-  Prefix extends string | PrefixMap | undefined,
-> = `${PrefixForBucket<Prefix, Bucket>}${Key}`;
-
-type ContractValue<ValueSchema extends AnySchema, Resolved extends boolean> = Resolved extends true
-  ? IsOptional<ValueSchema> extends true
-    ? Redact<Unredacted<Schema.Schema.Type<ValueSchema>>> | undefined
-    : Redact<Unredacted<Schema.Schema.Type<ValueSchema>>>
-  : NormalizeSchemaOutput<Schema.Schema.Type<ValueSchema>>;
-
-/** Safe structural metadata retained only in TypeScript types. */
+/** Safe structural metadata retained only in TypeScript types for CLI inspection. */
 export interface EnvVariableContract<
   Value,
   Encoded,
   Key extends string,
-  Bucket extends keyof PrefixMap,
   RuntimeName extends string,
   Secret extends boolean,
   Source extends string,
@@ -102,317 +182,272 @@ export interface EnvVariableContract<
   readonly value: Value;
   readonly encoded: Encoded;
   readonly key: Key;
-  readonly bucket: Bucket;
   readonly runtimeKey: RuntimeName;
   readonly secret: Secret;
   readonly source: Source;
   readonly optional: Optional;
 }
 
-type BucketContract<
-  Bucket extends keyof PrefixMap,
-  Schemas extends SchemaDict,
-  Prefix extends string | PrefixMap | undefined,
-  Resolvers extends readonly AnyResolverDefinition[],
-> = {
-  readonly [Key in keyof Schemas & string]: EnvVariableContract<
-    ContractValue<Schemas[Key], IsResolved<Key, Resolvers>>,
-    Schema.Schema.Encoded<Schemas[Key]>,
-    Key,
-    Bucket,
-    RuntimeKey<Key, Bucket, Prefix>,
-    IsResolved<Key, Resolvers> extends true ? true : IsRedacted<Schema.Schema.Type<Schemas[Key]>>,
-    IsResolved<Key, Resolvers> extends true ? SourceForKey<Key, Resolvers> : "runtime",
-    IsOptional<Schemas[Key]>
-  >;
+type ContextContract<Entries extends DefinitionEntries, Target extends "server" | "client"> = {
+  readonly [Key in keyof Entries & string as Entries[Key] extends VariableEntry<
+    VariableDefinition,
+    string | undefined,
+    Target
+  >
+    ? Key
+    : never]: Entries[Key] extends VariableEntry<
+    infer Definition,
+    infer Prefix extends string | undefined,
+    Target
+  >
+    ? EnvVariableContract<
+        VariableOutput<Definition>,
+        Schema.Codec.Encoded<SchemaOf<Definition>>,
+        Key,
+        RuntimeKey<Definition, Key, Prefix>,
+        ResolverOf<Definition> extends never
+          ? IsRedacted<Schema.Schema.Type<SchemaOf<Definition>>>
+          : true,
+        SourceName<Definition>,
+        IsOptional<SchemaOf<Definition>>
+      >
+    : never;
 };
 
-/** Complete type-only environment contract inspected by the CLI. */
-export interface EnvContract<
-  Server extends Readonly<
-    Record<
-      string,
-      EnvVariableContract<
-        unknown,
-        unknown,
-        string,
-        keyof PrefixMap,
-        string,
-        boolean,
-        string,
-        boolean
-      >
-    >
-  >,
-  Client extends Readonly<
-    Record<
-      string,
-      EnvVariableContract<
-        unknown,
-        unknown,
-        string,
-        keyof PrefixMap,
-        string,
-        boolean,
-        string,
-        boolean
-      >
-    >
-  >,
-  Shared extends Readonly<
-    Record<
-      string,
-      EnvVariableContract<
-        unknown,
-        unknown,
-        string,
-        keyof PrefixMap,
-        string,
-        boolean,
-        string,
-        boolean
-      >
-    >
-  >,
+/** Complete type-only contract inspected by the CLI. */
+export interface AppEnvContract<
+  Server extends Readonly<Record<string, unknown>>,
+  Client extends Readonly<Record<string, unknown>>,
 > {
   readonly server: Server;
   readonly client: Client;
-  readonly shared: Shared;
 }
 
 /** Internal phantom field used by inference helpers and the CLI. */
-export interface EnvContractCarrier<Contract> extends Brand.Brand<typeof ENVIL_ENV_BRAND> {
+export interface AppEnvContractCarrier<Contract> {
   readonly __envilContract: Contract;
 }
 
-/** Builds the complete contract for one environment definition. */
-export type BuildEnvContract<
-  Server extends SchemaDict,
-  Client extends SchemaDict,
-  Shared extends SchemaDict,
-  Prefix extends string | PrefixMap | undefined,
-  Resolvers extends readonly AnyResolverDefinition[],
-> = EnvContract<
-  BucketContract<"server", Server, Prefix, Resolvers>,
-  BucketContract<"client", Client, Prefix, Resolvers>,
-  BucketContract<"shared", Shared, Prefix, Resolvers>
->;
-
-type ContractRecord = Readonly<
-  Record<
-    string,
-    EnvVariableContract<unknown, unknown, string, keyof PrefixMap, string, boolean, string, boolean>
+type ContextResolvers<Entries extends DefinitionEntries> = {
+  readonly [Key in keyof Entries]: Entries[Key] extends VariableEntry<
+    infer Definition,
+    infer _Prefix,
+    infer _Target
   >
->;
-type AnyEnvContract = EnvContract<ContractRecord, ContractRecord, ContractRecord>;
-type EmptyEnvContract = EnvContract<{}, {}, {}>;
-
-type ContractOf<Value> =
-  Value extends EnvContractCarrier<infer Contract>
-    ? Contract
-    : Value extends Effect.Effect<infer Success, unknown, unknown>
-      ? ContractOf<Success>
-      : Value extends PromiseLike<infer Success>
-        ? ContractOf<Success>
-        : never;
-
-type ContractOfOrEmpty<Value> = [ContractOf<Value>] extends [never]
-  ? EmptyEnvContract
-  : ContractOf<Value> extends infer Contract extends AnyEnvContract
-    ? Contract
-    : EmptyEnvContract;
-
-type MergeContractRecords<Left extends ContractRecord, Right extends ContractRecord> = Readonly<
-  Omit<Left, keyof Right> & Right
->;
-
-type MergeEnvContracts<Left extends AnyEnvContract, Right extends AnyEnvContract> = EnvContract<
-  MergeContractRecords<Left["server"], Right["server"]>,
-  MergeContractRecords<Left["client"], Right["client"]>,
-  MergeContractRecords<Left["shared"], Right["shared"]>
->;
-
-type MergeExtendedContracts<
-  Envs extends readonly AnyEnv[],
-  Accumulator extends AnyEnvContract = EmptyEnvContract,
-> = Envs extends readonly [infer First extends AnyEnv, ...infer Rest extends readonly AnyEnv[]]
-  ? MergeExtendedContracts<Rest, MergeEnvContracts<Accumulator, ContractOfOrEmpty<First>>>
-  : Accumulator;
-
-/** Combines inherited contracts left-to-right before applying the current definition. */
-export type ComposedEnvContract<
-  Extends extends readonly AnyEnv[],
-  Current extends AnyEnvContract,
-> = MergeEnvContracts<MergeExtendedContracts<Extends>, Current>;
-
-type ValuesOf<Bucket extends ContractRecord> = {
-  readonly [Key in keyof Bucket]: Bucket[Key]["value"];
-};
-
-/** Extracts the complete decoded environment from an Effect, Promise, or resolved value. */
-export type InferEnv<Value> =
-  ContractOf<Value> extends infer Contract extends AnyEnvContract
-    ? Readonly<
-        ValuesOf<Contract["server"]> & ValuesOf<Contract["client"]> & ValuesOf<Contract["shared"]>
-      >
+    ? ResolverOf<Definition>
     : never;
+}[keyof Entries];
+type ContextSchemaRequirements<Entries extends DefinitionEntries> = {
+  readonly [Key in keyof Entries]: Entries[Key] extends VariableEntry<
+    infer Definition,
+    infer _Prefix,
+    infer _Target
+  >
+    ? Schema.Codec.DecodingServices<SchemaOf<Definition>>
+    : never;
+}[keyof Entries];
 
-type ResolvedEnv<Value> =
+type ServerErrors<Entries extends DefinitionEntries> =
+  | ConfiguredResolverError<ContextResolvers<Entries>>
+  | EnvConfigurationError
+  | EnvValidationError;
+type ServerRequirements<Entries extends DefinitionEntries> =
+  | ConfiguredResolverRequirements<ContextResolvers<Entries>>
+  | ContextSchemaRequirements<Entries>;
+
+/**
+ * One composable environment with independent lazy server and client Effects.
+ */
+export interface AppEnv<
+  ServerEntries extends DefinitionEntries,
+  ClientEntries extends DefinitionEntries,
+>
+  extends
+    AnyAppEnv,
+    AppEnvContractCarrier<
+      AppEnvContract<
+        ContextContract<ServerEntries, "server">,
+        ContextContract<ClientEntries, "client">
+      >
+    > {
+  /** The resolved server environment Effect. */
+  readonly server: Effect.Effect<
+    ContextOutput<ServerEntries>,
+    ServerErrors<ServerEntries>,
+    ServerRequirements<ServerEntries>
+  >;
+  /** The resolved public client environment Effect. */
+  readonly client: Effect.Effect<
+    ContextOutput<ClientEntries>,
+    EnvConfigurationError | EnvValidationError,
+    ContextSchemaRequirements<ClientEntries>
+  >;
+  readonly [APP_ENV_TYPES]: {
+    readonly server: ServerEntries;
+    readonly client: ClientEntries;
+  };
+}
+
+/** Nominal base shared by every AppEnv regardless of its inferred contexts. */
+export interface AnyAppEnv extends Pipeable.Pipeable {
+  readonly [APP_ENV_BRAND]: true;
+}
+
+type EntryForValue<
+  Value,
+  Prefix extends string | undefined,
+  Target extends EnvFragmentTarget,
+> = Value extends VariableDefinition
+  ? Target extends "server" | "client"
+    ? VariableEntry<Value, Prefix, Target>
+    : never
+  : StaticEntry<Value, Target>;
+type FragmentEntries<Fragment> =
+  Fragment extends EnvFragment<infer Target, infer Values, infer Prefix, infer _Runtime>
+    ? {
+        readonly [Key in keyof Values]: EntryForValue<Values[Key], Prefix, Target>;
+      }
+    : {};
+type MergeEntries<Left, Right> = Simplify<Omit<Left, keyof Right> & Right>;
+
+type ApplyServerFragment<Entries, Fragment> =
+  Fragment extends EnvFragment<
+    EnvFragmentTarget,
+    EnvValues,
+    string | undefined,
+    RuntimeEnv | undefined
+  >
+    ? MergeEntries<Entries, FragmentEntries<Fragment>>
+    : Entries;
+type ApplyClientFragment<Entries, Fragment> =
+  Fragment extends EnvFragment<infer Target, EnvValues, string | undefined, RuntimeEnv | undefined>
+    ? Target extends "client" | "shared"
+      ? MergeEntries<Entries, FragmentEntries<Fragment>>
+      : Entries
+    : Entries;
+
+type FoldServerFragments<
+  Fragments extends readonly unknown[],
+  Entries = {},
+> = Fragments extends readonly [infer First, ...infer Rest]
+  ? FoldServerFragments<Rest, ApplyServerFragment<Entries, First>>
+  : Entries extends DefinitionEntries
+    ? Entries
+    : never;
+type FoldClientFragments<
+  Fragments extends readonly unknown[],
+  Entries = {},
+> = Fragments extends readonly [infer First, ...infer Rest]
+  ? FoldClientFragments<Rest, ApplyClientFragment<Entries, First>>
+  : Entries extends DefinitionEntries
+    ? Entries
+    : never;
+type ServerEntriesOf<Value> =
+  Value extends AppEnv<infer ServerEntries, infer _ClientEntries> ? ServerEntries : {};
+type ClientEntriesOf<Value> =
+  Value extends AppEnv<infer _ServerEntries, infer ClientEntries> ? ClientEntries : {};
+type ExtensionServerEntries<Input> = Input extends AnyAppEnv
+  ? ServerEntriesOf<Input>
+  : ApplyServerFragment<{}, Input>;
+type ExtensionClientEntries<Input> = Input extends AnyAppEnv
+  ? ClientEntriesOf<Input>
+  : ApplyClientFragment<{}, Input>;
+type FoldServerExtensions<
+  Inputs extends readonly unknown[],
+  Entries extends DefinitionEntries,
+> = Inputs extends readonly [infer First, ...infer Rest]
+  ? MergeEntries<Entries, ExtensionServerEntries<First>> extends infer Next
+    ? Next extends DefinitionEntries
+      ? FoldServerExtensions<Rest, Next>
+      : never
+    : never
+  : Entries;
+type FoldClientExtensions<
+  Inputs extends readonly unknown[],
+  Entries extends DefinitionEntries,
+> = Inputs extends readonly [infer First, ...infer Rest]
+  ? MergeEntries<Entries, ExtensionClientEntries<First>> extends infer Next
+    ? Next extends DefinitionEntries
+      ? FoldClientExtensions<Rest, Next>
+      : never
+    : never
+  : Entries;
+
+/** Final server entries inferred from a createEnv fragment tuple. */
+export type CreateEnvServerEntries<Fragments extends readonly AnyEnvFragment[]> =
+  FoldServerFragments<Fragments>;
+
+/** Final client entries inferred from a createEnv fragment tuple. */
+export type CreateEnvClientEntries<Fragments extends readonly AnyEnvFragment[]> =
+  FoldClientFragments<Fragments>;
+
+/** Final server entries inferred after extending an AppEnv. */
+export type ExtendedServerEntries<
+  Base extends AnyAppEnv,
+  Inputs extends readonly (AnyAppEnv | AnyEnvFragment)[],
+> = FoldServerExtensions<Inputs, ServerEntriesOf<Base>>;
+
+/** Final client entries inferred after extending an AppEnv. */
+export type ExtendedClientEntries<
+  Base extends AnyAppEnv,
+  Inputs extends readonly (AnyAppEnv | AnyEnvFragment)[],
+> = FoldClientExtensions<Inputs, ClientEntriesOf<Base>>;
+
+type VariableKeys<Values extends EnvValues> = {
+  readonly [Key in keyof Values]: Values[Key] extends VariableDefinition ? Key : never;
+}[keyof Values];
+type ResolverKeys<Values extends EnvValues> = {
+  readonly [Key in keyof Values]: Values[Key] extends VariableDefinition
+    ? ResolverOf<Values[Key]> extends never
+      ? never
+      : Key
+    : never;
+}[keyof Values];
+type RedactedKeys<Values extends EnvValues> = {
+  readonly [Key in keyof Values]: Values[Key] extends VariableDefinition
+    ? IsRedacted<Schema.Schema.Type<SchemaOf<Values[Key]>>> extends true
+      ? Key
+      : never
+    : IsRedacted<Values[Key]> extends true
+      ? Key
+      : never;
+}[keyof Values];
+
+/** Rejects sources and sensitive values from a client fragment. */
+export type ValidClientValues<Values extends EnvValues> = [
+  ResolverKeys<Values> | RedactedKeys<Values>,
+] extends [never]
+  ? unknown
+  : never;
+
+/** Rejects schemas and sensitive values from a shared fragment. */
+export type ValidSharedValues<Values extends EnvValues> = [
+  VariableKeys<Values> | RedactedKeys<Values>,
+] extends [never]
+  ? unknown
+  : never;
+
+/** Returns whether a fragment contains schemas that read a runtime environment. */
+export type HasRuntimeVariables<Values extends EnvValues> = [VariableKeys<Values>] extends [never]
+  ? false
+  : true;
+
+/** Extracts the success value from an Envil Effect or Promise. */
+export type InferEnv<Value> =
   Value extends Effect.Effect<infer Success, unknown, unknown>
     ? Success
     : Value extends PromiseLike<infer Success>
       ? Success
-      : Value;
+      : never;
 
-type MergeEnvs<Envs extends readonly AnyEnv[]> = Envs extends readonly [
-  infer First extends AnyEnv,
-  ...infer Rest extends readonly AnyEnv[],
-]
-  ? ResolvedEnv<First> & MergeEnvs<Rest>
-  : {};
-type KnownKeys<Value> = keyof {
-  [Key in keyof Value as string extends Key ? never : Key]: Value[Key];
-};
-
-/** Final runtime object with the type-only contract attached. */
-export type EnvValue<Extends extends readonly AnyEnv[], Contract extends AnyEnvContract> = Readonly<
-  Omit<
-    MergeEnvs<Extends>,
-    | keyof EnvContractCarrier<unknown>
-    | KnownKeys<Contract["server"]>
-    | KnownKeys<Contract["client"]>
-    | KnownKeys<Contract["shared"]>
-  > &
-    ValuesOf<Contract["server"]> &
-    ValuesOf<Contract["client"]> &
-    ValuesOf<Contract["shared"]>
-> &
-  EnvContractCarrier<Contract>;
-
-/** Common options shared by all environment creation boundaries. */
-export interface EnvOptions<
-  Server extends SchemaDict,
-  Client extends SchemaDict,
-  Shared extends SchemaDict,
-  Extends extends readonly AnyEnv[] = readonly [],
-  Prefix extends string | PrefixMap | undefined = undefined,
-> {
-  readonly server?: Server;
-  readonly client?: Client;
-  readonly shared?: Shared;
-  readonly extends?: Extends;
-  readonly prefix?: Prefix;
-  readonly runtimeEnv?: Readonly<Record<string, string | undefined>>;
-  readonly isServer?: boolean;
-  readonly emptyStringAsUndefined?: boolean;
-}
-
-type ServerKey<Server extends SchemaDict> = keyof Server & string;
-
-/** Schema-bound builder exposed inside the `resolvers` callback. */
-export interface ResolverTools<Server extends SchemaDict, AvailableRequirements = unknown> {
-  readonly resolve: <
-    Adapter extends AnyResolverAdapter,
-    const Secrets extends Readonly<Record<string, AdapterReference<Adapter>>>,
-  >(
-    adapter: AdapterRequirements<Adapter> extends AvailableRequirements ? Adapter : never,
-    options: AdapterOptions<Adapter> & {
-      readonly secrets: Secrets &
-        Partial<Readonly<Record<ServerKey<Server>, AdapterReference<Adapter>>>> &
-        Record<Exclude<keyof Secrets, ServerKey<Server>>, never>;
-    },
-  ) => ResolverDefinition<
-    AdapterName<Adapter>,
-    keyof Secrets & string,
-    AdapterError<Adapter>,
-    AdapterRequirements<Adapter>
-  >;
-}
-
-type DefinitionKeys<Definition> =
-  Definition extends ResolverDefinition<infer _Name, infer Keys, infer _Error, infer _Requirements>
-    ? Keys
-    : never;
-type ValidateResolverTuple<
-  Resolvers extends readonly AnyResolverDefinition[],
-  Seen extends string = never,
-> = Resolvers extends readonly [
-  infer First extends AnyResolverDefinition,
-  ...infer Rest extends readonly AnyResolverDefinition[],
-]
-  ? Extract<DefinitionKeys<First>, Seen> extends never
-    ? ValidateResolverTuple<Rest, Seen | DefinitionKeys<First>>
-    : never
-  : unknown;
-
-/** Rejects resolver tuples containing the same logical key more than once. */
-export type ValidResolverTuple<Resolvers extends readonly AnyResolverDefinition[]> = Resolvers &
-  ValidateResolverTuple<Resolvers>;
-
-type RedactedKeys<Schemas extends SchemaDict> = {
-  [Key in keyof Schemas]: IsRedacted<Schema.Schema.Type<Schemas[Key]>> extends true ? Key : never;
-}[keyof Schemas];
-type BucketDuplicates<
-  Server extends SchemaDict,
-  Client extends SchemaDict,
-  Shared extends SchemaDict,
-> = Extract<keyof Server, keyof Client | keyof Shared> | Extract<keyof Client, keyof Shared>;
-type LogicalPhysicalKeys<
-  Schemas extends SchemaDict,
-  Bucket extends keyof PrefixMap,
-  Prefix extends string | PrefixMap | undefined,
-> = {
-  [Key in keyof Schemas & string]: RuntimeKey<Key, Bucket, Prefix>;
-}[keyof Schemas & string];
-type PhysicalDuplicates<
-  Server extends SchemaDict,
-  Client extends SchemaDict,
-  Shared extends SchemaDict,
-  Prefix extends string | PrefixMap | undefined,
-> =
-  | Extract<
-      LogicalPhysicalKeys<Server, "server", Prefix>,
-      LogicalPhysicalKeys<Client, "client", Prefix> | LogicalPhysicalKeys<Shared, "shared", Prefix>
-    >
-  | Extract<
-      LogicalPhysicalKeys<Client, "client", Prefix>,
-      LogicalPhysicalKeys<Shared, "shared", Prefix>
-    >;
-
-/** Compile-time invariants applied to every environment options object. */
-export type ValidEnvOptions<
-  Server extends SchemaDict,
-  Client extends SchemaDict,
-  Shared extends SchemaDict,
-  Prefix extends string | PrefixMap | undefined,
-> = [BucketDuplicates<Server, Client, Shared>] extends [never]
-  ? [RedactedKeys<Client> | RedactedKeys<Shared>] extends [never]
-    ? [PhysicalDuplicates<Server, Client, Shared, Prefix>] extends [never]
-      ? unknown
-      : never
-    : never
-  : never;
-
-/** Union of typed resolver failures in a configured tuple. */
-export type ResolverErrors<Resolvers extends readonly AnyResolverDefinition[]> =
-  Resolvers[number] extends ResolverDefinition<
-    infer _Name,
-    infer _Keys,
-    infer Error,
-    infer _Requirements
-  >
-    ? Error
+/** Extracts the environment produced by `appEnv.server`. */
+export type InferServerEnv<Value> =
+  Value extends AppEnv<infer ServerEntries, infer _ClientEntries>
+    ? ContextOutput<ServerEntries>
     : never;
 
-/** Union of Effect requirements in a configured tuple. */
-export type ResolverRequirements<Resolvers extends readonly AnyResolverDefinition[]> =
-  Resolvers[number] extends ResolverDefinition<
-    infer _Name,
-    infer _Keys,
-    infer _Error,
-    infer Requirements
-  >
-    ? Requirements
+/** Extracts the environment produced by `appEnv.client`. */
+export type InferClientEnv<Value> =
+  Value extends AppEnv<infer _ServerEntries, infer ClientEntries>
+    ? ContextOutput<ClientEntries>
     : never;
-
-export type { PrefixMap };

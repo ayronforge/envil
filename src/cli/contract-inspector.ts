@@ -2,11 +2,11 @@ import path from "node:path";
 
 import ts from "typescript6";
 
-import type { Bucket } from "./types.ts";
+import type { EnvironmentTarget } from "./types.ts";
 
 /** One environment variable recovered from type-only contract metadata. */
 export interface InspectedContractVariable {
-  readonly bucket: Bucket;
+  readonly target: EnvironmentTarget;
   readonly logicalKey: string;
   readonly runtimeKey: string;
   readonly secret: boolean;
@@ -28,14 +28,16 @@ function literalString(
 ): string {
   const property = metadataType.getProperty(propertyName);
   if (property === undefined) {
-    throw new Error("The environment contract is missing required type metadata");
+    throw new Error(
+      "Envil could not read this environment definition. Export the value returned by createEnv.",
+    );
   }
   const declaration = property.valueDeclaration ?? property.declarations?.[0] ?? fallbackLocation;
 
   const propertyType = checker.getTypeOfSymbolAtLocation(property, declaration);
   if (!propertyType.isStringLiteral()) {
     throw new Error(
-      `The environment contract contains a widened ${propertyName}; concrete environment names cannot be generated`,
+      "Envil could not determine the generated variable names. Keep prefixes and resolver names as string literals instead of typing them as string.",
     );
   }
   return propertyType.value;
@@ -49,35 +51,41 @@ function literalBoolean(
 ): boolean {
   const property = metadataType.getProperty(propertyName);
   if (property === undefined) {
-    throw new Error("The environment contract is missing required type metadata");
+    throw new Error(
+      "Envil could not read this environment definition. Export the value returned by createEnv.",
+    );
   }
   const declaration = property.valueDeclaration ?? property.declarations?.[0] ?? fallbackLocation;
 
   const propertyType = checker.getTypeOfSymbolAtLocation(property, declaration);
   if ((propertyType.flags & ts.TypeFlags.BooleanLiteral) === 0) {
-    throw new Error("The environment contract contains non-literal boolean metadata");
+    throw new Error(
+      "Envil could not determine how this variable should be generated. Keep the environment definition fully inferred instead of widening its types.",
+    );
   }
   return checker.typeToString(propertyType) === "true";
 }
 
-function inspectBucket(
+function inspectTarget(
   checker: ts.TypeChecker,
   contractType: ts.Type,
-  bucket: Bucket,
+  target: EnvironmentTarget,
 ): ReadonlyArray<InspectedContractVariable> {
-  const bucketProperty = contractType.getProperty(bucket);
-  const bucketDeclaration = bucketProperty?.valueDeclaration ?? bucketProperty?.declarations?.[0];
-  if (bucketProperty === undefined || bucketDeclaration === undefined) {
-    throw new Error(`The environment contract is missing its ${bucket} bucket`);
+  const targetProperty = contractType.getProperty(target);
+  const targetDeclaration = targetProperty?.valueDeclaration ?? targetProperty?.declarations?.[0];
+  if (targetProperty === undefined || targetDeclaration === undefined) {
+    throw new Error(
+      `Envil could not read the "${target}" target. Export the value returned by createEnv.`,
+    );
   }
 
-  const bucketType = checker.getTypeOfSymbolAtLocation(bucketProperty, bucketDeclaration);
-  return checker.getPropertiesOfType(bucketType).map((variable) => {
+  const targetType = checker.getTypeOfSymbolAtLocation(targetProperty, targetDeclaration);
+  return checker.getPropertiesOfType(targetType).map((variable) => {
     const declaration =
-      variable.valueDeclaration ?? variable.declarations?.[0] ?? bucketDeclaration;
+      variable.valueDeclaration ?? variable.declarations?.[0] ?? targetDeclaration;
     const metadataType = checker.getTypeOfSymbolAtLocation(variable, declaration);
     return {
-      bucket,
+      target,
       logicalKey: variable.getName(),
       runtimeKey: literalString(checker, metadataType, "runtimeKey", declaration),
       secret: literalBoolean(checker, metadataType, "secret", declaration),
@@ -104,8 +112,8 @@ function inspectExport(
   const contractType = checker.getTypeOfSymbolAtLocation(contractProperty, contractDeclaration);
   return {
     exportName: symbol.getName(),
-    variables: (["server", "client", "shared"] as const).flatMap((bucket) =>
-      inspectBucket(checker, contractType, bucket),
+    variables: (["server", "client"] as const).flatMap((target) =>
+      inspectTarget(checker, contractType, target),
     ),
   };
 }
@@ -121,12 +129,14 @@ export function inspectEnvContract(
   const absoluteInput = path.resolve(inputPath);
   const configPath = ts.findConfigFile(path.dirname(absoluteInput), ts.sys.fileExists);
   if (configPath === undefined) {
-    throw new Error("Unable to locate a tsconfig.json for the input module");
+    throw new Error(
+      `No tsconfig.json was found for "${absoluteInput}". Add one to the project and try again.`,
+    );
   }
 
   const config = ts.readConfigFile(configPath, ts.sys.readFile);
   if (config.error !== undefined) {
-    throw new Error("Unable to read the nearest tsconfig.json");
+    throw new Error(`Could not read "${configPath}". Fix the tsconfig.json file and try again.`);
   }
   const parsed = ts.parseJsonConfigFileContent(
     config.config,
@@ -147,21 +157,25 @@ export function inspectEnvContract(
   });
   const sourceFile = program.getSourceFile(absoluteInput);
   if (sourceFile === undefined) {
-    throw new Error("Unable to load the input module into the TypeScript program");
+    throw new Error(
+      `Could not load "${absoluteInput}". Check --input and make sure the file is included by tsconfig.json.`,
+    );
   }
   if (
     program.getSyntacticDiagnostics(sourceFile).length > 0 ||
     program.getSemanticDiagnostics(sourceFile).length > 0
   ) {
     throw new Error(
-      "The input module could not be typechecked; compiler details were omitted to protect environment data",
+      `"${absoluteInput}" has TypeScript errors. Run your typecheck command, fix them, and try again. Error details were hidden to protect environment data.`,
     );
   }
 
   const checker = program.getTypeChecker();
   const moduleSymbol = checker.getSymbolAtLocation(sourceFile);
   if (moduleSymbol === undefined) {
-    throw new Error("The input module has no inspectable exports");
+    throw new Error(
+      `"${absoluteInput}" has no exports. Export the app environment returned by createEnv.`,
+    );
   }
   const contracts = checker.getExportsOfModule(moduleSymbol).flatMap((symbol) => {
     const contract = inspectExport(checker, symbol, sourceFile);
@@ -171,41 +185,56 @@ export function inspectEnvContract(
   if (requestedExport !== undefined) {
     const selected = contracts.find((contract) => contract.exportName === requestedExport);
     if (selected === undefined) {
-      throw new Error(`Export "${requestedExport}" does not carry an Envil contract`);
+      throw new Error(
+        `Export "${requestedExport}" is not an Envil app environment. Choose an export created with createEnv.`,
+      );
     }
     return selected;
   }
   if (contracts.length === 0) {
-    throw new Error("No exported Envil contract was found in the input module");
+    throw new Error(
+      `No Envil app environment was exported from "${absoluteInput}". Export the value returned by createEnv.`,
+    );
   }
   if (contracts.length > 1) {
     throw new Error(
-      "Multiple exported Envil contracts were found; select one with --export <name>",
+      "Found multiple exported Envil environments. Use --export <name> to choose one.",
     );
   }
 
   const contract = contracts[0];
   if (contract === undefined) {
-    throw new Error("No exported Envil contract was found in the input module");
+    throw new Error(
+      `No Envil app environment was exported from "${absoluteInput}". Export the value returned by createEnv.`,
+    );
   }
   return contract;
 }
 
-/** Renders empty, deterministically ordered physical keys for `.env.example`. */
+/** Renders empty, deterministically ordered runtime keys for `.env.example`. */
 export function renderEnvExample(contract: InspectedEnvContract): string {
-  const bucketOrder: Record<Bucket, number> = {
+  const targetOrder: Record<EnvironmentTarget, number> = {
     server: 0,
     client: 1,
-    shared: 2,
   };
-  const variables = [...contract.variables].sort((left, right) => {
-    const byBucket = bucketOrder[left.bucket] - bucketOrder[right.bucket];
-    return byBucket === 0 ? left.runtimeKey.localeCompare(right.runtimeKey) : byBucket;
-  });
-  const groups = (["server", "client", "shared"] as const)
-    .map((bucket) =>
+  const variables = contract.variables
+    .filter((variable) => variable.source === "env")
+    .sort((left, right) => {
+      const byTarget = targetOrder[left.target] - targetOrder[right.target];
+      return byTarget === 0 ? left.runtimeKey.localeCompare(right.runtimeKey) : byTarget;
+    });
+  const emittedKeys = new Set<string>();
+  const groups = (["server", "client"] as const)
+    .map((target) =>
       variables
-        .filter((variable) => variable.bucket === bucket)
+        .filter((variable) => variable.target === target)
+        .filter((variable) => {
+          if (emittedKeys.has(variable.runtimeKey)) {
+            return false;
+          }
+          emittedKeys.add(variable.runtimeKey);
+          return true;
+        })
         .map((variable) => `${variable.runtimeKey}=`)
         .join("\n"),
     )

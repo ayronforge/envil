@@ -1,90 +1,185 @@
 ---
 title: API Reference
-description: Public creation, inference, resolver, result, and error APIs.
+description: Public fragment, composition, source, inference, resolver, result, and error APIs.
 ---
 
-## Creation
+## Environment definition
 
-### createEnv
+### `server(values, options?)`
 
-Always returns:
+Creates an immutable server fragment. `options` accepts:
 
 ```ts
-Effect.Effect<Env, EnvError, Requirements>
+{
+  runtimeEnv?: RuntimeEnv;
+  prefix?: string;
+  emptyStringAsUndefined?: boolean;
+}
 ```
 
-The optional `resolvers` field uses `({ resolve }) => [...]`.
+The runtime source defaults to `process.env`. Values may contain static values,
+any Effect Schema, `fromEnv` definitions, and `fromResolver` definitions.
 
-### createEnvSync
+### `client(values, options?)`
 
-Returns the immutable environment and rejects `resolvers` at typecheck.
-Validation failures are thrown at the synchronous boundary.
+Creates an immutable public client fragment with the same runtime options.
+`runtimeEnv` is required when `values` contains a schema. Resolver-backed and
+redacted definitions are rejected.
 
-### createEnvPromise
+### `shared(values)`
 
-Returns `Promise<Env>`. A second `{ layer }` argument is required only when
-resolver requirements remain unprovided.
+Creates an immutable fragment of public static values available to both
+contexts. Schemas and redacted values are rejected.
+
+### `createEnv(...fragments)`
+
+Creates one AppEnv from `server`, `client`, and `shared` fragments:
+
+```ts
+const appEnv = createEnv(
+  shared({ APP_NAME: "My App" }),
+  server({ DATABASE_URL: postgresUrl }),
+  client({ APP_URL: url }, { runtimeEnv: import.meta.env }),
+);
+```
+
+The returned object exposes two lazy Effect properties:
+
+```ts
+appEnv.server
+appEnv.client
+```
+
+The server Effect produces server, client, and shared values. The client Effect
+produces client and shared values.
+
+### `extendEnv(...inputs)`
+
+Returns a pipeable extension function:
+
+```ts
+const appEnv = baseEnv.pipe(
+  extendEnv(featureEnv),
+  extendEnv(server({ PORT: port })),
+);
+```
+
+Inputs may be AppEnv values or individual fragments. They are applied from left
+to right, and the last complete definition for a key wins. `createEnv` does not
+accept existing AppEnv values.
+
+### `fromEnv(name)`
+
+Schema pipe combinator that maps one property to an exact runtime name:
+
+```ts
+API_KEY: requiredString.pipe(fromEnv("PUBLIC_API_KEY"))
+```
+
+Apply schema combinators before `fromEnv`; the returned sourced definition is
+terminal so the source cannot be accidentally erased.
+
+Runtime sources accept an environment object, parsed JSON object, or
+`ReadonlyMap<string, unknown>`. Object sources support exact keys and
+dot-separated paths; exact keys take precedence. Map sources use exact keys.
+
+## Resolvers
+
+### `configureResolver(adapter, options)`
+
+Configures any `ResolverAdapter` with ordinary runtime options. No compiler
+metadata is required from custom adapters. The configured resolver can be
+reused by multiple `fromResolver` definitions.
+
+Resolver adapters receive requested provider references as `referencesByKey`,
+keyed by application property:
+
+```ts
+resolve: ({ referencesByKey }) =>
+  Effect.succeed({
+    TOKEN: resolveReference(referencesByKey.TOKEN),
+  })
+```
+
+### `fromResolver(resolver, reference)`
+
+Makes one server variable authoritative from a provider reference:
+
+```ts
+TOKEN: requiredString.pipe(
+  fromResolver(aws, "production/token"),
+)
+```
+
+Resolver-backed schemas are server-only, automatically redacted, and batched by
+configured resolver.
+
+### Built-in adapters
+
+- `awsSecretsAdapter`
+- `gcpSecretsAdapter`
+- `azureKeyVaultAdapter`
+- `onePasswordSecretsAdapter`
+- `customSecretsAdapter`
 
 ## Inference
 
 ```ts
-InferEnv<T>
+InferServerEnv<typeof appEnv>
+InferClientEnv<typeof appEnv>
+InferEnv<typeof appEnv.server>
+InferEnv<typeof appEnv.client>
 ```
 
-It returns the complete decoded environment type and works with an Effect,
-sync value, Promise, or awaited value.
+`InferEnv` also accepts Promise-like materialization results.
 
-## Results
+## Result conversion
+
+### `asResult()`
+
+Converts only an Effect's typed error channel:
 
 ```ts
-asResult()
-Result<A, E>
+const result = await Effect.runPromise(
+  appEnv.server.pipe(asResult()),
+);
 ```
 
-`asResult()` converts only the typed Effect error channel.
-
-## Resolver protocol
-
-```ts
-ResolverAdapter<Name, Reference, Options, Error, Requirements>
-```
-
-Built-in values:
-
-```ts
-awsSecretsAdapter
-gcpSecretsAdapter
-azureKeyVaultAdapter
-onePasswordSecretsAdapter
-customSecretsAdapter
-```
-
-## Custom source
-
-```ts
-SecretSource
-SecretSource.fromPromise({ get })
-SecretSourceError
-SecretSourceRequestFailed
-```
-
-`get` returns:
-
-```ts
-Effect.Effect<
-  Option.Option<Redacted<string>>,
-  SecretSourceRequestFailed
->
-```
+Defects and interruptions are not converted into result values.
 
 ## Errors
 
-```ts
-EnvValidationError
-EnvConfigurationError
-ClientAccessError
-ResolverConfigurationError
-ResolverInitializationError
-ResolverRequestFailed
-ResolverResponseDecodeFailed
-```
+### `EnvValidationError`
+
+Contains frozen, secret-safe issues for missing and invalid values.
+
+### `EnvConfigurationError`
+
+Reports invalid fragments, duplicate runtime mappings, malformed runtime
+sources, and malformed resolver results.
+
+### `ServerEnvironmentAccessError`
+
+An `EnvConfigurationError` subclass returned when `appEnv.server` executes in a
+client or unproven runtime.
+
+### `EnvironmentAccessError`
+
+An `EnvConfigurationError` subclass raised when code reads a property that is
+not present in the materialized target.
+
+### Resolver errors
+
+- `ResolverConfigurationError`
+- `ResolverInitializationError`
+- `ResolverRequestFailed`
+- `ResolverResponseDecodeFailed`
+
+## Build plugins
+
+- `@ayronforge/envil/plugins/vite`
+- `@ayronforge/envil/plugins/rollup`
+- `@ayronforge/envil/plugins/rolldown`
+- `@ayronforge/envil/plugins/webpack`
+- `@ayronforge/envil/plugins/rspack`
+- `@ayronforge/envil/plugins/esbuild`

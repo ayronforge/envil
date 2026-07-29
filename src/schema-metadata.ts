@@ -1,4 +1,4 @@
-import { Option, Schema, SchemaAST } from "effect";
+import { Schema, SchemaAST } from "effect";
 
 import { REDACTED_ANNOTATION } from "./schemas.ts";
 
@@ -8,41 +8,27 @@ function hasRedactedAnnotation(ast: SchemaAST.AST, visited: Set<SchemaAST.AST>):
   }
   visited.add(ast);
 
-  const redacted = Option.getOrUndefined(
-    SchemaAST.getAnnotation<boolean>(ast, REDACTED_ANNOTATION),
-  );
-  if (redacted === true) {
+  if (SchemaAST.resolveAt<boolean>(REDACTED_ANNOTATION)(ast) === true) {
     return true;
   }
 
-  if (SchemaAST.isTransformation(ast)) {
-    return hasRedactedAnnotation(ast.from, visited) || hasRedactedAnnotation(ast.to, visited);
-  }
-  if (SchemaAST.isRefinement(ast)) {
-    return hasRedactedAnnotation(ast.from, visited);
+  if (ast.encoding?.some((link) => hasRedactedAnnotation(link.to, visited))) {
+    return true;
   }
   if (SchemaAST.isUnion(ast)) {
     return ast.types.some((member) => hasRedactedAnnotation(member, visited));
   }
   if (SchemaAST.isSuspend(ast)) {
-    return hasRedactedAnnotation(ast.f(), visited);
+    return hasRedactedAnnotation(ast.thunk(), visited);
   }
 
   return false;
 }
 
-/**
- * Returns whether a schema contains envil's redacted wrapper, including when
- * that wrapper is nested inside optional or default combinators.
- */
-export function isRedactedSchema(schema: Schema.Schema.Any): boolean {
+export function isRedactedSchema(schema: Schema.Top): boolean {
   return hasRedactedAnnotation(schema.ast, new Set());
 }
 
-/**
- * Returns a safe schema identifier for diagnostics without formatting the
- * rejected input.
- */
-export function getSchemaIdentifier(schema: Schema.Schema.Any): string | undefined {
-  return Option.getOrUndefined(SchemaAST.getIdentifierAnnotation(schema.ast));
+export function getSchemaIdentifier(schema: Schema.Top): string | undefined {
+  return SchemaAST.resolveIdentifier(schema.ast);
 }

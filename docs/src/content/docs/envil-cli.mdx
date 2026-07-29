@@ -1,59 +1,61 @@
 ---
 title: Envil CLI
-description: Generate environment definitions and empty examples without executing application code.
+description: Generate app environment definitions and empty examples without executing application code.
 ---
 
 The CLI has two commands:
 
 ```bash
 envil init
+envil example
+```
+
+## `envil init`
+
+Generate a Vite-oriented starter:
+
+```bash
+envil init
+```
+
+Infer server and client fragment schemas from a dotenv file:
+
+```bash
 envil init --from .env
 envil init --from .env.example
+```
+
+Useful options:
+
+```bash
+--client-prefix <prefix>
+--output <path>
+--force
+```
+
+Values are held only in memory and are never copied into generated TypeScript.
+Connection URLs and credential-like server names are redacted automatically.
+
+## `envil example`
+
+Generate empty runtime keys from an exported app environment:
+
+```bash
 envil example --input src/env.ts
 ```
 
-## init
-
-Without `--from`, `envil init` writes one secure starter `env.ts`.
-
-With `--from`, values stay in memory and are used only to infer schemas. The
-generated source contains no defaults and no source values. Known public
-prefixes are recognized automatically:
-
-- `NEXT_PUBLIC_`
-- `VITE_`
-- `EXPO_PUBLIC_`
-- `NUXT_PUBLIC_`
-- `PUBLIC_`
-
-If more than one is present, select one with `--client-prefix`. All remaining
-keys become `server`; `init` never infers `shared`.
-
-Common credential segments such as `PASSWORD`, `SECRET`, `TOKEN`, `API_KEY`,
-`PRIVATE_KEY`, and `ACCESS_KEY` are generated with `redacted(...)`. This is a
-conservative heuristic, so review the generated contract before using it.
-
-## example
-
-`envil example` locates the nearest `tsconfig.json`, creates a TypeScript 6
-`Program`, and inspects exported type-only Envil contracts.
-
-If the module exports one contract, it is selected automatically. With several:
+Useful options:
 
 ```bash
-envil example --input src/env.ts --export productionEnv
+--export <name>
+--output <path>
+--force
 ```
 
-The command never imports or executes the module, reads the application's
-`process.env`, runs `createEnv`, initializes SDKs, or calls resolvers.
+The command uses the TypeScript Compiler API and never imports the application
+module, reads `process.env` or `import.meta.env`, runs an environment Effect, or
+calls a resolver.
 
-The output contains empty physical keys only:
-
-```env
-DATABASE_URL=
-
-VITE_APP_URL=
-```
-
-If a physical key is widened to `string`, generation fails because no concrete
-name can be emitted.
+Only runtime-environment-backed variables are emitted. Resolver-backed variables
+and static shared values are omitted. `fromEnv` mappings and fragment prefixes are
+reflected in the output.

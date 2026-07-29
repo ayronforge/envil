@@ -1,6 +1,6 @@
 ---
 title: Azure Key Vault
-description: Resolve server secrets with the isolated Azure adapter.
+description: Source server variables from Azure Key Vault.
 ---
 
 ```bash
@@ -8,24 +8,27 @@ bun add @azure/keyvault-secrets @azure/identity
 ```
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/envil";
+import {
+  configureResolver,
+  createEnv,
+  fromResolver,
+  requiredString,
+  server,
+} from "@ayronforge/envil";
 import { azureKeyVaultAdapter } from "@ayronforge/envil/azure";
 
-export const env = createEnv({
-  server: {
-    DATABASE_PASSWORD: requiredString,
-  },
-  resolvers: ({ resolve }) => [
-    resolve(azureKeyVaultAdapter, {
-      vaultUrl: "https://my-vault.vault.azure.net",
-      secrets: {
-        DATABASE_PASSWORD: "database-password",
-      },
-    }),
-  ],
+const azure = configureResolver(azureKeyVaultAdapter, {
+  vaultUrl: "https://my-vault.vault.azure.net",
 });
+
+export const appEnv = createEnv(
+  server({
+    API_TOKEN: requiredString.pipe(
+      fromResolver(azure, "api-token"),
+    ),
+  }),
+);
 ```
 
-The optional `credential` field uses Azure's official `TokenCredential` type.
-Without it, the adapter creates `DefaultAzureCredential`. HTTP 404 becomes
-`Option.none()`; other SDK failures stay typed errors.
+The adapter uses `DefaultAzureCredential` unless a `credential` is supplied.
+Azure 404 responses become `Option.none()`.

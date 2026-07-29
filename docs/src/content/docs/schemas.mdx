@@ -1,174 +1,137 @@
 ---
 title: Built-in Schemas
-description: Reference for all built-in schemas — strings, numbers, URLs, booleans, and parsed types.
+description: Reference for string, number, URL, boolean, and parsed environment schemas.
 order: 4
 ---
 
 import TypeTable from "@/components/docs/TypeTable.astro";
 import Callout from "@/components/docs/Callout.astro";
 
-envil ships with a set of ready-to-use schemas for common environment variable patterns. All schemas are exported from the main package.
+All built-in schemas are Effect Schemas and may be used directly in a server or
+client fragment:
 
 ```ts
-import { requiredString, port, boolean, url } from "@ayronforge/envil"
+const appEnv = createEnv(
+  server({
+    PORT: port,
+    DATABASE_URL: redacted(postgresUrl),
+  }),
+);
 ```
 
-## String schemas
+## Strings
 
 <TypeTable rows={[
-  { name: "requiredString", type: "string", description: "Non-empty string. Fails if the value is undefined or empty." },
+  { name: "requiredString", type: "string", description: "A present, non-empty string." },
+]} />
+
+Use `optional(schema)` when absence is valid.
+
+## Numbers
+
+<TypeTable rows={[
+  { name: "number", type: "number", description: "Any number parsed from a string." },
+  { name: "positiveNumber", type: "number", description: "A number greater than zero." },
+  { name: "integer", type: "number", description: "A whole number." },
+  { name: "nonNegativeNumber", type: "number", description: "A number greater than or equal to zero." },
+  { name: "port", type: "number", description: "A whole number from 1 through 65535." },
 ]} />
 
 ```ts
-import { requiredString, optional } from "@ayronforge/envil"
-import { Schema } from "effect"
-
-createEnvSync({
-  server: {
-    API_KEY: requiredString,          // must be present and non-empty
-    OPTIONAL_FLAG: optional(Schema.String),  // can be undefined
-  },
-})
+values: {
+  PORT: port,
+  MAX_RETRIES: integer,
+  RATE_LIMIT: positiveNumber,
+  THRESHOLD: number,
+}
 ```
 
-## Number schemas
+## Boolean
 
 <TypeTable rows={[
-  { name: "number", type: "number", description: "Any number parsed from string via NumberFromString." },
-  { name: "positiveNumber", type: "number", description: "Positive number parsed from string. Must be > 0." },
-  { name: "integer", type: "number", description: "Integer parsed from string. No decimals allowed." },
-  { name: "nonNegativeNumber", type: "number", description: "Non-negative number parsed from string. Must be >= 0." },
-  { name: "port", type: "number", description: "Port number (1–65535), parsed from string." },
+  { name: "boolean", type: "boolean", description: "Parses true, false, 1, or 0 without case sensitivity." },
 ]} />
 
 ```ts
-import { number, port, positiveNumber, integer } from "@ayronforge/envil"
-
-createEnvSync({
-  server: {
-    PORT: port,                    // 1-65535
-    MAX_RETRIES: integer,          // whole number
-    RATE_LIMIT: positiveNumber,    // > 0
-    THRESHOLD: number,             // any number (e.g. "3.14" → 3.14)
-  },
-})
+values: {
+  DEBUG: boolean,
+}
 ```
 
-## Boolean schema
+## URLs
 
 <TypeTable rows={[
-  { name: "boolean", type: "boolean", description: "Parses 'true', 'false', '1', '0' (case-insensitive) into a boolean." },
+  { name: "url", type: "string", description: "HTTP or HTTPS URL." },
+  { name: "postgresUrl", type: "string", description: "PostgreSQL connection URL." },
+  { name: "redisUrl", type: "string", description: "Redis connection URL." },
+  { name: "mongoUrl", type: "string", description: "MongoDB connection URL." },
+  { name: "mysqlUrl", type: "string", description: "MySQL connection URL." },
+  { name: "commaSeparatedUrls", type: "string[]", description: "Comma-separated HTTP and HTTPS URLs." },
+]} />
+
+Server connection URLs should normally be redacted:
+
+```ts
+values: {
+  DATABASE_URL: redacted(postgresUrl),
+  REDIS_URL: redacted(redisUrl),
+  WEBHOOK_URL: url,
+}
+```
+
+## Comma-separated values
+
+<TypeTable rows={[
+  { name: "commaSeparated", type: "string[]", description: "Trimmed strings separated by commas." },
+  { name: "commaSeparatedNumbers", type: "number[]", description: "Numbers separated by commas." },
 ]} />
 
 ```ts
-import { boolean } from "@ayronforge/envil"
-
-createEnvSync({
-  server: {
-    DEBUG: boolean,       // "true" → true, "0" → false
-    VERBOSE: boolean,
-  },
-})
-```
-
-## URL schemas
-
-<TypeTable rows={[
-  { name: "url", type: "string", description: "Valid HTTP or HTTPS URL." },
-  { name: "postgresUrl", type: "string", description: "PostgreSQL connection URL (postgres:// or postgresql://)." },
-  { name: "redisUrl", type: "string", description: "Redis connection URL (redis:// or rediss://)." },
-  { name: "mongoUrl", type: "string", description: "MongoDB connection URL (mongodb:// or mongodb+srv://)." },
-  { name: "mysqlUrl", type: "string", description: "MySQL connection URL (mysql:// or mysqls://)." },
-  { name: "commaSeparatedUrls", type: "string[]", description: "Comma-separated list of valid HTTP/HTTPS URLs." },
-]} />
-
-```ts
-import { url, postgresUrl, redisUrl } from "@ayronforge/envil"
-
-createEnvSync({
-  server: {
-    DATABASE_URL: postgresUrl,     // postgresql://user:pass@host:5432/db
-    REDIS_URL: redisUrl,           // redis://localhost:6379/0
-    WEBHOOK_URL: url,              // https://example.com/webhook
-  },
-})
-```
-
-## Comma-separated schemas
-
-<TypeTable rows={[
-  { name: "commaSeparated", type: "string[]", description: "Splits a comma-separated string into a trimmed string array." },
-  { name: "commaSeparatedNumbers", type: "number[]", description: "Splits a comma-separated string into a number array. Throws if any item isn't a valid number." },
-]} />
-
-```ts
-import { commaSeparated, commaSeparatedNumbers } from "@ayronforge/envil"
-
-createEnvSync({
-  server: {
-    ALLOWED_ORIGINS: commaSeparated,        // "a.com, b.com" → ["a.com", "b.com"]
-    RETRY_DELAYS: commaSeparatedNumbers,    // "100,200,500" → [100, 200, 500]
-  },
-})
+values: {
+  ALLOWED_ORIGINS: commaSeparated,
+  RETRY_DELAYS: commaSeparatedNumbers,
+}
 ```
 
 ## Parameterized schemas
 
 ### `stringEnum`
 
-Creates a schema that accepts only the specified literal values:
-
 ```ts
-import { stringEnum } from "@ayronforge/envil"
-
-createEnvSync({
-  shared: {
-    LOG_LEVEL: stringEnum(["debug", "info", "warn", "error"]),
-    // Type: "debug" | "info" | "warn" | "error"
-  },
-})
+values: {
+  LOG_LEVEL: stringEnum(["debug", "info", "warn", "error"]),
+}
 ```
 
 ### `json`
 
-Parses a JSON string and validates the result against an inner schema:
-
 ```ts
-import { json } from "@ayronforge/envil"
-import { Schema } from "effect"
+import { Schema } from "effect";
 
-createEnvSync({
-  server: {
-    // JSON_CONFIG='{"retries":3,"timeout":5000}'
-    JSON_CONFIG: json(Schema.Struct({
+values: {
+  JSON_CONFIG: json(
+    Schema.Struct({
       retries: Schema.Number,
       timeout: Schema.Number,
-    })),
-  },
-})
+    }),
+  ),
+}
 ```
 
-## Using Effect Schema directly
+## Effect Schema
 
-Any Effect Schema works as a validator. The built-in schemas are just convenience wrappers:
+Any Effect Schema is accepted, including schemas with Effect context
+requirements:
 
 ```ts
-import { Schema } from "effect"
-
-createEnvSync({
-  server: {
-    PORT: Schema.NumberFromString,
-    NODE_ENV: Schema.Literal("development", "production", "test"),
-    API_KEY: Schema.String.pipe(Schema.minLength(32)),
-    CUSTOM: Schema.transform(
-      Schema.String,
-      Schema.Number,
-      { decode: (s) => parseInt(s, 16), encode: (n) => n.toString(16) },
-    ),
-  },
-})
+values: {
+  NODE_ENV: Schema.Literal("development", "production", "test"),
+  API_KEY: Schema.String.check(Schema.isMinLength(32)),
+}
 ```
 
 <Callout type="tip">
-  If you need a schema that doesn't exist as a built-in, just use Effect Schema directly. envil accepts any `Schema.Schema<any, any, never>`.
+  Use Effect Schema directly when the built-in set does not express the desired
+  validation and decoded type. Its errors and context requirements are
+  preserved by the resulting environment Effect.
 </Callout>

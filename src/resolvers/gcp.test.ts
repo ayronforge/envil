@@ -21,12 +21,13 @@ describe("gcpSecretsAdapter", () => {
   test("fails configuration before initializing the SDK", async () => {
     const exit = await Effect.runPromiseExit(
       gcpSecretsAdapter.resolve({
-        secrets: { TOKEN: "short-name" },
+        referencesByKey: { TOKEN: "short-name" },
       }),
     );
 
     expect(exit._tag).toBe("Failure");
     expect(String(exit)).toContain("ResolverConfigurationError");
+    expect(String(exit)).toContain('Set "projectId"');
     expect(String(exit)).not.toContain("short-name");
   });
 
@@ -35,7 +36,7 @@ describe("gcpSecretsAdapter", () => {
 
     const result = await Effect.runPromise(
       gcpSecretsAdapter.resolve({
-        secrets: { TOKEN: "projects/project/secrets/token/versions/latest" },
+        referencesByKey: { TOKEN: "projects/project/secrets/token/versions/latest" },
       }),
     );
 
@@ -52,7 +53,7 @@ describe("gcpSecretsAdapter", () => {
 
     const result = await Effect.runPromise(
       gcpSecretsAdapter.resolve({
-        secrets: { TOKEN: "projects/project/secrets/token/versions/latest" },
+        referencesByKey: { TOKEN: "projects/project/secrets/token/versions/latest" },
       }),
     );
 
@@ -67,7 +68,7 @@ describe("gcpSecretsAdapter", () => {
 
     const exit = await Effect.runPromiseExit(
       gcpSecretsAdapter.resolve({
-        secrets: { TOKEN: "projects/private/secrets/token/versions/latest" },
+        referencesByKey: { TOKEN: "projects/private/secrets/token/versions/latest" },
       }),
     );
 

@@ -38,13 +38,18 @@ afterEach(async () => {
 });
 
 describe("envil init", () => {
-  test("generates the secure default starter", () => {
-    expect(generateDefaultEnvSource()).toContain("DATABASE_URL: redacted(url)");
-    expect(generateDefaultEnvSource()).toContain('client: "VITE_"');
-    expect(generateDefaultEnvSource()).not.toContain("CHANGE_ME");
+  test("generates the lazy Vite starter", () => {
+    const source = generateDefaultEnvSource();
+
+    expect(source).toContain("export const appEnv = createEnv");
+    expect(source).toContain("server({");
+    expect(source).toContain("client(");
+    expect(source).toContain("DATABASE_URL: redacted(url)");
+    expect(source).toContain('prefix: "VITE_"');
+    expect(source).toContain("runtimeEnv: import.meta.env");
   });
 
-  test("uses dotenv values only to infer schemas", () => {
+  test("uses dotenv values only to infer target schemas", () => {
     const secret = "postgres://user:password@db.example.com:5432/app";
     const source = generateEnvSourceFromDotenv(
       `DATABASE_URL=${secret}\nVITE_APP_URL=https://example.com\nPORT=3000\n`,
@@ -53,66 +58,52 @@ describe("envil init", () => {
     expect(source).toContain("DATABASE_URL: redacted(postgresUrl)");
     expect(source).toContain("APP_URL: url");
     expect(source).toContain("PORT: port");
-    expect(source).toContain('client: "VITE_"');
+    expect(source).toContain('prefix: "VITE_"');
+    expect(source).toContain("runtimeEnv: import.meta.env");
     expect(source).not.toContain(secret);
-    expect(source).not.toContain("withDefault");
-    expect(source).not.toContain("shared:");
   });
 
-  test("parses quoted values, inline comments, and hashes inside quotes", () => {
-    const source = generateEnvSourceFromDotenv(
-      [
-        'PORT="3000" # local port',
-        'VITE_APP_URL="https://example.com/#documentation" # public URL',
-      ].join("\n"),
-    );
-
-    expect(source).toContain("PORT: port");
-    expect(source).toContain("APP_URL: url");
-    expect(source).toContain('client: "VITE_"');
-  });
-
-  test("redacts common compound credential names without matching unrelated words", () => {
+  test("redacts sensitive names and inferred server connection URLs", () => {
     const source = generateEnvSourceFromDotenv(
       [
         "AWS_SECRET_ACCESS_KEY=private-value",
-        "STRIPE_SECRET_KEY=private-value",
-        "AWS_ACCESS_KEY_ID=private-value",
+        "CACHE=redis://host:6379/0",
+        "DOCUMENTS=mongodb://host:27017/app",
+        "MYSQL_URL=mysql://user:password@host:3306/app",
         "SECRETARY_EMAIL=assistant@example.com",
-        "MONKEY=capuchin",
       ].join("\n"),
     );
 
     expect(source).toContain("AWS_SECRET_ACCESS_KEY: redacted(requiredString)");
-    expect(source).toContain("STRIPE_SECRET_KEY: redacted(requiredString)");
-    expect(source).toContain("AWS_ACCESS_KEY_ID: redacted(requiredString)");
+    expect(source).toContain("CACHE: redacted(redisUrl)");
+    expect(source).toContain("DOCUMENTS: redacted(mongoUrl)");
+    expect(source).toContain("MYSQL_URL: redacted(mysqlUrl)");
     expect(source).toContain("SECRETARY_EMAIL: requiredString");
-    expect(source).toContain("MONKEY: requiredString");
     expect(source).not.toContain("private-value");
   });
 
   test("rejects ambiguous known client prefixes without exposing values", () => {
     const secret = "private-value";
     expect(() =>
-      generateEnvSourceFromDotenv(`VITE_URL=${secret}\nNEXT_PUBLIC_URL=${secret}\n`),
+      generateEnvSourceFromDotenv(`VITE_URL=${secret}\nEXPO_PUBLIC_URL=${secret}\n`),
     ).toThrow("--client-prefix");
 
     try {
-      generateEnvSourceFromDotenv(`VITE_URL=${secret}\nNEXT_PUBLIC_URL=${secret}\n`);
+      generateEnvSourceFromDotenv(`VITE_URL=${secret}\nEXPO_PUBLIC_URL=${secret}\n`);
     } catch (failure: unknown) {
       expect(String(failure)).not.toContain(secret);
     }
   });
 
-  test("rejects logical collisions created by prefix removal", () => {
-    expect(() =>
-      generateEnvSourceFromDotenv(
-        "APP_URL=https://server.example.com\nVITE_APP_URL=https://client.example.com\n",
-      ),
-    ).toThrow("more than one bucket");
+  test("allows the same property name in server and client targets", () => {
+    const source = generateEnvSourceFromDotenv(
+      "URL=https://server.example.com\nVITE_URL=https://client.example.com\n",
+    );
+
+    expect(source.match(/URL: url/g)).toHaveLength(2);
   });
 
-  test("CLI writes one env.ts file", async () => {
+  test("CLI writes one app environment definition", async () => {
     const directory = await createFixture();
     const stdout: string[] = [];
     const stderr: string[] = [];
@@ -125,25 +116,26 @@ describe("envil init", () => {
     expect(exitCode).toBe(0);
     expect(stderr).toEqual([]);
     expect(stdout).toHaveLength(1);
-    expect(await readFile(path.join(directory, "env.ts"), "utf8")).toContain("createEnvSync");
+    expect(await readFile(path.join(directory, "env.ts"), "utf8")).toContain(
+      "export const appEnv = createEnv",
+    );
   });
 });
 
 describe("envil example", () => {
-  test("inspects the phantom contract without executing the module", async () => {
+  test("inspects the app contract without executing the module", async () => {
     const directory = await createFixture();
     const inputPath = path.join(directory, "env.ts");
     await writeFile(
       inputPath,
       [
-        'import { createEnv, redacted, requiredString, url } from "../src/index.ts";',
+        'import { client, createEnv, redacted, server, shared, url } from "../src/index.ts";',
         "",
-        "export const env = createEnv({",
-        "  server: { DATABASE_URL: redacted(url) },",
-        "  client: { APP_URL: url },",
-        '  prefix: { client: "VITE_" },',
-        "  runtimeEnv: {},",
-        "});",
+        "export const appEnv = createEnv(",
+        "  server({ DATABASE_URL: redacted(url) }),",
+        "  client({ APP_URL: url }, { runtimeEnv: {}, prefix: 'VITE_' }),",
+        "  shared({ APP_NAME: 'Envil' }),",
+        ");",
         "",
         'throw new Error("THIS_MODULE_MUST_NOT_EXECUTE");',
       ].join("\n"),
@@ -152,48 +144,102 @@ describe("envil example", () => {
     const contract = inspectEnvContract(inputPath);
     const example = renderEnvExample(contract);
 
-    expect(contract.exportName).toBe("env");
+    expect(contract.exportName).toBe("appEnv");
     expect(example).toBe("DATABASE_URL=\n\nVITE_APP_URL=\n");
+    expect(example).not.toContain("APP_NAME");
     expect(example).not.toContain("THIS_MODULE_MUST_NOT_EXECUTE");
   });
 
-  test("includes inherited contracts in generated examples", async () => {
+  test("uses fromEnv names and omits resolver-backed variables", async () => {
     const directory = await createFixture();
     const inputPath = path.join(directory, "env.ts");
     await writeFile(
       inputPath,
       [
-        'import { createEnvSync, redacted, requiredString, url } from "../src/index.ts";',
+        'import { configureResolver, createEnv, customSecretsAdapter, fromEnv, fromResolver, requiredString, server } from "../src/index.ts";',
         "",
-        "const baseEnv = createEnvSync({",
-        "  server: { DATABASE_URL: redacted(url) },",
-        "  client: { API_URL: url },",
-        '  prefix: { client: "VITE_" },',
-        "  runtimeEnv: {},",
-        "});",
-        "",
-        "export const env = createEnvSync({",
-        "  extends: [baseEnv],",
-        "  server: { APP_NAME: requiredString },",
-        "  runtimeEnv: {},",
-        "});",
+        "const source = configureResolver(customSecretsAdapter, {});",
+        "export const appEnv = createEnv(",
+        "  server({",
+        '      TOKEN: requiredString.pipe(fromResolver(source, "private-reference")),',
+        '      DATABASE_URL: requiredString.pipe(fromEnv("POSTGRES_URL")),',
+        "  }),",
+        ");",
       ].join("\n"),
     );
 
-    const example = renderEnvExample(inspectEnvContract(inputPath));
-
-    expect(example).toBe("APP_NAME=\nDATABASE_URL=\n\nVITE_API_URL=\n");
+    expect(renderEnvExample(inspectEnvContract(inputPath))).toBe("POSTGRES_URL=\n");
   });
 
-  test("requires --export when several contracts are exported", async () => {
+  test("omits a server definition shadowed by the winning client definition", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { client, createEnv, requiredString, server } from "../src/index.ts";',
+        "",
+        "export const appEnv = createEnv(",
+        "  server({ URL: requiredString }),",
+        "  client({ URL: requiredString }, { runtimeEnv: {}, prefix: 'VITE_' }),",
+        ");",
+      ].join("\n"),
+    );
+
+    expect(renderEnvExample(inspectEnvContract(inputPath))).toBe("VITE_URL=\n");
+  });
+
+  test("renders the final contract produced by extendEnv composition", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { client, configureResolver, createEnv, customSecretsAdapter, extendEnv, fromEnv, fromResolver, requiredString, server } from "../src/index.ts";',
+        "",
+        "const source = configureResolver(customSecretsAdapter, {});",
+        "const baseEnv = createEnv(",
+        "  server({",
+        '    DATABASE: requiredString.pipe(fromEnv("OLD_DATABASE")),',
+        '    TOKEN: requiredString.pipe(fromResolver(source, "private-reference")),',
+        "  }),",
+        ");",
+        "",
+        "export const appEnv = baseEnv.pipe(",
+        "  extendEnv(",
+        "    createEnv(",
+        "      server({",
+        '        DATABASE: requiredString.pipe(fromEnv("NEW_DATABASE")),',
+        '        PORT: requiredString.pipe(fromEnv("SERVER_PORT")),',
+        "      }),",
+        "    ),",
+        "  ),",
+        "  extendEnv(",
+        "    client(",
+        "      { DATABASE: requiredString, APP_URL: requiredString },",
+        "      { runtimeEnv: {}, prefix: 'PUBLIC_' },",
+        "    ),",
+        "  ),",
+        ");",
+        "",
+        'throw new Error("THIS_COMPOSED_MODULE_MUST_NOT_EXECUTE");',
+      ].join("\n"),
+    );
+
+    expect(renderEnvExample(inspectEnvContract(inputPath))).toBe(
+      "SERVER_PORT=\n\nPUBLIC_APP_URL=\nPUBLIC_DATABASE=\n",
+    );
+  });
+
+  test("requires --export when several app environments are exported", async () => {
     const directory = await createFixture();
     const inputPath = path.join(directory, "env.ts");
     await writeFile(
       inputPath,
       [
         'import { createEnv } from "../src/index.ts";',
-        "export const first = createEnv({ server: {} });",
-        "export const second = createEnv({ server: {} });",
+        "export const first = createEnv();",
+        "export const second = createEnv();",
       ].join("\n"),
     );
 
@@ -201,22 +247,23 @@ describe("envil example", () => {
     expect(inspectEnvContract(inputPath, "second").exportName).toBe("second");
   });
 
-  test("fails widened physical keys explicitly", async () => {
+  test("explains fragment prefixes whose type was widened", async () => {
     const directory = await createFixture();
     const inputPath = path.join(directory, "env.ts");
     await writeFile(
       inputPath,
       [
-        'import { createEnv, requiredString } from "../src/index.ts";',
+        'import { client, createEnv, requiredString } from "../src/index.ts";',
         'const prefix: string = "APP_";',
-        "export const env = createEnv({",
-        "  server: { TOKEN: requiredString },",
-        "  prefix,",
-        "});",
+        "export const appEnv = createEnv(",
+        "  client({ TOKEN: requiredString }, { runtimeEnv: {}, prefix }),",
+        ");",
       ].join("\n"),
     );
 
-    expect(() => inspectEnvContract(inputPath)).toThrow("widened runtimeKey");
+    expect(() => inspectEnvContract(inputPath)).toThrow(
+      "Envil could not determine the generated variable names. Keep prefixes and resolver names as string literals instead of typing them as string.",
+    );
   });
 
   test("CLI stderr omits compiler source details", async () => {
@@ -247,4 +294,15 @@ test("only init and example are accepted commands", async () => {
 
   expect(exitCode).toBe(1);
   expect(stderr.join("")).toContain('Unknown command "add"');
+  expect(stderr.join("")).toContain('Run "envil --help"');
+});
+
+test("CLI option errors explain the correct syntax", async () => {
+  const stderr: string[] = [];
+  const exitCode = await runCli(["init", "--force=true"], {
+    stderr: (message) => stderr.push(message),
+  });
+
+  expect(exitCode).toBe(1);
+  expect(stderr.join("")).toContain('Use "--force" without a value.');
 });

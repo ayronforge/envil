@@ -1,331 +1,218 @@
-import { Effect, Either, Predicate, type Layer } from "effect";
+import { Pipeable } from "effect";
 
-import { isEnvValue } from "./env/runtime.ts";
-import type { EnvironmentCreationOptions } from "./env/secret-resolution.ts";
-import { createEnvEffect } from "./env/secret-resolution.ts";
-import { EnvConfigurationError, EnvValidationError } from "./errors.ts";
-import type { AnyResolverDefinition } from "./resolvers/types.ts";
+import { buildEnvironmentEffect } from "./env/runtime.ts";
 import type {
-  AnyEnv,
-  BuildEnvContract,
-  ComposedEnvContract,
-  EnvContractCarrier,
-  EnvOptions,
-  EnvValue,
-  PrefixMap,
-  ResolverErrors,
-  ResolverRequirements,
-  ResolverTools,
-  SchemaDict,
-  ValidEnvOptions,
-  ValidResolverTuple,
+  AnyAppEnv,
+  AnyEnvFragment,
+  AppEnv,
+  CreateEnvClientEntries,
+  CreateEnvServerEntries,
+  EnvFragment,
+  EnvValues,
+  ExtendedClientEntries,
+  ExtendedServerEntries,
+  HasRuntimeVariables,
+  RuntimeEnv,
+  ValidClientValues,
+  ValidSharedValues,
 } from "./types.ts";
 
-type EnvFailure<Resolvers extends readonly AnyResolverDefinition[]> =
-  | ResolverErrors<Resolvers>
-  | EnvConfigurationError
-  | EnvValidationError;
-
-type EffectExtends<Extends extends readonly AnyEnv[]> = {
-  readonly [Index in keyof Extends]: Extends[Index] extends PromiseLike<unknown>
-    ? never
-    : Extends[Index];
-};
-
-type PromiseExtends<Extends extends readonly AnyEnv[]> = {
-  readonly [Index in keyof Extends]: Extends[Index] extends Effect.Effect<unknown, unknown, unknown>
-    ? never
-    : Extends[Index];
-};
-
-type SyncExtends<Extends extends readonly AnyEnv[]> = {
-  readonly [Index in keyof Extends]: Extends[Index] extends
-    | Effect.Effect<unknown, unknown, unknown>
-    | PromiseLike<unknown>
-    ? never
-    : Extends[Index];
-};
-
-type ExtendedEffects<Extends extends readonly AnyEnv[]> = Extract<
-  Extends[number],
-  Effect.Effect<unknown, unknown, unknown>
->;
-
-type ExtendedEnvErrors<Extends extends readonly AnyEnv[]> = [ExtendedEffects<Extends>] extends [
-  never,
-]
-  ? never
-  : ExtendedEffects<Extends> extends Effect.Effect<unknown, infer Error, unknown>
-    ? Error
-    : never;
-
-type ExtendedEnvRequirements<Extends extends readonly AnyEnv[]> = [
-  ExtendedEffects<Extends>,
-] extends [never]
-  ? never
-  : ExtendedEffects<Extends> extends Effect.Effect<unknown, unknown, infer Requirements>
-    ? Requirements
-    : never;
-
-/**
- * Creates an Effect that resolves and validates an immutable environment.
- */
-export function createEnv<
-  const Resolvers extends readonly AnyResolverDefinition[],
-  Server extends SchemaDict = {},
-  Client extends SchemaDict = {},
-  Shared extends SchemaDict = {},
-  const Extends extends readonly AnyEnv[] = readonly [],
-  const Prefix extends string | PrefixMap | undefined = undefined,
->(
-  options: Omit<EnvOptions<Server, Client, Shared, Extends, Prefix>, "extends"> & {
-    readonly extends?: EffectExtends<Extends>;
-    readonly resolvers: (tools: ResolverTools<Server>) => ValidResolverTuple<Resolvers>;
-  } & ValidEnvOptions<Server, Client, Shared, Prefix>,
-): Effect.Effect<
-  EnvValue<
-    Extends,
-    ComposedEnvContract<Extends, BuildEnvContract<Server, Client, Shared, Prefix, Resolvers>>
-  >,
-  EnvFailure<Resolvers> | ExtendedEnvErrors<Extends>,
-  ResolverRequirements<Resolvers> | ExtendedEnvRequirements<Extends>
-> &
-  EnvContractCarrier<
-    ComposedEnvContract<Extends, BuildEnvContract<Server, Client, Shared, Prefix, Resolvers>>
-  >;
-
-/**
- * Creates an Effect that validates an immutable runtime-only environment.
- */
-export function createEnv<
-  Server extends SchemaDict = {},
-  Client extends SchemaDict = {},
-  Shared extends SchemaDict = {},
-  const Extends extends readonly AnyEnv[] = readonly [],
-  const Prefix extends string | PrefixMap | undefined = undefined,
->(
-  options: Omit<EnvOptions<Server, Client, Shared, Extends, Prefix>, "extends"> & {
-    readonly extends?: EffectExtends<Extends>;
-    readonly resolvers?: never;
-  } & ValidEnvOptions<Server, Client, Shared, Prefix>,
-): Effect.Effect<
-  EnvValue<
-    Extends,
-    ComposedEnvContract<Extends, BuildEnvContract<Server, Client, Shared, Prefix, readonly []>>
-  >,
-  EnvConfigurationError | EnvValidationError | ExtendedEnvErrors<Extends>,
-  ExtendedEnvRequirements<Extends>
-> &
-  EnvContractCarrier<
-    ComposedEnvContract<Extends, BuildEnvContract<Server, Client, Shared, Prefix, readonly []>>
-  >;
-
-export function createEnv(
-  options: EnvironmentCreationOptions,
-): Effect.Effect<AnyEnv, unknown, unknown> {
-  return Effect.forEach(
-    options.extends ?? [],
-    (extendedEnv) => {
-      if (Effect.isEffect(extendedEnv)) {
-        return Effect.flatMap(extendedEnv, (resolvedEnv) =>
-          isEnvValue(resolvedEnv)
-            ? Effect.succeed(resolvedEnv)
-            : Effect.fail(
-                new EnvConfigurationError(
-                  "createEnv extends Effects must resolve to environments created by Envil",
-                ),
-              ),
-        );
-      }
-      if (Predicate.isPromiseLike(extendedEnv)) {
-        return Effect.fail(
-          new EnvConfigurationError(
-            "createEnv extends accepts Effects or resolved environment values, not Promises",
-          ),
-        );
-      }
-      return isEnvValue(extendedEnv)
-        ? Effect.succeed(extendedEnv)
-        : Effect.fail(
-            new EnvConfigurationError(
-              "createEnv extends accepts only environments created by Envil",
-            ),
-          );
-    },
-    { concurrency: "unbounded" },
-  ).pipe(
-    Effect.flatMap((resolvedExtends) =>
-      createEnvEffect({
-        ...options,
-        extends: resolvedExtends,
-      }),
-    ),
-  );
-}
-
-/**
- * Synchronously validates an environment that has no resolvers.
- */
-export function createEnvSync<
-  Server extends SchemaDict = {},
-  Client extends SchemaDict = {},
-  Shared extends SchemaDict = {},
-  const Extends extends readonly AnyEnv[] = readonly [],
-  const Prefix extends string | PrefixMap | undefined = undefined,
->(
-  options: Omit<EnvOptions<Server, Client, Shared, Extends, Prefix>, "extends"> & {
-    readonly extends?: SyncExtends<Extends>;
-    readonly resolvers?: never;
-  } & ValidEnvOptions<Server, Client, Shared, Prefix>,
-): EnvValue<
-  Extends,
-  ComposedEnvContract<Extends, BuildEnvContract<Server, Client, Shared, Prefix, readonly []>>
+interface FragmentOptions<
+  Prefix extends string | undefined,
+  Runtime extends RuntimeEnv | undefined,
 > {
-  for (const extendedEnv of options.extends ?? []) {
-    if (Effect.isEffect(extendedEnv) || Predicate.isPromiseLike(extendedEnv)) {
-      throw new EnvConfigurationError(
-        "createEnvSync extends accepts resolved environment values only",
-      );
-    }
-    if (!isEnvValue(extendedEnv)) {
-      throw new EnvConfigurationError(
-        "createEnvSync extends accepts only environments created by Envil",
-      );
-    }
-  }
+  readonly prefix?: Prefix;
+  readonly runtimeEnv?: Runtime;
+  readonly emptyStringAsUndefined?: boolean;
+}
 
-  // SAFETY: createEnvSync rejects resolvers in its public contract and async
-  // extends values above, so the internal Effect has no remaining requirements.
-  const effect = createEnvEffect(options) as Effect.Effect<
-    EnvValue<
-      Extends,
-      ComposedEnvContract<Extends, BuildEnvContract<Server, Client, Shared, Prefix, readonly []>>
-    >,
-    unknown,
-    never
-  >;
-  const result = Effect.runSync(Effect.either(effect));
-  if (Either.isLeft(result)) {
-    throw result.left;
+type UnprefixedFragmentOptions<Runtime extends RuntimeEnv | undefined> = Omit<
+  FragmentOptions<undefined, Runtime>,
+  "prefix"
+> & {
+  readonly prefix?: never;
+};
+
+type EnvPlan = ReadonlyArray<AnyEnvFragment>;
+
+const fragments = new WeakSet<object>();
+const plans = new WeakMap<object, EnvPlan>();
+
+function makeFragment<
+  const Target extends "server" | "client" | "shared",
+  const Values extends EnvValues,
+  const Prefix extends string | undefined,
+  const Runtime extends RuntimeEnv | undefined,
+>(
+  target: Target,
+  values: Values,
+  options: FragmentOptions<Prefix, Runtime> | undefined,
+): EnvFragment<Target, Values, Prefix, Runtime> {
+  const fragment = Object.freeze({
+    target,
+    values: Object.freeze({ ...values }),
+    prefix: options?.prefix,
+    runtimeEnv: options?.runtimeEnv,
+    emptyStringAsUndefined: options?.emptyStringAsUndefined,
+  });
+  fragments.add(fragment);
+
+  // SAFETY: The private WeakSet authenticates this immutable fragment. The
+  // unique-symbol field is phantom metadata for target-aware inference.
+  return fragment as EnvFragment<Target, Values, Prefix, Runtime>;
+}
+
+function isEnvFragment(value: unknown): value is AnyEnvFragment {
+  return typeof value === "object" && value !== null && fragments.has(value);
+}
+
+function planOf(appEnv: AnyAppEnv): EnvPlan {
+  const plan = plans.get(appEnv);
+  if (plan === undefined) {
+    throw new TypeError("Only environments created by createEnv can be extended.");
   }
-  return result.right;
+  return plan;
+}
+
+function makeAppEnv(plan: EnvPlan): AnyAppEnv {
+  const appEnv = {
+    server: buildEnvironmentEffect("server", plan),
+    client: buildEnvironmentEffect("client", plan),
+    pipe() {
+      return Pipeable.pipeArguments(this, arguments);
+    },
+  };
+  plans.set(appEnv, plan);
+
+  // SAFETY: Both Effects are derived from this exact immutable plan. AppEnv's
+  // brand and contract carrier are phantom fields used only for inference.
+  return Object.freeze(appEnv) as unknown as AnyAppEnv;
+}
+
+/** Defines server-only schemas and values. */
+export function server<const Values extends EnvValues>(
+  values: Values,
+): EnvFragment<"server", Values, undefined, undefined>;
+export function server<
+  const Values extends EnvValues,
+  const Runtime extends RuntimeEnv | undefined,
+>(
+  values: Values,
+  options: UnprefixedFragmentOptions<Runtime>,
+): EnvFragment<"server", Values, undefined, Runtime>;
+export function server<
+  const Values extends EnvValues,
+  const Prefix extends string,
+  const Runtime extends RuntimeEnv | undefined,
+>(
+  values: Values,
+  options: FragmentOptions<Prefix, Runtime> & { readonly prefix: Prefix },
+): EnvFragment<"server", Values, Prefix, Runtime>;
+export function server(
+  values: EnvValues,
+  options?: FragmentOptions<string | undefined, RuntimeEnv | undefined>,
+): AnyEnvFragment {
+  return makeFragment("server", values, options);
+}
+
+/** Defines public client schemas and values. Schema-backed entries require runtimeEnv. */
+export function client<const Values extends EnvValues>(
+  values: Values &
+    ValidClientValues<Values> &
+    (HasRuntimeVariables<Values> extends true ? never : unknown),
+): EnvFragment<"client", Values, undefined, undefined>;
+export function client<
+  const Values extends EnvValues,
+  const Runtime extends RuntimeEnv | undefined,
+>(
+  values: Values & ValidClientValues<Values>,
+  options: UnprefixedFragmentOptions<Runtime> &
+    (HasRuntimeVariables<Values> extends true
+      ? { readonly runtimeEnv: Exclude<Runtime, undefined> }
+      : unknown),
+): EnvFragment<"client", Values, undefined, Runtime>;
+export function client<
+  const Values extends EnvValues,
+  const Prefix extends string,
+  const Runtime extends RuntimeEnv | undefined,
+>(
+  values: Values & ValidClientValues<Values>,
+  options: FragmentOptions<Prefix, Runtime> & {
+    readonly prefix: Prefix;
+  } & (HasRuntimeVariables<Values> extends true
+      ? { readonly runtimeEnv: Exclude<Runtime, undefined> }
+      : unknown),
+): EnvFragment<"client", Values, Prefix, Runtime>;
+export function client(
+  values: EnvValues,
+  options?: FragmentOptions<string | undefined, RuntimeEnv | undefined>,
+): AnyEnvFragment {
+  return makeFragment("client", values, options);
+}
+
+/** Defines static public values available in both runtime contexts. */
+export function shared<const Values extends EnvValues>(
+  values: Values & ValidSharedValues<Values>,
+): EnvFragment<"shared", Values, undefined, undefined> {
+  return makeFragment("shared", values, undefined);
 }
 
 /**
- * Resolves an environment at a Promise boundary, requiring a Layer only when
- * configured adapters leave Effect services unprovided.
+ * Creates an environment from target-aware fragments.
+ *
+ * Existing AppEnv values compose only through extendEnv so one extension path
+ * owns ordering and last-wins semantics.
  */
-export function createEnvPromise<
-  const Resolvers extends readonly AnyResolverDefinition[],
-  Provided,
-  Server extends SchemaDict = {},
-  Client extends SchemaDict = {},
-  Shared extends SchemaDict = {},
-  const Extends extends readonly AnyEnv[] = readonly [],
-  const Prefix extends string | PrefixMap | undefined = undefined,
->(
-  options: Omit<EnvOptions<Server, Client, Shared, Extends, Prefix>, "extends"> & {
-    readonly extends?: PromiseExtends<Extends>;
-    readonly resolvers: (tools: ResolverTools<Server, Provided>) => ValidResolverTuple<Resolvers>;
-  } & ValidEnvOptions<Server, Client, Shared, Prefix>,
-  layerOptions: {
-    readonly layer: Layer.Layer<Provided, unknown, never>;
-  },
-): Promise<
-  EnvValue<
-    Extends,
-    ComposedEnvContract<Extends, BuildEnvContract<Server, Client, Shared, Prefix, Resolvers>>
-  >
-> &
-  EnvContractCarrier<
-    ComposedEnvContract<Extends, BuildEnvContract<Server, Client, Shared, Prefix, Resolvers>>
-  >;
-
-/**
- * Resolves an environment whose adapters require no Effect services.
- */
-export function createEnvPromise<
-  const Resolvers extends readonly AnyResolverDefinition[],
-  Server extends SchemaDict = {},
-  Client extends SchemaDict = {},
-  Shared extends SchemaDict = {},
-  const Extends extends readonly AnyEnv[] = readonly [],
-  const Prefix extends string | PrefixMap | undefined = undefined,
->(
-  options: Omit<EnvOptions<Server, Client, Shared, Extends, Prefix>, "extends"> & {
-    readonly extends?: PromiseExtends<Extends>;
-    readonly resolvers: (tools: ResolverTools<Server, never>) => ValidResolverTuple<Resolvers>;
-  } & ValidEnvOptions<Server, Client, Shared, Prefix>,
-): Promise<
-  EnvValue<
-    Extends,
-    ComposedEnvContract<Extends, BuildEnvContract<Server, Client, Shared, Prefix, Resolvers>>
-  >
-> &
-  EnvContractCarrier<
-    ComposedEnvContract<Extends, BuildEnvContract<Server, Client, Shared, Prefix, Resolvers>>
-  >;
-
-/**
- * Validates a runtime-only environment at a Promise boundary.
- */
-export function createEnvPromise<
-  Server extends SchemaDict = {},
-  Client extends SchemaDict = {},
-  Shared extends SchemaDict = {},
-  const Extends extends readonly AnyEnv[] = readonly [],
-  const Prefix extends string | PrefixMap | undefined = undefined,
->(
-  options: Omit<EnvOptions<Server, Client, Shared, Extends, Prefix>, "extends"> & {
-    readonly extends?: PromiseExtends<Extends>;
-    readonly resolvers?: never;
-  } & ValidEnvOptions<Server, Client, Shared, Prefix>,
-): Promise<
-  EnvValue<
-    Extends,
-    ComposedEnvContract<Extends, BuildEnvContract<Server, Client, Shared, Prefix, readonly []>>
-  >
-> &
-  EnvContractCarrier<
-    ComposedEnvContract<Extends, BuildEnvContract<Server, Client, Shared, Prefix, readonly []>>
-  >;
-
-export function createEnvPromise(
-  options: EnvironmentCreationOptions,
-  ...layerOptions: readonly [
-    options?: {
-      readonly layer: Layer.Layer<unknown, unknown, never>;
-    },
-  ]
-): Promise<AnyEnv> {
-  for (const extendedEnv of options.extends ?? []) {
-    if (Effect.isEffect(extendedEnv)) {
-      return Promise.reject(
-        new EnvConfigurationError(
-          "createEnvPromise extends accepts Promises or resolved environment values, not Effects",
-        ),
-      );
+export function createEnv<const Fragments extends readonly AnyEnvFragment[]>(
+  ...input: Fragments
+): AppEnv<CreateEnvServerEntries<Fragments>, CreateEnvClientEntries<Fragments>> {
+  const plan: AnyEnvFragment[] = [];
+  for (const candidate of input as readonly unknown[]) {
+    if (candidate === undefined) {
+      continue;
     }
+    if (!isEnvFragment(candidate)) {
+      throw new TypeError("createEnv accepts fragments created by server, client, and shared.");
+    }
+    plan.push(candidate);
   }
 
-  return Promise.all(options.extends ?? []).then((resolvedExtends) => {
-    for (const extendedEnv of resolvedExtends) {
-      if (!isEnvValue(extendedEnv)) {
-        throw new EnvConfigurationError(
-          "createEnvPromise extends accepts only environments created by Envil",
-        );
+  // SAFETY: The fold types apply the same left-to-right fragment order stored
+  // in the immutable runtime plan.
+  return makeAppEnv(Object.freeze(plan)) as unknown as AppEnv<
+    CreateEnvServerEntries<Fragments>,
+    CreateEnvClientEntries<Fragments>
+  >;
+}
+
+/**
+ * Extends an AppEnv with environments or fragments from left to right.
+ *
+ * When a key appears more than once in one runtime context, the last complete
+ * definition wins.
+ */
+export function extendEnv<const Inputs extends readonly (AnyAppEnv | AnyEnvFragment)[]>(
+  ...inputs: Inputs
+): <Base extends AnyAppEnv>(
+  base: Base,
+) => AppEnv<ExtendedServerEntries<Base, Inputs>, ExtendedClientEntries<Base, Inputs>> {
+  return <Base extends AnyAppEnv>(
+    base: Base,
+  ): AppEnv<ExtendedServerEntries<Base, Inputs>, ExtendedClientEntries<Base, Inputs>> => {
+    const plan = [...planOf(base)];
+    for (const input of inputs) {
+      if (isEnvFragment(input)) {
+        plan.push(input);
+        continue;
       }
+      plan.push(...planOf(input));
     }
 
-    const effect = createEnvEffect({
-      ...options,
-      extends: resolvedExtends,
-    });
-    const runnable =
-      layerOptions[0] === undefined ? effect : Effect.provide(effect, layerOptions[0].layer);
-
-    // SAFETY: The public overload requires a Layer whenever resolver
-    // requirements are non-never, so the Promise boundary has no services left.
-    return Effect.runPromise(runnable as Effect.Effect<AnyEnv, unknown, never>);
-  });
+    // SAFETY: Runtime plans are concatenated in the same order as the type-level
+    // extension fold, including complete last-wins replacement.
+    return makeAppEnv(Object.freeze(plan)) as unknown as AppEnv<
+      ExtendedServerEntries<Base, Inputs>,
+      ExtendedClientEntries<Base, Inputs>
+    >;
+  };
 }

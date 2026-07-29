@@ -34,6 +34,7 @@ export const docsNav: NavSection[] = [
     title: "Configuration",
     items: [
       { title: "Framework Presets", slug: "framework-presets" },
+      { title: "Build and Runtime Security", slug: "build-security" },
       { title: "Environment Composition", slug: "environment-composition" },
       { title: "Error Handling", slug: "error-handling" },
       { title: "Effect and Results", slug: "safe-parsing" },

@@ -1,9 +1,9 @@
 ---
 title: Error Handling
-description: Typed, tagged, and secret-safe validation and resolver failures.
+description: Typed, actionable, and secret-safe environment and resolver failures.
 ---
 
-## Validation issues
+## Validation failures
 
 `EnvValidationError.issues` is a frozen discriminated union:
 
@@ -23,22 +23,47 @@ type EnvValidationIssue =
     };
 ```
 
-Rejected values are never retained. Messages include only physical keys, safe
-schema identifiers, and fixed text.
+Rejected values are never retained. Messages name the affected variable,
+describe the expected format, and provide the next action.
+
+## Configuration failures
+
+`EnvConfigurationError` covers invalid definitions that JavaScript callers can
+still construct despite TypeScript checks, including:
+
+- a missing client `runtimeEnv`;
+- `fromResolver` or redaction in a client fragment;
+- duplicate winning definitions that map to the same runtime name;
+- shared values shadowing runtime properties;
+- malformed resolver results.
 
 ## Resolver failures
 
-Adapters return discriminable errors:
+Provider adapters use tagged failures in the Effect error channel:
 
 - `ResolverConfigurationError`
 - `ResolverInitializationError`
 - `ResolverRequestFailed`
 - `ResolverResponseDecodeFailed`
-- `SecretSourceRequestFailed`
 
-Errors do not retain secret values, remote references, tenant IDs, response
-bodies, provider DTOs, or original SDK exceptions.
+Messages never include runtime values, secret references, provider responses,
+credentials, or arbitrary thrown causes.
 
-Absence is not an error. Adapters return `Option.none()` only for a reliable
-provider-specific not-found signal. Operational failures stay in the error
-channel.
+## Runtime access failures
+
+`ServerEnvironmentAccessError` is returned through the server Effect's typed
+error channel when Envil cannot prove that the caller is running server-side.
+No server runtime value or resolver is read before this check.
+
+`EnvironmentAccessError` is raised by the output Proxy when code bypasses
+TypeScript and reads a value outside the materialized target:
+
+```text
+"DATABASE_URL" is not available in the client environment.
+Declare it in a client fragment if it is public, or read it through
+appEnv.server from server code.
+```
+
+The message deliberately does not confirm whether the requested name exists in
+the server definition. This keeps the client Proxy independent from server-key
+metadata.

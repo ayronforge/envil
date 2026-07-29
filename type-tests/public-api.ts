@@ -1,18 +1,30 @@
-import { Effect, Layer, Option, Redacted } from "effect";
+import { Context, Effect, Option, Redacted, Schema, SchemaGetter } from "effect";
 
 import {
   SecretSource,
   asResult,
+  client,
+  configureResolver,
   createEnv,
-  createEnvPromise,
-  createEnvSync,
   customSecretsAdapter,
+  extendEnv,
+  fromEnv,
+  fromResolver,
   optional,
   redacted,
   requiredString,
+  server,
+  shared,
   url,
+  type InferClientEnv,
   type InferEnv,
+  type InferServerEnv,
 } from "../src/index.ts";
+import * as Envil from "../src/index.ts";
+import rollupPlugin from "../src/plugins/rollup.ts";
+import vitePlugin from "../src/plugins/vite.ts";
+import webpackPlugin from "../src/plugins/webpack.ts";
+import * as presets from "../src/presets.ts";
 import { awsSecretsAdapter } from "../src/resolvers/aws.ts";
 import { azureKeyVaultAdapter } from "../src/resolvers/azure.ts";
 import { gcpSecretsAdapter } from "../src/resolvers/gcp.ts";
@@ -26,300 +38,232 @@ type Expect<Value extends true> = Value;
 type EffectRequirements<Value> =
   Value extends Effect.Effect<unknown, unknown, infer Requirements> ? Requirements : never;
 
-const env = createEnv({
-  server: {
-    DATABASE_URL: redacted(url),
-    DATABASE_PASSWORD: requiredString,
-    OPTIONAL_TOKEN: optional(requiredString),
-    WRAPPED_OPTIONAL_TOKEN: redacted(optional(requiredString)),
-  },
-  client: {
-    APP_URL: url,
-  },
-  prefix: {
-    client: "VITE_",
-  },
-  resolvers: ({ resolve }) => [
-    resolve(awsSecretsAdapter, {
-      region: "us-east-1",
-      secrets: {
-        DATABASE_PASSWORD: "production/database#password",
-        OPTIONAL_TOKEN: "production/optional",
-      },
-    }),
-  ],
-});
+const aws = configureResolver(awsSecretsAdapter, { region: "us-east-1" });
+const arbitrarySchema = Schema.String.pipe(
+  Schema.decodeTo(Schema.Number, {
+    decode: SchemaGetter.transform((value: string) => Number(value)),
+    encode: SchemaGetter.transform((value: number) => String(value)),
+  }),
+);
+class SchemaPolicy extends Context.Service<
+  SchemaPolicy,
+  { readonly accepts: (value: string) => boolean }
+>()("type-test/SchemaPolicy") {}
+const contextualSchema = Schema.String.pipe(
+  Schema.decode({
+    decode: SchemaGetter.checkEffect((value) =>
+      SchemaPolicy.useSync((policy) => policy.accepts(value)),
+    ),
+    encode: SchemaGetter.passthrough(),
+  }),
+);
 
-type Environment = InferEnv<typeof env>;
-
-export type EnvironmentContract = Expect<
-  Equal<
-    Environment,
-    Readonly<{
-      DATABASE_URL: Redacted.Redacted<string>;
-      DATABASE_PASSWORD: Redacted.Redacted<string>;
-      OPTIONAL_TOKEN: Redacted.Redacted<string> | undefined;
-      WRAPPED_OPTIONAL_TOKEN: Redacted.Redacted<string> | undefined;
-      APP_URL: string;
-    }>
-  >
->;
-
-const syncEnv = createEnvSync({
-  server: { DATABASE_URL: requiredString },
-  runtimeEnv: { DATABASE_URL: "postgres://localhost" },
-});
-export type SyncInferenceContract = Expect<Equal<InferEnv<typeof syncEnv>["DATABASE_URL"], string>>;
-
-const promiseEnv = createEnvPromise({
-  server: { DATABASE_URL: requiredString },
-  runtimeEnv: { DATABASE_URL: "postgres://localhost" },
-});
-export type PromiseInferenceContract = Expect<
-  Equal<InferEnv<typeof promiseEnv>["DATABASE_URL"], string>
->;
-export type AwaitedInferenceContract = Expect<
-  Equal<InferEnv<Awaited<typeof promiseEnv>>["DATABASE_URL"], string>
->;
-
-const baseEnv = createEnvSync({
-  server: {
-    BASE_TOKEN: redacted(requiredString),
-  },
-  client: {
-    BASE_URL: url,
-  },
-  prefix: {
-    client: "BASE_",
-  },
-  runtimeEnv: {
-    BASE_TOKEN: "secret",
-    BASE_BASE_URL: "https://example.com",
-  },
-});
-
-const composedEnv = createEnvSync({
-  extends: [baseEnv],
-  server: {
-    APP_NAME: requiredString,
-  },
-  runtimeEnv: {
+const baseEnv = createEnv(
+  shared({
     APP_NAME: "envil",
-  },
-});
+  }),
+  server(
+    {
+      DATABASE_URL: redacted(url),
+      DATABASE_PASSWORD: requiredString.pipe(fromResolver(aws, "production/database#password")),
+      ARBITRARY: arbitrarySchema,
+    },
+    {
+      runtimeEnv: {
+        DATABASE_URL: "postgres://localhost",
+        ARBITRARY: "42",
+      },
+    },
+  ),
+  client(
+    {
+      APP_URL: url,
+      ANALYTICS_KEY: optional(requiredString).pipe(fromEnv("PUBLIC_ANALYTICS_KEY")),
+    },
+    {
+      runtimeEnv: {
+        VITE_APP_URL: "https://example.com",
+        PUBLIC_ANALYTICS_KEY: "public-key",
+      },
+      prefix: "VITE_",
+    },
+  ),
+);
 
-export type ComposedInferenceContract = Expect<
+const appEnv = baseEnv.pipe(
+  extendEnv(
+    server({
+      DATABASE_URL: "postgres://override.example.com",
+    }),
+    client({
+      APP_URL: "https://override.example.com",
+      POSTHOG_API_KEY: "phc_public",
+    }),
+  ),
+);
+
+type ServerEnvironment = InferEnv<typeof appEnv.server>;
+type ClientEnvironment = InferEnv<typeof appEnv.client>;
+
+export type ServerInferenceContract = Expect<
   Equal<
-    InferEnv<typeof composedEnv>,
+    ServerEnvironment,
     Readonly<{
-      BASE_TOKEN: Redacted.Redacted<string>;
-      BASE_URL: string;
-      APP_NAME: string;
+      APP_NAME: "envil";
+      DATABASE_URL: "postgres://override.example.com";
+      DATABASE_PASSWORD: Redacted.Redacted<string>;
+      ARBITRARY: number;
+      ANALYTICS_KEY: string | undefined;
+      APP_URL: "https://override.example.com";
+      POSTHOG_API_KEY: "phc_public";
     }>
   >
 >;
 
-const overriddenEnv = createEnvSync({
-  extends: [baseEnv],
-  server: {
-    BASE_TOKEN: requiredString,
-  },
-  runtimeEnv: {
-    BASE_TOKEN: "plain",
-  },
-});
-
-export type LocalOverrideInferenceContract = Expect<
-  Equal<InferEnv<typeof overriddenEnv>["BASE_TOKEN"], string>
+export type ClientInferenceContract = Expect<
+  Equal<
+    ClientEnvironment,
+    Readonly<{
+      APP_NAME: "envil";
+      ANALYTICS_KEY: string | undefined;
+      APP_URL: "https://override.example.com";
+      POSTHOG_API_KEY: "phc_public";
+    }>
+  >
 >;
 
-const effectBaseEnv = createEnv({
-  server: { EFFECT_VALUE: requiredString },
-});
-const promiseBaseEnv = createEnvPromise({
-  server: { PROMISE_VALUE: requiredString },
+export type DirectServerInferenceContract = Expect<
+  Equal<InferServerEnv<typeof appEnv>, ServerEnvironment>
+>;
+export type DirectClientInferenceContract = Expect<
+  Equal<InferClientEnv<typeof appEnv>, ClientEnvironment>
+>;
+
+Effect.map(appEnv.client, (env) => {
+  // @ts-expect-error Server values do not exist in a client environment.
+  env.DATABASE_PASSWORD;
+  return env.APP_URL;
 });
 
-createEnv({ extends: [effectBaseEnv] });
-createEnvPromise({ extends: [promiseBaseEnv] });
-createEnv({ extends: [baseEnv] });
-createEnvPromise({ extends: [baseEnv] });
-
-createEnvSync({
-  // @ts-expect-error Only environments created by Envil can be composed.
-  extends: [new Date()],
-});
-
-createEnvSync({
-  // @ts-expect-error The private Envil brand cannot be forged structurally.
-  extends: [{ __envilContract: { server: {}, client: {}, shared: {} } }],
-});
-
-createEnv({
-  // @ts-expect-error Effects can only be unresolved by createEnv.
-  extends: [promiseBaseEnv],
-});
-createEnvPromise({
-  // @ts-expect-error Promises can only be unresolved by createEnvPromise.
-  extends: [effectBaseEnv],
-});
-createEnvSync({
-  // @ts-expect-error createEnvSync only composes resolved environment values.
-  extends: [effectBaseEnv],
-});
-createEnvSync({
-  // @ts-expect-error createEnvSync only composes resolved environment values.
-  extends: [promiseBaseEnv],
-});
-
-const customEnv = createEnv({
-  server: { INTERNAL_TOKEN: requiredString },
-  resolvers: ({ resolve }) => [
-    resolve(customSecretsAdapter, {
-      secrets: { INTERNAL_TOKEN: "tenant/internal-token" },
-    }),
-  ],
-});
+const custom = configureResolver(customSecretsAdapter, {});
+const customAppEnv = createEnv(
+  server({
+    INTERNAL_TOKEN: requiredString.pipe(fromResolver(custom, "tenant/internal-token")),
+  }),
+);
 export type CustomRequirementContract = Expect<
-  Equal<EffectRequirements<typeof customEnv>, SecretSource>
->;
-
-const composedCustomEnv = createEnv({ extends: [customEnv] });
-export type ComposedRequirementContract = Expect<
-  Equal<EffectRequirements<typeof composedCustomEnv>, SecretSource>
+  Equal<EffectRequirements<typeof customAppEnv.server>, SecretSource>
 >;
 
 const customLayer = SecretSource.fromPromise({
   get: async () => Option.some("secret"),
 });
+Effect.runPromise(customAppEnv.server.pipe(Effect.provide(customLayer)));
 
-createEnvPromise(
-  {
-    server: { INTERNAL_TOKEN: requiredString },
-    resolvers: ({ resolve }) => [
-      resolve(customSecretsAdapter, {
-        secrets: { INTERNAL_TOKEN: "tenant/internal-token" },
-      }),
-    ],
-  },
-  { layer: customLayer },
+const contextualAppEnv = createEnv(
+  server({ CONTEXTUAL: contextualSchema }, { runtimeEnv: { CONTEXTUAL: "value" } }),
 );
+export type SchemaRequirementContract = Expect<
+  Equal<EffectRequirements<typeof contextualAppEnv.server>, SchemaPolicy>
+>;
 
-createEnvPromise(
-  {
-    server: { INTERNAL_TOKEN: requiredString },
-    resolvers: ({ resolve }) => [
-      // @ts-expect-error The provided Layer must satisfy SecretSource.
-      resolve(customSecretsAdapter, {
-        secrets: { INTERNAL_TOKEN: "tenant/internal-token" },
-      }),
-    ],
-  },
-  {
-    layer: Layer.empty,
-  },
+const contextualClientEnv = createEnv(
+  client({ CONTEXTUAL: contextualSchema }, { runtimeEnv: { CONTEXTUAL: "value" } }),
 );
+export type ClientSchemaRequirementContract = Expect<
+  Equal<EffectRequirements<typeof contextualClientEnv.client>, SchemaPolicy>
+>;
+export type ServerIncludesClientRequirementContract = Expect<
+  Equal<EffectRequirements<typeof contextualClientEnv.server>, SchemaPolicy>
+>;
 
-createEnvPromise({
-  server: { INTERNAL_TOKEN: requiredString },
-  resolvers: ({ resolve }) => [
-    // @ts-expect-error Custom adapter requirements need an explicit Layer.
-    resolve(customSecretsAdapter, {
-      secrets: { INTERNAL_TOKEN: "tenant/internal-token" },
-    }),
-  ],
-});
+const shadowedCustomEnv = customAppEnv.pipe(extendEnv(server({ INTERNAL_TOKEN: "local" })));
+export type ShadowedRequirementContract = Expect<
+  Equal<EffectRequirements<typeof shadowedCustomEnv.server>, never>
+>;
 
-createEnv({
-  server: {
-    AWS: requiredString,
-    GCP: requiredString,
-    AZURE: requiredString,
-    OP: requiredString,
-  },
-  resolvers: ({ resolve }) => [
-    resolve(awsSecretsAdapter, { secrets: { AWS: "aws-ref" } }),
-    resolve(gcpSecretsAdapter, {
-      projectId: "project",
-      secrets: { GCP: "gcp-ref" },
-    }),
-    resolve(azureKeyVaultAdapter, {
-      vaultUrl: "https://vault.example.com",
-      secrets: { AZURE: "azure-ref" },
-    }),
-    resolve(onePasswordSecretsAdapter, {
-      serviceAccountToken: "token",
-      secrets: { OP: "op://vault/item/field" },
-    }),
-  ],
-});
+const crossTargetShadowedCustomEnv = customAppEnv.pipe(
+  extendEnv(client({ INTERNAL_TOKEN: "public" })),
+);
+export type CrossTargetShadowedRequirementContract = Expect<
+  Equal<EffectRequirements<typeof crossTargetShadowedCustomEnv.server>, never>
+>;
 
-createEnvPromise({
-  server: { TOKEN: requiredString },
-  resolvers: ({ resolve }) => [
-    resolve(awsSecretsAdapter, {
-      secrets: { TOKEN: "aws-reference" },
-    }),
-  ],
-});
+configureResolver(gcpSecretsAdapter, { projectId: "project" });
+configureResolver(azureKeyVaultAdapter, { vaultUrl: "https://vault.example.com" });
+configureResolver(onePasswordSecretsAdapter, { serviceAccountToken: "token" });
 
-createEnv({
-  server: { KNOWN: requiredString },
-  resolvers: ({ resolve }) => [
-    resolve(awsSecretsAdapter, {
-      secrets: {
-        // @ts-expect-error Resolver keys are bound to the server schema.
-        UNKNOWN: "secret-reference",
-      },
-    }),
-  ],
-});
-
-createEnv({
-  server: { DUPLICATE: requiredString },
-  // @ts-expect-error A logical key cannot be handled by two resolvers.
-  resolvers: ({ resolve }) => [
-    resolve(awsSecretsAdapter, { secrets: { DUPLICATE: "one" } }),
-    resolve(gcpSecretsAdapter, {
-      projectId: "project",
-      secrets: { DUPLICATE: "two" },
-    }),
-  ],
-});
-
-// @ts-expect-error A logical key cannot exist in multiple buckets.
-createEnv({
-  server: { DUPLICATE: requiredString },
-  client: { DUPLICATE: requiredString },
-});
-
-// @ts-expect-error Prefix application cannot produce duplicate physical keys.
-createEnv({
-  server: { PUBLIC_URL: requiredString },
-  client: { URL: requiredString },
-  prefix: { client: "PUBLIC_" },
-});
-
-// @ts-expect-error Redacted schemas are server-only.
-createEnv({
-  client: { PUBLIC_SECRET: redacted(requiredString) },
-});
-
-// @ts-expect-error Redacted schemas are server-only.
-createEnv({
-  shared: { SHARED_SECRET: redacted(requiredString) },
-});
-
-createEnvSync({
-  server: { TOKEN: requiredString },
-  // @ts-expect-error createEnvSync cannot execute resolvers.
-  resolvers: ({ resolve }) => [resolve(awsSecretsAdapter, { secrets: { TOKEN: "reference" } })],
-});
-
-const resultEffect = createEnv({
-  server: { TOKEN: requiredString },
-  runtimeEnv: { TOKEN: "value" },
-}).pipe(asResult());
+const resultEffect = appEnv.server.pipe(asResult());
 export type ResultRequirementsContract = Expect<
   Equal<EffectRequirements<typeof resultEffect>, never>
 >;
+
+requiredString.pipe(
+  fromEnv("FIRST"),
+  // @ts-expect-error Source definitions are terminal.
+  fromEnv("SECOND"),
+);
+
+// @ts-expect-error Source definitions are terminal and cannot enter later schema combinators.
+optional(requiredString.pipe(fromResolver(custom, "terminal-reference")));
+
+vitePlugin();
+// @ts-expect-error Vite detects client and SSR targets automatically.
+vitePlugin({ target: "server" });
+rollupPlugin({ target: "client" });
+webpackPlugin({ target: "server" });
+
+// @ts-expect-error Existing environments compose only through extendEnv.
+createEnv(baseEnv);
+
+createEnv({
+  // @ts-expect-error Legacy object definitions are not accepted.
+  server: {
+    TOKEN: requiredString,
+  },
+});
+
+// @ts-expect-error defineBucket was removed from the public API.
+Envil.defineBucket;
+
+// @ts-expect-error The Next.js preset was removed.
+presets.nextjs;
+
+// @ts-expect-error Plugin strict mode was removed with static object-shape analysis.
+rollupPlugin({ target: "client", strict: false });
+
+// @ts-expect-error Schema-backed client fragments require runtimeEnv.
+client({ PUBLIC: requiredString });
+
+client({
+  PUBLIC: "constant",
+});
+
+client(
+  // @ts-expect-error Resolver-backed variables are server-only.
+  {
+    TOKEN: requiredString.pipe(fromResolver(aws, "reference")),
+  },
+  { runtimeEnv: {} },
+);
+
+client(
+  // @ts-expect-error Redacted variables are server-only.
+  {
+    TOKEN: redacted(requiredString),
+  },
+  { runtimeEnv: {} },
+);
+
+// @ts-expect-error Shared values are static and cannot contain schemas.
+shared({
+  TOKEN: requiredString,
+});
+
+// @ts-expect-error Shared values are public and cannot be redacted.
+shared({
+  TOKEN: Redacted.make("secret"),
+});
+
+// @ts-expect-error AppEnv exposes Effect properties rather than methods.
+appEnv.server();

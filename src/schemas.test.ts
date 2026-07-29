@@ -24,7 +24,7 @@ import {
   withDefault,
 } from "./schemas.ts";
 
-const decode = <S extends Schema.Schema.Any>(schema: S, value: unknown) =>
+const decode = <S extends Schema.Top>(schema: S, value: unknown) =>
   Schema.decodeUnknownSync(schema)(value);
 
 describe("withDefault", () => {
@@ -204,7 +204,9 @@ describe("commaSeparatedNumbers", () => {
   });
 
   test("rejects non-numeric entries", () => {
-    expect(() => decode(commaSeparatedNumbers, "1,abc,3")).toThrow('"abc" is not a valid number');
+    expect(() => decode(commaSeparatedNumbers, "1,abc,3")).toThrow(
+      'Use a comma-separated list of numbers, such as "1, 2, 3"',
+    );
   });
 });
 

@@ -29,7 +29,7 @@ describe("awsSecretsAdapter", () => {
     sendAwsCommand = () => Promise.reject({ name: "ResourceNotFoundException" });
 
     const result = await Effect.runPromise(
-      awsSecretsAdapter.resolve({ secrets: { TOKEN: "missing-secret" } }),
+      awsSecretsAdapter.resolve({ referencesByKey: { TOKEN: "missing-secret" } }),
     );
 
     expect(Option.isNone(result.TOKEN)).toBe(true);
@@ -39,10 +39,11 @@ describe("awsSecretsAdapter", () => {
     sendAwsCommand = () => Promise.reject(new Error("private provider response"));
 
     const exit = await Effect.runPromiseExit(
-      awsSecretsAdapter.resolve({ secrets: { TOKEN: "private-reference" } }),
+      awsSecretsAdapter.resolve({ referencesByKey: { TOKEN: "private-reference" } }),
     );
 
     expect(String(exit)).toContain("ResolverRequestFailed");
+    expect(String(exit)).toContain("Check provider access and try again");
     expect(String(exit)).not.toContain("private provider response");
     expect(String(exit)).not.toContain("private-reference");
   });
@@ -55,7 +56,7 @@ describe("awsSecretsAdapter", () => {
 
     const result = await Effect.runPromise(
       awsSecretsAdapter.resolve({
-        secrets: { TOKEN: "database#password" },
+        referencesByKey: { TOKEN: "database#password" },
       }),
     );
 
@@ -73,7 +74,7 @@ describe("awsSecretsAdapter", () => {
 
     const exit = await Effect.runPromiseExit(
       awsSecretsAdapter.resolve({
-        secrets: { TOKEN: "private-reference#password" },
+        referencesByKey: { TOKEN: "private-reference#password" },
       }),
     );
 
@@ -90,7 +91,7 @@ describe("awsSecretsAdapter", () => {
 
     const exit = await Effect.runPromiseExit(
       awsSecretsAdapter.resolve({
-        secrets: {
+        referencesByKey: {
           FIRST: "first",
           SECOND: "second",
         },
@@ -115,7 +116,7 @@ describe("awsSecretsAdapter", () => {
 
     const result = await Effect.runPromise(
       awsSecretsAdapter.resolve({
-        secrets: {
+        referencesByKey: {
           FIRST: firstArn,
           SECOND: secondArn,
         },

@@ -26,17 +26,18 @@ function isGcpNotFound(failure: unknown): boolean {
 
 function resolveGcpSecrets<const Keys extends string>(
   options: GcpSecretsAdapterOptions & {
-    readonly secrets: Readonly<Record<Keys, string>>;
+    readonly referencesByKey: Readonly<Record<Keys, string>>;
   },
 ): Effect.Effect<ResolverResult<Keys>, ResolverError> {
   return Effect.gen(function* () {
-    const requested = resolverEntries(options.secrets);
+    const requested = resolverEntries(options.referencesByKey);
     const usesShortName = requested.some(([, secretName]) => !secretName.startsWith("projects/"));
     if (usesShortName && options.projectId === undefined) {
       return yield* new ResolverConfigurationError({
         adapter: "gcp",
         operation: "configure",
-        message: "projectId is required when GCP secret names are not fully qualified",
+        message:
+          'Set "projectId" when using short GCP secret names, or use fully qualified names beginning with "projects/".',
       });
     }
 

@@ -1,60 +1,83 @@
 ---
 title: Quickstart
-description: Install Envil and choose the correct environment creation boundary.
+description: Define and materialize composable server and client environment Effects.
 ---
 
 ```bash
 bun add @ayronforge/envil effect
 ```
 
-## Synchronous applications
-
-Use `createEnvSync` only when every value comes from the runtime environment.
+## Define the environment
 
 ```ts
-import { createEnvSync, port, redacted, url } from "@ayronforge/envil";
+import {
+  client,
+  createEnv,
+  port,
+  redacted,
+  requiredString,
+  server,
+  shared,
+  url,
+} from "@ayronforge/envil";
 
-export const env = createEnvSync({
-  server: {
-    DATABASE_URL: redacted(url),
+export const appEnv = createEnv(
+  shared({
+    APP_NAME: "My App",
+  }),
+  server({
+    DATABASE_URL: redacted(requiredString),
     PORT: port,
-  },
-  client: {
-    APP_URL: url,
-  },
-  prefix: {
-    client: "VITE_",
-  },
-});
+  }),
+  client(
+    {
+      APP_URL: url,
+    },
+    {
+      runtimeEnv: import.meta.env,
+      prefix: "VITE_",
+    },
+  ),
+);
 ```
 
-`createEnvSync` rejects `resolvers` at typecheck.
+Server fragments default to `process.env`. A client fragment containing schemas
+requires an explicit `runtimeEnv`, because browser frameworks expose public
+configuration differently. Static values may also be declared directly in
+`server(...)` or `client(...)`.
 
-## Effect applications
-
-`createEnv` is the primary API and always returns an Effect, even without
-resolvers.
+## Run the desired Effect
 
 ```ts
 import { Effect } from "effect";
-import { createEnv, requiredString } from "@ayronforge/envil";
 
-const program = createEnv({
-  server: { API_TOKEN: requiredString },
-});
-
-const env = Effect.runSync(program);
+const serverEnv = Effect.runSync(appEnv.server);
+const clientEnv = await Effect.runPromise(appEnv.client);
 ```
 
-## Promise applications
+Both properties are lazy Effects. The caller chooses synchronous or asynchronous
+execution. If a schema or resolver is asynchronous, run the Effect
+asynchronously.
 
-```ts
-import { createEnvPromise, requiredString } from "@ayronforge/envil";
+The client output contains client and shared values. The server output contains
+all three targets, matching what a server bundle can use.
 
-const env = await createEnvPromise({
-  server: { API_TOKEN: requiredString },
+## Protect client builds
+
+For Vite applications, add the Envil plugin:
+
+```ts title="vite.config.ts"
+import { defineConfig } from "vite";
+import envil from "@ayronforge/envil/plugins/vite";
+
+export default defineConfig({
+  plugins: [envil()],
 });
 ```
 
-When an adapter leaves an Effect service unprovided, `createEnvPromise` requires
-the corresponding Layer as its second argument.
+The plugin removes every `server(...)` fragment expression before the client
+module graph is bundled and injects an exact runtime target. It does not need to
+inspect or evaluate your schemas, resolver adapters, spreads, or factory calls.
+
+See [Build and Runtime Security](/envil/docs/build-security) for Rollup,
+Rolldown, webpack, Rspack, and esbuild setup.

@@ -1,43 +1,47 @@
 ---
 title: Custom SecretSource
-description: Implement a custom secret provider as an Effect Service.
+description: Implement a custom resolver through an Effect Service.
 ---
 
-`customSecretsAdapter` is backed by the `SecretSource` Effect Service.
+`customSecretsAdapter` reads references through the `SecretSource` service.
 
 ```ts
 import { Effect, Option } from "effect";
 import {
   SecretSource,
+  configureResolver,
   createEnv,
   customSecretsAdapter,
+  fromResolver,
   requiredString,
+  server,
 } from "@ayronforge/envil";
 
-const CustomSecretSourceLive = SecretSource.fromPromise({
+const sourceLayer = SecretSource.fromPromise({
   get: async (reference) => {
-    const value = await vault.get(reference);
+    const value = await readFromInternalStore(reference);
     return value === undefined ? Option.none() : Option.some(value);
   },
 });
 
-const program = createEnv({
-  server: {
-    INTERNAL_TOKEN: requiredString,
-  },
-  resolvers: ({ resolve }) => [
-    resolve(customSecretsAdapter, {
-      secrets: {
-        INTERNAL_TOKEN: "tenant/internal-token",
-      },
-    }),
-  ],
-}).pipe(Effect.provide(CustomSecretSourceLive));
+const custom = configureResolver(customSecretsAdapter, {});
+
+const appEnv = createEnv(
+  server({
+    INTERNAL_TOKEN: requiredString.pipe(
+      fromResolver(custom, "tenant/internal-token"),
+    ),
+  }),
+);
+
+const serverEnv = await Effect.runPromise(
+  appEnv.server.pipe(Effect.provide(sourceLayer)),
+);
 ```
 
-`fromPromise` requires `Option` explicitly. Present strings are redacted
-immediately, absence stays `Option.none()`, and Promise rejection becomes a
-sanitized `SecretSourceRequestFailed`.
+`SecretSource` returns `Option<Redacted<string>>` in its Effect service
+contract. `fromPromise` accepts `Option<string>` and wraps present values before
+they enter the environment pipeline.
 
-Implement `SecretSource` directly with another secret-safe `SecretSourceError`
-when you need more granular typed errors.
+Custom source failures remain in the precise requirement and error channels of
+`appEnv.server`.

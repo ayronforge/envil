@@ -27,7 +27,7 @@ function isAzureNotFound(failure: unknown): boolean {
 
 function resolveAzureSecrets<const Keys extends string>(
   options: AzureKeyVaultAdapterOptions & {
-    readonly secrets: Readonly<Record<Keys, string>>;
+    readonly referencesByKey: Readonly<Record<Keys, string>>;
   },
 ): Effect.Effect<ResolverResult<Keys>, ResolverError> {
   return Effect.gen(function* () {
@@ -35,7 +35,7 @@ function resolveAzureSecrets<const Keys extends string>(
       return yield* new ResolverConfigurationError({
         adapter: "azure",
         operation: "configure",
-        message: "vaultUrl is required by the Azure Key Vault adapter",
+        message: 'Set "vaultUrl" to the Azure Key Vault URL before using this resolver.',
       });
     }
 
@@ -46,7 +46,7 @@ function resolveAzureSecrets<const Keys extends string>(
       return new keyVault.SecretClient(options.vaultUrl, credential);
     });
     const entries = yield* Effect.forEach(
-      resolverEntries(options.secrets),
+      resolverEntries(options.referencesByKey),
       ([key, secretName]) =>
         requestSecret(
           "azure",

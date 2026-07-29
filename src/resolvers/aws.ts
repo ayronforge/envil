@@ -64,7 +64,8 @@ function decodeAwsValue(
       new ResolverResponseDecodeFailed({
         adapter: "aws",
         operation: "decode-json",
-        message: "An AWS secret JSON response could not be decoded",
+        message:
+          "AWS returned a secret that could not be read as JSON. Check the secret contents and configured JSON field.",
       }),
   });
 }
@@ -79,12 +80,12 @@ async function createAwsClient(region: string | undefined) {
 
 function resolveAwsSecrets<const Keys extends string>(
   options: AwsSecretsAdapterOptions & {
-    readonly secrets: Readonly<Record<Keys, string>>;
+    readonly referencesByKey: Readonly<Record<Keys, string>>;
   },
 ): Effect.Effect<ResolverResult<Keys>, ResolverError> {
   return Effect.gen(function* () {
     const { sdk, client } = yield* initializeAdapter("aws", () => createAwsClient(options.region));
-    const requested = resolverEntries(options.secrets);
+    const requested = resolverEntries(options.referencesByKey);
     const parsed = requested.map(([key, reference]) => [key, parseReference(reference)] as const);
     const uniqueSecretIds = [...new Set(parsed.map(([, reference]) => reference.secretId))];
     const values = new Map<string, ResolvedSecret>();
@@ -114,7 +115,8 @@ function resolveAwsSecrets<const Keys extends string>(
             new ResolverRequestFailed({
               adapter: "aws",
               operation: "read-batch",
-              message: "The AWS secret batch request failed",
+              message:
+                "AWS could not read the requested secrets. Check Secrets Manager permissions and try again.",
             }),
         });
 
@@ -126,7 +128,8 @@ function resolveAwsSecrets<const Keys extends string>(
           return yield* new ResolverRequestFailed({
             adapter: "aws",
             operation: "read-batch",
-            message: "The AWS secret batch was only partially resolved",
+            message:
+              "AWS could not read every requested secret. Check that each secret exists and the current credentials can access it.",
           });
         }
 
@@ -149,7 +152,8 @@ function resolveAwsSecrets<const Keys extends string>(
             return yield* new ResolverRequestFailed({
               adapter: "aws",
               operation: "read-batch",
-              message: "The AWS secret batch returned an incomplete response",
+              message:
+                "AWS did not return every requested secret. Check that each secret exists and try again.",
             });
           }
         }
