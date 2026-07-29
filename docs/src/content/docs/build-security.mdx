@@ -58,8 +58,10 @@ const appEnv = createEnv(
 
 The client transform removes `server(makeServerDefinitions())` as one unit. It
 does not execute or statically interpret `makeServerDefinitions`, Effect
-Schemas, spreads, resolver adapters, or imported helpers. The server transform
-keeps every target because `appEnv.server` exposes the complete environment.
+Schemas, spreads, resolver adapters, or imported helpers. A top-level
+`configureResolver(...)` binding is also removed when every reference to it is
+inside a pruned server fragment. The server transform keeps every target because
+`appEnv.server` exposes the complete environment.
 
 This boundary is what makes arbitrary Effect Schema and custom resolver code
 compatible with compilation: surviving code remains ordinary runtime code with
@@ -123,6 +125,24 @@ await build({
 
 Generic bundler adapters default to `client` so an omitted target fails closed.
 Pass `target: "server"` explicitly for a server build.
+
+## Expo
+
+```js title="babel.config.js"
+module.exports = function (api) {
+  api.cache(true);
+
+  return {
+    presets: ["babel-preset-expo"],
+    plugins: ["@ayronforge/envil/plugins/expo"],
+  };
+};
+```
+
+The Expo plugin runs the Envil compiler before Expo parses and inlines public
+environment references. Alongside normal server-fragment pruning, it expands
+the `expo` preset into one static `process.env.EXPO_PUBLIC_*` property access
+for every inline client schema key.
 
 ## What the Proxy guarantees
 

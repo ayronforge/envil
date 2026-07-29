@@ -7,8 +7,8 @@ order: 6
 import TypeTable from "@/components/docs/TypeTable.astro";
 import Callout from "@/components/docs/Callout.astro";
 
-Presets are small option objects designed to be spread into the second argument
-of `client`.
+Presets provide framework-specific client options. Expo also provides its
+compiler-backed runtime source.
 
 ```ts
 import {
@@ -22,7 +22,7 @@ import {
 
 <TypeTable showDefault={false} rows={[
   { name: "vite", type: "{ prefix: \"VITE_\" }", description: "Vite public client prefix" },
-  { name: "expo", type: "{ prefix: \"EXPO_PUBLIC_\" }", description: "Expo public client prefix" },
+  { name: "expo", type: "{ prefix: \"EXPO_PUBLIC_\", runtimeEnv: compiled }", description: "Expo public prefix and compiler-backed runtime source" },
   { name: "nuxt", type: "{ prefix: \"NUXT_PUBLIC_\" }", description: "Nuxt public client prefix" },
   { name: "sveltekit", type: "{ prefix: \"PUBLIC_\" }", description: "SvelteKit public client prefix" },
   { name: "astro", type: "{ prefix: \"PUBLIC_\" }", description: "Astro public client prefix" },
@@ -54,9 +54,63 @@ export const appEnv = createEnv(
 This reads `VITE_API_URL`.
 
 <Callout type="note" title="Runtime source">
-  Presets configure only naming. Pass the runtime object exposed by your
-  framework explicitly to the client fragment.
+  Except for Expo, presets configure only naming. Pass the runtime object
+  exposed by your framework explicitly to the client fragment.
 </Callout>
+
+## Expo
+
+Add the Envil compiler to the Expo Babel configuration:
+
+```js title="babel.config.js"
+module.exports = function (api) {
+  api.cache(true);
+
+  return {
+    presets: ["babel-preset-expo"],
+    plugins: ["@ayronforge/envil/plugins/expo"],
+  };
+};
+```
+
+The preset can then be passed directly:
+
+```ts
+import {
+  client,
+  createEnv,
+  requiredString,
+} from "@ayronforge/envil";
+import { expo } from "@ayronforge/envil/presets";
+
+export const appEnv = createEnv(
+  client(
+    {
+      APP_URL: requiredString,
+    },
+    expo,
+  ),
+);
+```
+
+The compiler turns `APP_URL` into a literal
+`process.env.EXPO_PUBLIC_APP_URL` reference before Expo performs its own
+environment-variable inlining. Client keys must therefore be declared in an
+inline object literal.
+
+Additional client options can be composed normally:
+
+```ts
+client(
+  {
+    APP_URL: requiredString,
+  },
+  {
+    ...expo,
+    emptyStringAsUndefined: true,
+  },
+)
+```
 
 ## Custom prefix
 

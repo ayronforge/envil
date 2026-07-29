@@ -89,14 +89,20 @@ export const port = strictNumberFromString
     identifier: "Port",
   });
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export const url = Schema.String.check(
-  Schema.makeFilter<string>(
-    (value) => URL.canParse(value) && (value.startsWith("http://") || value.startsWith("https://")),
-    {
-      identifier: "Url",
-      message: 'Use a full HTTP or HTTPS URL, such as "https://example.com"',
-    },
-  ),
+  Schema.makeFilter<string>(isHttpUrl, {
+    identifier: "Url",
+    message: 'Use a full HTTP or HTTPS URL, such as "https://example.com"',
+  }),
 );
 export type Url = Schema.Schema.Type<typeof url>;
 

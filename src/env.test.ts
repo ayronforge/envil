@@ -62,6 +62,28 @@ const recordingResolverAdapter: ResolverAdapter<
   resolve: resolveRecordingSecrets,
 };
 
+function verifyStaticValueTypes(): void {
+  server({ LABEL: "server" });
+  client({ LABEL: "client" });
+  shared({
+    CONFIG: {
+      enabled: true,
+      paths: ["/", "/health"],
+    },
+  });
+
+  // @ts-expect-error Raw structured server values require an Effect Schema.
+  server({ CONFIG: { enabled: true } });
+  // @ts-expect-error Raw structured client values require an Effect Schema.
+  client({ CONFIG: ["public"] });
+  // @ts-expect-error Shared values cannot contain Effect values recursively.
+  shared({ CONFIG: { token: Redacted.make("secret") } });
+  // @ts-expect-error Shared values cannot contain Effect Schemas recursively.
+  shared({ CONFIG: { parser: requiredString } });
+}
+
+void verifyStaticValueTypes;
+
 describe("environment composition", () => {
   test("rejects legacy object definitions and forged fragment shapes", () => {
     const legacyDefinition: unknown = {
@@ -216,6 +238,81 @@ describe("environment composition", () => {
         ),
       ).PORT,
     ).toBe(3000);
+  });
+
+  test("accepts recursively static shared data", () => {
+    const config = {
+      enabled: true,
+      routes: ["/", "/health"],
+      nested: { retries: 3 },
+    } as const;
+    const appEnv = createEnv(shared({ CONFIG: config }));
+
+    expect(Effect.runSync(appEnv.client).CONFIG).toEqual(config);
+    expect(Effect.runSync(appEnv.server).CONFIG).toEqual(config);
+  });
+
+  test("requires Effect Schemas for structured server and client values", () => {
+    const structured = Schema.fromJsonString(
+      Schema.Struct({
+        enabled: Schema.Boolean,
+      }),
+    );
+    const appEnv = createEnv(
+      server({ SERVER_CONFIG: structured }, { runtimeEnv: { SERVER_CONFIG: '{"enabled":true}' } }),
+      client({ CLIENT_CONFIG: structured }, { runtimeEnv: { CLIENT_CONFIG: '{"enabled":false}' } }),
+    );
+
+    expect(Effect.runSync(appEnv.server)).toMatchObject({
+      SERVER_CONFIG: { enabled: true },
+      CLIENT_CONFIG: { enabled: false },
+    });
+    expect(Effect.runSync(appEnv.client).CLIENT_CONFIG).toEqual({ enabled: false });
+  });
+
+  test("rejects nested Effect values from shared when JavaScript bypasses the types", () => {
+    const fragment: unknown = Reflect.apply(shared, undefined, [
+      {
+        CONFIG: {
+          token: Redacted.make("secret"),
+        },
+      },
+    ]);
+    const appEnv: unknown = Reflect.apply(createEnv, undefined, [fragment]);
+    if (typeof appEnv !== "object" || appEnv === null) {
+      throw new Error("Expected an AppEnv");
+    }
+    const clientEffect = Reflect.get(appEnv, "client");
+    if (!Effect.isEffect(clientEffect)) {
+      throw new Error("Expected a client Effect");
+    }
+
+    const result = Effect.runSync(Effect.result(clientEffect));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(EnvConfigurationError);
+      expect(String(result.failure)).toContain("not recursively static public data");
+      expect(String(result.failure)).not.toContain("secret");
+    }
+  });
+
+  test("rejects raw structured runtime values when JavaScript bypasses the types", () => {
+    const fragment: unknown = Reflect.apply(server, undefined, [{ CONFIG: { enabled: true } }]);
+    const appEnv: unknown = Reflect.apply(createEnv, undefined, [fragment]);
+    if (typeof appEnv !== "object" || appEnv === null) {
+      throw new Error("Expected an AppEnv");
+    }
+    const serverEffect = Reflect.get(appEnv, "server");
+    if (!Effect.isEffect(serverEffect)) {
+      throw new Error("Expected a server Effect");
+    }
+
+    const result = Effect.runSync(Effect.result(serverEffect));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(EnvConfigurationError);
+      expect(String(result.failure)).toContain("Describe objects and arrays with an Effect Schema");
+    }
   });
 });
 

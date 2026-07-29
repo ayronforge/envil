@@ -12,6 +12,8 @@ import { getSchemaIdentifier, isRedactedSchema } from "../schema-metadata.ts";
 import type { AnyEnvFragment, AnySchema, RuntimeEnv } from "../types.ts";
 import { isSourcedVariable, type VariableSource } from "../variable-source.ts";
 
+const expoRuntimeEnvMarker = Symbol.for("@ayronforge/envil/expo-runtime-env");
+
 interface VariablePlan {
   readonly _tag: "variable";
   readonly key: string;
@@ -62,6 +64,50 @@ function splitVariableDefinition(definition: unknown):
   // SAFETY: Public fragment contracts accept any Effect Schema. This runtime
   // branch authenticates the value as an Effect Schema after erasure.
   return { schema: definition as AnySchema, source: undefined };
+}
+
+function isStaticScalar(value: unknown): boolean {
+  return (
+    value === null ||
+    value === undefined ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
+}
+
+function isSharedStaticValue(value: unknown, ancestors: ReadonlySet<object> = new Set()): boolean {
+  if (isStaticScalar(value)) {
+    return true;
+  }
+  if (typeof value !== "object" || value === null || Redacted.isRedacted(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    return false;
+  }
+  if (ancestors.has(value)) {
+    return false;
+  }
+
+  const nextAncestors = new Set(ancestors);
+  nextAncestors.add(value);
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string") {
+      return false;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (
+      descriptor === undefined ||
+      !("value" in descriptor) ||
+      !isSharedStaticValue(descriptor.value, nextAncestors)
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function createVariablePlan(
@@ -118,9 +164,9 @@ function createEnvironmentPlans(
 
     for (const [key, definition] of Object.entries(fragment.values)) {
       if (fragment.target === "shared") {
-        if (Redacted.isRedacted(definition) || Schema.isSchema(definition)) {
+        if (!isSharedStaticValue(definition)) {
           throw configurationFailure(
-            `"${key}" is not a static public value. Move schemas and sensitive values out of shared().`,
+            `"${key}" is not recursively static public data. shared() accepts only scalar, array, and plain-object values without Effect values.`,
           );
         }
         plans.set(key, { _tag: "static", key, value: definition });
@@ -132,6 +178,11 @@ function createEnvironmentPlans(
         if (fragment.target === "client" && Redacted.isRedacted(definition)) {
           throw configurationFailure(
             `"${key}" is redacted in a client fragment, which is public. Move it to a server fragment.`,
+          );
+        }
+        if (!isStaticScalar(definition)) {
+          throw configurationFailure(
+            `"${key}" is structured runtime data. Describe objects and arrays with an Effect Schema.`,
           );
         }
         plans.set(key, { _tag: "static", key, value: definition });
@@ -296,6 +347,15 @@ function runtimeEnvForPlan(plan: VariablePlan): RuntimeEnv {
             `The client variable "${plan.key}" needs runtimeEnv. Pass the client runtime object, such as import.meta.env.`,
           );
         })());
+  if (
+    typeof runtimeEnv === "object" &&
+    runtimeEnv !== null &&
+    Reflect.get(runtimeEnv, expoRuntimeEnvMarker) === true
+  ) {
+    throw configurationFailure(
+      `The Expo client variable "${plan.key}" was not compiled. Add "@ayronforge/envil/plugins/expo" to babel.config.js.`,
+    );
+  }
   validateRuntimeEnv(runtimeEnv);
   return runtimeEnv;
 }

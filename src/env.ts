@@ -14,6 +14,7 @@ import type {
   HasRuntimeVariables,
   RuntimeEnv,
   ValidClientValues,
+  ValidServerValues,
   ValidSharedValues,
 } from "./types.ts";
 
@@ -91,13 +92,13 @@ function makeAppEnv(plan: EnvPlan): AnyAppEnv {
 
 /** Defines server-only schemas and values. */
 export function server<const Values extends EnvValues>(
-  values: Values,
+  values: Values & ValidServerValues<Values>,
 ): EnvFragment<"server", Values, undefined, undefined>;
 export function server<
   const Values extends EnvValues,
   const Runtime extends RuntimeEnv | undefined,
 >(
-  values: Values,
+  values: Values & ValidServerValues<Values>,
   options: UnprefixedFragmentOptions<Runtime>,
 ): EnvFragment<"server", Values, undefined, Runtime>;
 export function server<
@@ -105,7 +106,7 @@ export function server<
   const Prefix extends string,
   const Runtime extends RuntimeEnv | undefined,
 >(
-  values: Values,
+  values: Values & ValidServerValues<Values>,
   options: FragmentOptions<Prefix, Runtime> & { readonly prefix: Prefix },
 ): EnvFragment<"server", Values, Prefix, Runtime>;
 export function server(
@@ -200,12 +201,15 @@ export function extendEnv<const Inputs extends readonly (AnyAppEnv | AnyEnvFragm
     base: Base,
   ): AppEnv<ExtendedServerEntries<Base, Inputs>, ExtendedClientEntries<Base, Inputs>> => {
     const plan = [...planOf(base)];
-    for (const input of inputs) {
+    for (const input of inputs as readonly unknown[]) {
+      if (input === undefined) {
+        continue;
+      }
       if (isEnvFragment(input)) {
         plan.push(input);
         continue;
       }
-      plan.push(...planOf(input));
+      plan.push(...planOf(input as AnyAppEnv));
     }
 
     // SAFETY: Runtime plans are concatenated in the same order as the type-level

@@ -22,6 +22,9 @@ export type VariableDefinition = AnySchema | SourcedVariable<AnySchema, Variable
 /** Values declared by one server, client, or shared fragment. */
 export type EnvValues = Readonly<Record<string, unknown>>;
 
+/** Scalar value that can be embedded directly in an environment fragment. */
+export type StaticScalar = string | number | boolean | null | undefined;
+
 /**
  * Runtime values supplied as an object, parsed JSON object, or Map.
  *
@@ -160,13 +163,13 @@ type RuntimeKey<Variable, Key extends string, Prefix extends string | undefined>
         >
       ? ""
       : `${PrefixValue<Prefix>}${Key}`;
-type SourceName<Variable> = [SourceOf<Variable>] extends [never]
+type SourceKind<Variable> = [SourceOf<Variable>] extends [never]
   ? "env"
   : SourceOf<Variable> extends ResolverVariableSource<
-        infer Resolver extends AnyConfiguredResolver,
+        infer _Resolver extends AnyConfiguredResolver,
         infer _Reference
       >
-    ? Resolver["name"]
+    ? "resolver"
     : "env";
 
 /** Safe structural metadata retained only in TypeScript types for CLI inspection. */
@@ -208,7 +211,7 @@ type ContextContract<Entries extends DefinitionEntries, Target extends "server" 
         ResolverOf<Definition> extends never
           ? IsRedacted<Schema.Schema.Type<SchemaOf<Definition>>>
           : true,
-        SourceName<Definition>,
+        SourceKind<Definition>,
         IsOptional<SchemaOf<Definition>>
       >
     : never;
@@ -413,17 +416,52 @@ type RedactedKeys<Values extends EnvValues> = {
       : never;
 }[keyof Values];
 
+type IsAny<Value> = 0 extends 1 & Value ? true : false;
+type IsSharedStaticValue<Value> =
+  IsAny<Value> extends true
+    ? false
+    : Value extends VariableDefinition | Redacted.Redacted<unknown>
+      ? false
+      : Value extends StaticScalar
+        ? true
+        : Value extends readonly (infer Item)[]
+          ? IsSharedStaticValue<Item>
+          : Value extends (...arguments_: never[]) => unknown
+            ? false
+            : Value extends Readonly<Record<PropertyKey, unknown>>
+              ? false extends {
+                  readonly [Key in keyof Value]: IsSharedStaticValue<Value[Key]>;
+                }[keyof Value]
+                ? false
+                : true
+              : false;
+type InvalidServerKeys<Values extends EnvValues> = {
+  readonly [Key in keyof Values]: Values[Key] extends VariableDefinition | StaticScalar
+    ? never
+    : Key;
+}[keyof Values];
+type InvalidSharedKeys<Values extends EnvValues> = {
+  readonly [Key in keyof Values]: IsSharedStaticValue<Values[Key]> extends true ? never : Key;
+}[keyof Values];
+
+/** Rejects raw structured values from a server fragment. */
+export type ValidServerValues<Values extends EnvValues> = [InvalidServerKeys<Values>] extends [
+  never,
+]
+  ? unknown
+  : never;
+
 /** Rejects sources and sensitive values from a client fragment. */
 export type ValidClientValues<Values extends EnvValues> = [
-  ResolverKeys<Values> | RedactedKeys<Values>,
+  ResolverKeys<Values> | RedactedKeys<Values> | InvalidServerKeys<Values>,
 ] extends [never]
   ? unknown
   : never;
 
 /** Rejects schemas and sensitive values from a shared fragment. */
-export type ValidSharedValues<Values extends EnvValues> = [
-  VariableKeys<Values> | RedactedKeys<Values>,
-] extends [never]
+export type ValidSharedValues<Values extends EnvValues> = [InvalidSharedKeys<Values>] extends [
+  never,
+]
   ? unknown
   : never;
 

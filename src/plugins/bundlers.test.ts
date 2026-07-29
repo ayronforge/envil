@@ -64,6 +64,22 @@ import {
 } from "@ayronforge/envil";
 import { readServerValue } from "./server-only.ts";
 
+const resolver = configureResolver(
+  {
+    name: "${resolverSentinel}",
+    resolve: ({ referencesByKey }) =>
+      Effect.succeed(
+        Object.fromEntries(
+          Object.entries(referencesByKey).map(([key, reference]) => [
+            key,
+            Option.some(Redacted.make("resolved:" + reference)),
+          ]),
+        ),
+      ),
+  },
+  {},
+);
+
 const baseEnv = createEnv(
   shared({ APP_NAME: "Base" }),
   client(
@@ -82,24 +98,7 @@ const appEnv = baseEnv.pipe(
         {
           SECRET: requiredString.pipe(fromEnv("service.secret")),
           RESOLVED: requiredString.pipe(
-            fromResolver(
-              configureResolver(
-                {
-                  name: "${resolverSentinel}",
-                  resolve: ({ referencesByKey }) =>
-                    Effect.succeed(
-                      Object.fromEntries(
-                        Object.entries(referencesByKey).map(([key, reference]) => [
-                          key,
-                          Option.some(Redacted.make("resolved:" + reference)),
-                        ]),
-                      ),
-                    ),
-                },
-                {},
-              ),
-              "custom-reference",
-            ),
+            fromResolver(resolver, "custom-reference"),
           ),
         },
         {
@@ -230,7 +229,20 @@ async function verifyTargets(buildBundle: BuildBundle): Promise<void> {
   expect(serverBundle.code).toContain(resolverSentinel);
 
   expectClientRuntime(await executeBundle(clientBundle));
-  expectServerRuntime(await executeBundle(serverBundle));
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {},
+  });
+  try {
+    expectServerRuntime(await executeBundle(serverBundle));
+  } finally {
+    if (previousWindow === undefined) {
+      Reflect.deleteProperty(globalThis, "window");
+    } else {
+      Object.defineProperty(globalThis, "window", previousWindow);
+    }
+  }
 }
 
 async function buildRollupBundle(

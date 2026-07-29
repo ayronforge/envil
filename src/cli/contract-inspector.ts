@@ -10,7 +10,7 @@ export interface InspectedContractVariable {
   readonly logicalKey: string;
   readonly runtimeKey: string;
   readonly secret: boolean;
-  readonly source: string;
+  readonly source: "env" | "resolver";
   readonly optional: boolean;
 }
 
@@ -37,7 +37,7 @@ function literalString(
   const propertyType = checker.getTypeOfSymbolAtLocation(property, declaration);
   if (!propertyType.isStringLiteral()) {
     throw new Error(
-      "Envil could not determine the generated variable names. Keep prefixes and resolver names as string literals instead of typing them as string.",
+      "Envil could not determine the generated variable names. Keep prefixes and environment names as string literals instead of typing them as string.",
     );
   }
   return propertyType.value;
@@ -66,6 +66,20 @@ function literalBoolean(
   return checker.typeToString(propertyType) === "true";
 }
 
+function literalSourceKind(
+  checker: ts.TypeChecker,
+  metadataType: ts.Type,
+  fallbackLocation: ts.Node,
+): "env" | "resolver" {
+  const source = literalString(checker, metadataType, "source", fallbackLocation);
+  if (source === "env" || source === "resolver") {
+    return source;
+  }
+  throw new Error(
+    "Envil could not determine how this variable is sourced. Keep the environment definition fully inferred.",
+  );
+}
+
 function inspectTarget(
   checker: ts.TypeChecker,
   contractType: ts.Type,
@@ -89,7 +103,7 @@ function inspectTarget(
       logicalKey: variable.getName(),
       runtimeKey: literalString(checker, metadataType, "runtimeKey", declaration),
       secret: literalBoolean(checker, metadataType, "secret", declaration),
-      source: literalString(checker, metadataType, "source", declaration),
+      source: literalSourceKind(checker, metadataType, declaration),
       optional: literalBoolean(checker, metadataType, "optional", declaration),
     };
   });

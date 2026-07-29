@@ -1,4 +1,4 @@
-import type { TokenCredential } from "@azure/core-auth";
+import type { TokenCredential } from "@azure/identity";
 import { Effect } from "effect";
 
 import {

@@ -77,4 +77,86 @@ function runCallback(server: () => string) {
 
     expect(transformed).toBe('const target = "client";');
   });
+
+  test("removes configured resolvers referenced only by pruned server fragments", () => {
+    const source = `
+import { configureResolver, createEnv, fromResolver, requiredString, server } from "@ayronforge/envil";
+import { adapter } from "./server-adapter.ts";
+
+const secrets = configureResolver(adapter, {});
+export const appEnv = createEnv(
+  server({ TOKEN: requiredString.pipe(fromResolver(secrets, "token")) }),
+);
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).not.toContain("const secrets = configureResolver");
+    expect(transformed).toContain("createEnv(");
+    expect(transformed).toContain("undefined");
+  });
+
+  test("keeps configured resolvers that are also used outside a server fragment", () => {
+    const source = `
+import { configureResolver, createEnv, fromResolver, requiredString, server } from "@ayronforge/envil";
+import { adapter } from "./server-adapter.ts";
+
+const secrets = configureResolver(adapter, {});
+export const configuredName = secrets.name;
+export const appEnv = createEnv(
+  server({ TOKEN: requiredString.pipe(fromResolver(secrets, "token")) }),
+);
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).toContain("const secrets = configureResolver");
+    expect(transformed).toContain("configuredName = secrets.name");
+  });
+
+  test("compiles Expo preset keys into static process.env references", () => {
+    const source = `
+import { client, createEnv, requiredString } from "@ayronforge/envil";
+import { expo as expoPreset } from "@ayronforge/envil/presets";
+
+export const appEnv = createEnv(
+  client(
+    { APP_URL: requiredString, API_TOKEN: requiredString },
+    { ...expoPreset, emptyStringAsUndefined: true },
+  ),
+);
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).toContain('"EXPO_PUBLIC_APP_URL": process.env.EXPO_PUBLIC_APP_URL');
+    expect(transformed).toContain('"EXPO_PUBLIC_API_TOKEN": process.env.EXPO_PUBLIC_API_TOKEN');
+    expect(transformed).toContain("emptyStringAsUndefined: true");
+  });
+
+  test("compiles Expo runtime keys without pruning server builds", () => {
+    const source = `
+import { client, createEnv, requiredString, server } from "@ayronforge/envil";
+import { expo } from "@ayronforge/envil/presets";
+
+export const appEnv = createEnv(
+  server({ TOKEN: "private" }),
+  client({ APP_URL: requiredString }, expo),
+);
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "server");
+
+    expect(transformed).toContain('server({ TOKEN: "private" })');
+    expect(transformed).toContain('"EXPO_PUBLIC_APP_URL": process.env.EXPO_PUBLIC_APP_URL');
+  });
+
+  test("fails closed when Expo client keys are not statically enumerable", () => {
+    const source = `
+import { client, requiredString } from "@ayronforge/envil";
+import { expo } from "@ayronforge/envil/presets";
+const values = { APP_URL: requiredString };
+client(values, expo);
+`;
+
+    expect(() => transformEnvilModule(source, "src/env.ts", "client")).toThrow(
+      "inline object literal",
+    );
+  });
 });

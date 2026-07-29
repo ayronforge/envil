@@ -25,7 +25,8 @@
     "envil": "./dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "dist-cjs"
   ],
   "type": "module",
   "sideEffects": false,
@@ -79,6 +80,11 @@
     "./plugins/esbuild": {
       "types": "./dist/plugins/esbuild.d.ts",
       "import": "./dist/plugins/esbuild.js"
+    },
+    "./plugins/expo": {
+      "types": "./dist/plugins/expo.d.ts",
+      "import": "./dist/plugins/expo.js",
+      "require": "./dist-cjs/plugins/expo.cjs"
     }
   },
   "scripts": {
@@ -103,10 +109,13 @@
     "@aws-sdk/client-secrets-manager": "3.984.0",
     "@azure/identity": "4.13.0",
     "@azure/keyvault-secrets": "4.10.0",
+    "@babel/core": "7.29.7",
     "@google-cloud/secret-manager": "6.1.1",
     "@rspack/core": "^2.1.7",
+    "@types/babel__core": "7.20.5",
     "@types/bun": "^1.3.8",
     "@types/node": "^25.2.1",
+    "babel-preset-expo": "54.0.12",
     "effect": "4.0.0-beta.102",
     "esbuild": "^0.28.1",
     "esbuild-loader": "^4.5.0",

@@ -10,12 +10,12 @@ const injectedRuntimeTarget: unknown = Reflect.get(
 );
 
 function detectRuntimeTarget(): DetectedRuntimeTarget {
-  if (typeof window !== "undefined") {
-    return "client";
-  }
-
   if (injectedRuntimeTarget === "server" || injectedRuntimeTarget === "client") {
     return injectedRuntimeTarget;
+  }
+
+  if (typeof window !== "undefined") {
+    return "client";
   }
 
   if (

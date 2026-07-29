@@ -108,11 +108,14 @@ function generateSource(variables: ReadonlyArray<GeneratedVariable>, clientPrefi
   }
   const lines = [
     `import { ${[...helpers].sort().join(", ")} } from "@ayronforge/envil";`,
+    ...(clientPrefix === "EXPO_PUBLIC_"
+      ? ['import { expo } from "@ayronforge/envil/presets";']
+      : []),
     "",
     "export const appEnv = createEnv(",
   ];
 
-  for (const target of ["server", "client"] as const) {
+  for (const target of ["client", "server"] as const) {
     const targetVariables = variables
       .filter((variable) => variable.target === target)
       .sort((left, right) => left.logicalKey.localeCompare(right.logicalKey));
@@ -125,13 +128,19 @@ function generateSource(variables: ReadonlyArray<GeneratedVariable>, clientPrefi
     }
     lines.push("    },");
     if (target === "client") {
-      const runtimeExpression =
-        clientPrefix === "VITE_" || clientPrefix === "PUBLIC_" ? "import.meta.env" : "process.env";
-      lines.push("    {", `      runtimeEnv: ${runtimeExpression},`);
-      if (clientPrefix.length > 0) {
-        lines.push(`      prefix: ${JSON.stringify(clientPrefix)},`);
+      if (clientPrefix === "EXPO_PUBLIC_") {
+        lines.push("    expo,");
+      } else {
+        const runtimeExpression =
+          clientPrefix === "VITE_" || clientPrefix === "PUBLIC_"
+            ? "import.meta.env"
+            : "process.env";
+        lines.push("    {", `      runtimeEnv: ${runtimeExpression},`);
+        if (clientPrefix.length > 0) {
+          lines.push(`      prefix: ${JSON.stringify(clientPrefix)},`);
+        }
+        lines.push("    },");
       }
-      lines.push("    },");
     }
     lines.push("  ),", "");
   }

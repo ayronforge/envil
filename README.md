@@ -51,8 +51,9 @@ const clientEnv = await Effect.runPromise(appEnv.client);
 ```
 
 Server materialization reads `server + client + shared`. Client materialization
-reads `client + shared`. Static values may also live directly in a target
-fragment.
+reads `client + shared`. Scalar values may live directly in any fragment.
+Structured server and client values use Effect Schema; `shared` accepts
+recursively static public data.
 
 ## Composition
 
@@ -105,6 +106,10 @@ export default defineConfig({
 Envil also publishes plugins for Rollup, Rolldown, Webpack, Rspack, and esbuild.
 Generic plugins accept `{ target: "client" | "server" }`. Server builds retain
 both client and server contexts.
+
+Expo uses `@ayronforge/envil/plugins/expo` in `babel.config.js`. Its `expo`
+preset supplies both the `EXPO_PUBLIC_` prefix and a compiler-backed runtime
+source whose keys become literal `process.env.EXPO_PUBLIC_*` references.
 
 `server` is a compiler boundary. The transform does not inspect schemas,
 spreads, factory functions, or resolver implementations, so every Effect Schema

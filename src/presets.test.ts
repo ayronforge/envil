@@ -34,4 +34,12 @@ describe("framework presets", () => {
       expect(Effect.runSync(appEnv.client).API_URL).toBe("https://api.example.com");
     });
   }
+
+  test("fails clearly when the Expo preset was not compiled", () => {
+    const appEnv = createEnv(client({ API_URL: requiredString }, expo));
+
+    expect(() => Effect.runSync(appEnv.client)).toThrow(
+      'The Expo client variable "API_URL" was not compiled.',
+    );
+  });
 });

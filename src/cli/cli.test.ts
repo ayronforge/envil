@@ -101,6 +101,18 @@ describe("envil init", () => {
     );
 
     expect(source.match(/URL: url/g)).toHaveLength(2);
+    expect(source.indexOf("  client(")).toBeLessThan(source.indexOf("  server("));
+  });
+
+  test("generates Expo clients with the compiler-backed preset", () => {
+    const source = generateEnvSourceFromDotenv(
+      "DATABASE_URL=postgres://user:password@host:5432/app\nEXPO_PUBLIC_APP_URL=https://example.com\n",
+    );
+
+    expect(source).toContain('import { expo } from "@ayronforge/envil/presets";');
+    expect(source).toContain("APP_URL: url");
+    expect(source).toContain("    expo,");
+    expect(source).not.toContain("runtimeEnv: process.env");
   });
 
   test("CLI writes one app environment definition", async () => {
@@ -163,6 +175,29 @@ describe("envil example", () => {
         "  server({",
         '      TOKEN: requiredString.pipe(fromResolver(source, "private-reference")),',
         '      DATABASE_URL: requiredString.pipe(fromEnv("POSTGRES_URL")),',
+        "  }),",
+        ");",
+      ].join("\n"),
+    );
+
+    expect(renderEnvExample(inspectEnvContract(inputPath))).toBe("POSTGRES_URL=\n");
+  });
+
+  test('treats a resolver named "env" as resolver-backed metadata', async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { configureResolver, createEnv, fromEnv, fromResolver, requiredString, server } from "../src/index.ts";',
+        'import type { ResolverAdapter } from "../src/index.ts";',
+        "",
+        'const adapter = { name: "env", resolve: () => { throw new Error("not executed"); } } satisfies ResolverAdapter<"env", string, {}, never, never>;',
+        "const source = configureResolver(adapter, {});",
+        "export const appEnv = createEnv(",
+        "  server({",
+        '    TOKEN: requiredString.pipe(fromResolver(source, "private-reference")),',
+        '    DATABASE_URL: requiredString.pipe(fromEnv("POSTGRES_URL")),',
         "  }),",
         ");",
       ].join("\n"),
@@ -262,7 +297,7 @@ describe("envil example", () => {
     );
 
     expect(() => inspectEnvContract(inputPath)).toThrow(
-      "Envil could not determine the generated variable names. Keep prefixes and resolver names as string literals instead of typing them as string.",
+      "Envil could not determine the generated variable names. Keep prefixes and environment names as string literals instead of typing them as string.",
     );
   });
 
