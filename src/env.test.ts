@@ -567,4 +567,33 @@ describe("validation and runtime backstops", () => {
       );
     }
   });
+
+  test("detects inherited runtime mapping collisions after composition", () => {
+    const baseEnv = createEnv(
+      server(
+        {
+          PUBLIC_URL: requiredString,
+        },
+        { runtimeEnv: { PUBLIC_URL: "server" } },
+      ),
+    );
+    const appEnv = baseEnv.pipe(
+      extendEnv(
+        client(
+          {
+            URL: requiredString,
+          },
+          { runtimeEnv: { PUBLIC_URL: "client" }, prefix: "PUBLIC_" },
+        ),
+      ),
+    );
+
+    const result = Effect.runSync(Effect.result(appEnv.server));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(String(result.failure)).toContain(
+        '"PUBLIC_URL" and "URL" both read "PUBLIC_URL" in the server environment.',
+      );
+    }
+  });
 });
