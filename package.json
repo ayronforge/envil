@@ -82,7 +82,7 @@
     }
   },
   "scripts": {
-    "build": "bun run scripts/clean-dist.ts && tsc -p tsconfig.build.json && bun run scripts/verify-package.ts",
+    "build": "tsdown && bun run scripts/verify-package.ts",
     "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint --type-aware ./src",
@@ -115,6 +115,7 @@
     "oxlint-tsgolint": "^0.11.0",
     "rolldown": "^1.2.1",
     "rollup": "^4.62.3",
+    "tsdown": "^0.22.14",
     "typescript": "7.0.2",
     "vite": "6.4.1",
     "webpack": "^5.109.2"

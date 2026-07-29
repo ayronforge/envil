@@ -4,11 +4,10 @@
   "exclude": ["src/**/*.test.ts"],
   "compilerOptions": {
     "declaration": true,
-    "emitDeclarationOnly": false,
+    "emitDeclarationOnly": true,
     "noEmit": false,
     "outDir": "dist",
-    "rewriteRelativeImportExtensions": true,
     "rootDir": "src",
-    "sourceMap": true
+    "sourceMap": false
   }
 }
