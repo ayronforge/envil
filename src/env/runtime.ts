@@ -268,7 +268,17 @@ function readNestedObjectValue(
 }
 
 function isRuntimeMap(runtimeEnv: RuntimeEnv): runtimeEnv is ReadonlyMap<string, unknown> {
-  return runtimeEnv instanceof Map;
+  return (
+    runtimeEnv instanceof Map ||
+    (typeof Reflect.get(runtimeEnv, "size") === "number" &&
+      typeof Reflect.get(runtimeEnv, "get") === "function" &&
+      typeof Reflect.get(runtimeEnv, "has") === "function" &&
+      typeof Reflect.get(runtimeEnv, "entries") === "function" &&
+      typeof Reflect.get(runtimeEnv, "keys") === "function" &&
+      typeof Reflect.get(runtimeEnv, "values") === "function" &&
+      typeof Reflect.get(runtimeEnv, "forEach") === "function" &&
+      typeof Reflect.get(runtimeEnv, Symbol.iterator) === "function")
+  );
 }
 
 function readRuntimeValue(runtimeEnv: RuntimeEnv, key: string): unknown {

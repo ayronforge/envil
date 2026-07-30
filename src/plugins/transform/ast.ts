@@ -281,13 +281,32 @@ async function resolvedBindings(
       continue;
     }
     for (const element of namedBindings.elements) {
-      const origin = await originOf(
-        specifier,
-        sourceFile.fileName,
-        element.propertyName?.text ?? element.name.text,
-      );
+      const exportedName = element.propertyName?.text ?? element.name.text;
+      const origin = await originOf(specifier, sourceFile.fileName, exportedName);
       if (!element.isTypeOnly && origin !== undefined) {
         addBinding(bindings, origin, element.name, checker);
+        continue;
+      }
+      if (element.isTypeOnly) {
+        continue;
+      }
+      const symbol = checker.getSymbolAtLocation(element.name);
+      if (symbol === undefined) {
+        continue;
+      }
+      for (const intrinsic of [
+        "server",
+        "client",
+        "configureResolver",
+        "fromEnv",
+        "expo",
+      ] satisfies ReadonlyArray<IntrinsicName>) {
+        if (
+          (await originOf(specifier, sourceFile.fileName, `${exportedName}.${intrinsic}`)) ===
+          intrinsic
+        ) {
+          bindings.namespaces[intrinsic].add(symbol);
+        }
       }
     }
   }

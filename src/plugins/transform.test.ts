@@ -89,6 +89,20 @@ function runCallback(server: () => string) {
     expect(transformed).toBe('const target = "client";');
   });
 
+  test("preserves runtime proof marker text in strings and templates", () => {
+    const marker = 'Reflect.get(globalThis, Symbol.for("__ENVIL_RUNTIME_TARGET__"))';
+    const source = [
+      `const quoted = ${JSON.stringify(marker)};`,
+      `const template = \`${marker}\`;`,
+      `const target = ${marker};`,
+    ].join("\n");
+    const transformed = transformEnvilModule(source, "src/fixture.ts", "client");
+
+    expect(transformed).toContain(`const quoted = ${JSON.stringify(marker)};`);
+    expect(transformed).toContain(`const template = \`${marker}\`;`);
+    expect(transformed).toContain('const target = "client";');
+  });
+
   test("maps all edits from one transform back to the original module", () => {
     const source = `
 import { server } from "@ayronforge/envil";

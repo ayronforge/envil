@@ -432,6 +432,25 @@ describe("lazy runtime boundaries", () => {
     expect(Effect.runSync(appEnv.server).TOKEN).toBe("record-value");
   });
 
+  test("reads structurally valid ReadonlyMap sources", () => {
+    const values = new Map<string, unknown>([["TOKEN", "map-value"]]);
+    const runtimeEnv = {
+      get size() {
+        return values.size;
+      },
+      get: values.get.bind(values),
+      has: values.has.bind(values),
+      entries: values.entries.bind(values),
+      keys: values.keys.bind(values),
+      values: values.values.bind(values),
+      forEach: values.forEach.bind(values),
+      [Symbol.iterator]: values[Symbol.iterator].bind(values),
+    } satisfies ReadonlyMap<string, unknown>;
+    const appEnv = createEnv(server({ TOKEN: requiredString }, { runtimeEnv }));
+
+    expect(Effect.runSync(appEnv.server).TOKEN).toBe("map-value");
+  });
+
   test("fromEnv overrides a fragment prefix", () => {
     const appEnv = createEnv(
       client(

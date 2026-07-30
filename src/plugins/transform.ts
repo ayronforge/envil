@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import ts from "typescript6";
+
 import {
   applyReplacements,
   createDirectTransformContext,
@@ -27,8 +29,6 @@ export interface EnvilPluginOptions {
 
 const runtimeTargetMarker = "__ENVIL_RUNTIME_TARGET__";
 const envilModuleName = "@ayronforge/envil";
-const runtimeTargetExpression =
-  /Reflect\.get\(\s*globalThis\s*,\s*Symbol\.for\(\s*["']__ENVIL_RUNTIME_TARGET__["']\s*\)\s*,?\s*\)/g;
 const packageEligibility = new Map<string, Promise<boolean>>();
 
 function nodeModulePackageRoot(id: string): string | undefined {
@@ -110,26 +110,57 @@ function targetReplacements(
 
 function runtimeTargetReplacements(
   code: string,
+  id: string,
   target: EnvilBuildTarget,
 ): ReadonlyArray<Replacement> {
   if (!code.includes(runtimeTargetMarker)) {
     return [];
   }
 
-  return [...code.matchAll(runtimeTargetExpression)].flatMap(
-    (match): ReadonlyArray<Replacement> => {
-      if (match.index === undefined) {
-        return [];
+  const sourceFile = ts.createSourceFile(id, code, ts.ScriptTarget.Latest, true);
+  const replacements: Replacement[] = [];
+
+  function visit(node: ts.Node): void {
+    if (ts.isCallExpression(node) && node.arguments.length === 2) {
+      const reflectGet = node.expression;
+      const receiver = node.arguments[0];
+      const symbolCall = node.arguments[1];
+      if (
+        ts.isPropertyAccessExpression(reflectGet) &&
+        ts.isIdentifier(reflectGet.expression) &&
+        reflectGet.expression.text === "Reflect" &&
+        reflectGet.name.text === "get" &&
+        receiver !== undefined &&
+        ts.isIdentifier(receiver) &&
+        receiver.text === "globalThis" &&
+        symbolCall !== undefined &&
+        ts.isCallExpression(symbolCall) &&
+        symbolCall.arguments.length === 1 &&
+        ts.isPropertyAccessExpression(symbolCall.expression) &&
+        ts.isIdentifier(symbolCall.expression.expression) &&
+        symbolCall.expression.expression.text === "Symbol" &&
+        symbolCall.expression.name.text === "for"
+      ) {
+        const marker = symbolCall.arguments[0];
+        if (
+          marker !== undefined &&
+          ts.isStringLiteral(marker) &&
+          marker.text === runtimeTargetMarker
+        ) {
+          replacements.push({
+            start: node.getStart(sourceFile),
+            end: node.end,
+            text: JSON.stringify(target),
+          });
+          return;
+        }
       }
-      return [
-        {
-          start: match.index,
-          end: match.index + match[0].length,
-          text: JSON.stringify(target),
-        },
-      ];
-    },
-  );
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return replacements;
 }
 
 function transformModule(
@@ -139,7 +170,7 @@ function transformModule(
   context: TransformContext | undefined,
 ): TransformResult | undefined {
   return applyReplacements(code, id, [
-    ...runtimeTargetReplacements(code, target),
+    ...runtimeTargetReplacements(code, id, target),
     ...(context === undefined ? [] : targetReplacements(context, target)),
   ]);
 }

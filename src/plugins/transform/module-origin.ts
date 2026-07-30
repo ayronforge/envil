@@ -111,6 +111,33 @@ export function createExportOriginResolver(resolveModule: ModuleResolver): Expor
     }
     const nextVisiting = new Set(visiting).add(key);
 
+    const namespaceSeparator = exportName.indexOf(".");
+    if (namespaceSeparator > 0) {
+      const namespaceName = exportName.slice(0, namespaceSeparator);
+      const memberName = exportName.slice(namespaceSeparator + 1);
+      for (const statement of sourceFile.statements) {
+        if (
+          !ts.isExportDeclaration(statement) ||
+          statement.isTypeOnly ||
+          statement.exportClause === undefined ||
+          !ts.isNamespaceExport(statement.exportClause) ||
+          statement.exportClause.name.text !== namespaceName ||
+          statement.moduleSpecifier === undefined ||
+          !ts.isStringLiteral(statement.moduleSpecifier)
+        ) {
+          continue;
+        }
+        const origin = await originOf(
+          statement.moduleSpecifier.text,
+          fileName,
+          memberName,
+          nextVisiting,
+        );
+        origins.set(key, origin ?? null);
+        return origin;
+      }
+    }
+
     for (const statement of sourceFile.statements) {
       if (
         !ts.isExportDeclaration(statement) ||
