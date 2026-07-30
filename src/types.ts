@@ -95,6 +95,7 @@ type AnyDefinitionEntry =
   | StaticEntry<unknown, EnvFragmentTarget>;
 type DefinitionEntries = Readonly<Record<string, AnyDefinitionEntry>>;
 
+type IsAny<Value> = 0 extends 1 & Value ? true : false;
 type NonUndefined<Value> = Exclude<Value, undefined>;
 type OptionalityValue<Value> = Value extends Redacted.Redacted<infer Inner> ? Inner : Value;
 type IsOptional<SchemaValue extends AnySchema> =
@@ -103,6 +104,12 @@ type IsRedacted<Value> =
   Extract<NonUndefined<Value>, Redacted.Redacted<unknown>> extends never ? false : true;
 type Unredacted<Value> =
   NonUndefined<Value> extends Redacted.Redacted<infer Inner> ? Inner : NonUndefined<Value>;
+type IsFunctionOutput<Value> =
+  IsAny<Value> extends true
+    ? false
+    : Extract<Unredacted<Value>, (...arguments_: never[]) => unknown> extends never
+      ? false
+      : true;
 type Redact<Value> =
   NonUndefined<Value> extends Redacted.Redacted<unknown>
     ? NonUndefined<Value>
@@ -181,6 +188,7 @@ type SourceKind<Variable> = [SourceOf<Variable>] extends [never]
       >
     ? "resolver"
     : "env";
+type RuntimePropertyKey<Key> = Key extends string | number ? `${Key}` : never;
 
 /** Safe structural metadata retained only in TypeScript types for CLI inspection. */
 export interface EnvVariableContract<
@@ -202,12 +210,12 @@ export interface EnvVariableContract<
 }
 
 type ContextContract<Entries extends DefinitionEntries, Target extends "server" | "client"> = {
-  readonly [Key in keyof Entries & string as Entries[Key] extends VariableEntry<
+  readonly [Key in keyof Entries as Entries[Key] extends VariableEntry<
     VariableDefinition,
     string | undefined,
     Target
   >
-    ? Key
+    ? RuntimePropertyKey<Key>
     : never]: Entries[Key] extends VariableEntry<
     infer Definition,
     infer Prefix extends string | undefined,
@@ -216,8 +224,8 @@ type ContextContract<Entries extends DefinitionEntries, Target extends "server" 
     ? EnvVariableContract<
         VariableOutput<Definition>,
         Schema.Codec.Encoded<SchemaOf<Definition>>,
-        Key,
-        RuntimeKey<Definition, Key, Prefix>,
+        RuntimePropertyKey<Key>,
+        RuntimeKey<Definition, RuntimePropertyKey<Key>, Prefix>,
         ResolverOf<Definition> extends never
           ? IsRedacted<Schema.Schema.Type<SchemaOf<Definition>>>
           : true,
@@ -440,7 +448,6 @@ type RedactedKeys<Values extends EnvValues> = {
       : never;
 }[keyof Values];
 
-type IsAny<Value> = 0 extends 1 & Value ? true : false;
 type IsSharedStaticValue<Value> =
   IsAny<Value> extends true
     ? false
@@ -460,9 +467,13 @@ type IsSharedStaticValue<Value> =
                 : true
               : false;
 type InvalidServerKeys<Values extends EnvValues> = {
-  readonly [Key in keyof Values]: Values[Key] extends VariableDefinition | StaticScalar
-    ? never
-    : Key;
+  readonly [Key in keyof Values]: Values[Key] extends VariableDefinition
+    ? IsFunctionOutput<Schema.Schema.Type<SchemaOf<Values[Key]>>> extends true
+      ? Key
+      : never
+    : Values[Key] extends StaticScalar
+      ? never
+      : Key;
 }[keyof Values];
 type InvalidSharedKeys<Values extends EnvValues> = {
   readonly [Key in keyof Values]: IsSharedStaticValue<Values[Key]> extends true ? never : Key;

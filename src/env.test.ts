@@ -664,6 +664,25 @@ describe("variable sources", () => {
 });
 
 describe("validation and runtime backstops", () => {
+  test("rejects functions produced by broad schemas", () => {
+    const appEnv = createEnv(
+      server({ CALLBACK: Schema.Any }, { runtimeEnv: { CALLBACK: () => "value" } }),
+    );
+
+    const result = Effect.runSync(Effect.result(appEnv.server));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(EnvValidationError);
+      expect(result.failure.issues).toEqual([
+        {
+          _tag: "InvalidVariable",
+          key: "CALLBACK",
+          sensitive: false,
+        },
+      ]);
+    }
+  });
+
   test("redacted runtime schemas remain redacted", () => {
     const appEnv = createEnv(
       server({ TOKEN: redacted(requiredString) }, { runtimeEnv: { TOKEN: "secret-value" } }),

@@ -39,6 +39,22 @@ describe("SecretSource", () => {
     expect(Option.isNone(result.TOKEN)).toBe(true);
   });
 
+  test('preserves a result key named "__proto__"', async () => {
+    const layer = SecretSource.fromPromise({
+      get: async () => Option.some("secret-value"),
+    });
+    const result = await Effect.runPromise(
+      customSecretsAdapter
+        .resolve({
+          referencesByKey: { ["__proto__"]: "remote-reference" },
+        })
+        .pipe(Effect.provide(layer)),
+    );
+
+    expect(Object.hasOwn(result, "__proto__")).toBe(true);
+    expect(Option.isSome(result.__proto__)).toBe(true);
+  });
+
   test("sanitizes Promise rejection", async () => {
     const secret = "secret-in-provider-error";
     const layer = SecretSource.fromPromise({

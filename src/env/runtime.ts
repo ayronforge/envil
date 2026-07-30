@@ -387,10 +387,21 @@ function decodeVariableInputs(
           continue;
         }
 
-        const decoded =
-          Redacted.isRedacted(result.success) && Redacted.value(result.success) === undefined
-            ? undefined
-            : result.success;
+        const decodedValue = Redacted.isRedacted(result.success)
+          ? Redacted.value(result.success)
+          : result.success;
+        if (typeof decodedValue === "function") {
+          const schemaIdentifier = getSchemaIdentifier(plan.schema);
+          issues.push({
+            _tag: "InvalidVariable",
+            key: plan.runtimeKey ?? plan.key,
+            ...(schemaIdentifier === undefined ? {} : { schemaIdentifier }),
+            sensitive: plan.source?._tag === "resolver" || isRedactedSchema(plan.schema),
+          });
+          continue;
+        }
+
+        const decoded = decodedValue === undefined ? undefined : result.success;
         values.set(
           plan.key,
           plan.source?._tag === "resolver" && decoded !== undefined && !Redacted.isRedacted(decoded)

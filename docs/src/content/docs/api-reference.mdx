@@ -18,7 +18,8 @@ Creates an immutable server fragment. `options` accepts:
 ```
 
 The runtime source defaults to `process.env`. Values may contain static values,
-any Effect Schema, `fromEnv` definitions, and `fromResolver` definitions.
+Effect Schemas whose outputs are not functions, `fromEnv` definitions, and
+`fromResolver` definitions.
 
 ### `client(values, options?)`
 

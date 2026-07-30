@@ -1,9 +1,19 @@
 import { parse } from "dotenv";
+import { Schema } from "effect";
+
+import { mongoUrl, mysqlUrl, postgresUrl, redisUrl } from "../schemas.ts";
 
 import type { EnvironmentTarget, SchemaKind } from "./types.ts";
 
 const KNOWN_CLIENT_PREFIXES = ["VITE_", "EXPO_PUBLIC_", "PUBLIC_"] as const;
 const NUXT_CLIENT_PREFIX = "NUXT_PUBLIC_";
+const DATABASE_SCHEMAS = [
+  ["postgresUrl", postgresUrl],
+  ["redisUrl", redisUrl],
+  ["mongoUrl", mongoUrl],
+  ["mysqlUrl", mysqlUrl],
+] as const;
+const DATABASE_URL_SCHEME = /^(?:postgres(?:ql)?|rediss?|mongodb(?:\+srv)?|mysqls?):\/\//i;
 
 interface ParsedVariable {
   readonly runtimeKey: string;
@@ -50,17 +60,10 @@ function detectClientPrefix(
 function inferSchemaKind(key: string, value: string): SchemaKind {
   const normalized = value.trim();
   const lower = normalized.toLowerCase();
-  if (lower.startsWith("postgres://") || lower.startsWith("postgresql://")) {
-    return "postgresUrl";
-  }
-  if (lower.startsWith("redis://") || lower.startsWith("rediss://")) {
-    return "redisUrl";
-  }
-  if (lower.startsWith("mongodb://") || lower.startsWith("mongodb+srv://")) {
-    return "mongoUrl";
-  }
-  if (lower.startsWith("mysql://") || lower.startsWith("mysqls://")) {
-    return "mysqlUrl";
+  for (const [kind, schema] of DATABASE_SCHEMAS) {
+    if (Schema.is(schema)(normalized)) {
+      return kind;
+    }
   }
   try {
     const parsed = new URL(normalized);
@@ -148,20 +151,11 @@ function generateSource(variables: ReadonlyArray<GeneratedVariable>, clientPrefi
 /** Generates the safe default `env.ts` starter. */
 export function generateDefaultEnvSource(): string {
   return [
-    'import { client, createEnv, redacted, requiredString, server, url } from "@ayronforge/envil";',
+    'import { createEnv, redacted, requiredString, server } from "@ayronforge/envil";',
     "",
     "export const appEnv = createEnv(",
     "  server({",
     "    DATABASE_URL: redacted(requiredString),",
-    "  }),",
-    "",
-    "  client(",
-    "    {",
-    "      APP_URL: url,",
-    "    },",
-    "    {",
-    '      prefix: "VITE_",',
-    "    },",
     "  }),",
     ");",
     "",
@@ -185,8 +179,7 @@ export function generateEnvSourceFromDotenv(source: string, explicitClientPrefix
       );
     }
     const kind = inferSchemaKind(variable.runtimeKey, variable.value);
-    const connectionUrl =
-      kind === "postgresUrl" || kind === "redisUrl" || kind === "mongoUrl" || kind === "mysqlUrl";
+    const connectionUrl = DATABASE_URL_SCHEME.test(variable.value.trim());
     const schema =
       !isClient && (isSensitiveKey(logicalKey) || connectionUrl) ? `redacted(${kind})` : kind;
     return {

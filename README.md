@@ -2,7 +2,7 @@
 
 Type-safe environment validation for TypeScript applications, built on Effect
 Schema. Envil composes independent server, client, and shared contexts while
-preserving Effect errors, requirements, and arbitrary schemas.
+preserving Effect errors, requirements, and custom schemas.
 
 ```bash
 bun add @ayronforge/envil effect
@@ -112,8 +112,8 @@ preset supplies both the `EXPO_PUBLIC_` prefix and a compiler-backed runtime
 source whose keys become literal `process.env.EXPO_PUBLIC_*` references.
 
 `server` is a compiler boundary. The transform does not inspect schemas,
-spreads, factory functions, or resolver implementations, so every Effect Schema
-and ordinary custom resolver remains runtime code.
+spreads, factory functions, or resolver implementations, so every accepted
+Effect Schema and ordinary custom resolver remains runtime code.
 
 ## Runtime sources
 

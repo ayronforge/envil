@@ -38,14 +38,14 @@ afterEach(async () => {
 });
 
 describe("envil init", () => {
-  test("generates a Vite-prefixed starter without choosing its runtime", () => {
+  test("generates a server starter without choosing a client runtime", () => {
     const source = generateDefaultEnvSource();
 
     expect(source).toContain("export const appEnv = createEnv");
     expect(source).toContain("server({");
-    expect(source).toContain("client(");
     expect(source).toContain("DATABASE_URL: redacted(requiredString)");
-    expect(source).toContain('prefix: "VITE_"');
+    expect(source).not.toContain("client(");
+    expect(source).not.toContain("prefix:");
     expect(source).not.toContain("runtimeEnv:");
   });
 
@@ -80,6 +80,23 @@ describe("envil init", () => {
     expect(source).toContain("MYSQL_URL: redacted(mysqlUrl)");
     expect(source).toContain("SECRETARY_EMAIL: requiredString");
     expect(source).not.toContain("private-value");
+  });
+
+  test("falls back safely when database URLs do not satisfy their schemas", () => {
+    const source = generateEnvSourceFromDotenv(
+      [
+        "POSTGRES_URL=postgres://localhost/app",
+        "REDIS_URL=redis://",
+        "MONGO_URL=mongodb://",
+        "MYSQL_URL=mysql://localhost/app",
+      ].join("\n"),
+    );
+
+    expect(source.match(/redacted\(requiredString\)/g)).toHaveLength(4);
+    expect(source).not.toContain("postgresUrl");
+    expect(source).not.toContain("redisUrl");
+    expect(source).not.toContain("mongoUrl");
+    expect(source).not.toContain("mysqlUrl");
   });
 
   test("infers numeric port values before boolean shorthand", () => {
@@ -145,9 +162,9 @@ describe("envil init", () => {
     expect(exitCode).toBe(0);
     expect(stderr).toEqual([]);
     expect(stdout).toHaveLength(1);
-    expect(await readFile(path.join(directory, "env.ts"), "utf8")).toContain(
-      "export const appEnv = createEnv",
-    );
+    const outputPath = path.join(directory, "env.ts");
+    expect(await readFile(outputPath, "utf8")).toContain("export const appEnv = createEnv");
+    expect(renderEnvExample(inspectEnvContract(outputPath))).toBe("DATABASE_URL=\n");
   });
 });
 
@@ -331,6 +348,20 @@ describe("envil example", () => {
     );
 
     expect(() => inspectEnvContract(inputPath)).toThrow("string index signature");
+  });
+
+  test("normalizes numeric fragment keys to their runtime string form", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { createEnv, requiredString, server } from "../src/index.ts";',
+        "export const appEnv = createEnv(server({ 1: requiredString }));",
+      ].join("\n"),
+    );
+
+    expect(renderEnvExample(inspectEnvContract(inputPath))).toBe("1=\n");
   });
 
   test("CLI stderr omits compiler source details", async () => {

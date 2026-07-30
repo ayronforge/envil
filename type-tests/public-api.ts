@@ -45,6 +45,11 @@ const arbitrarySchema = Schema.String.pipe(
     encode: SchemaGetter.transform((value: number) => String(value)),
   }),
 );
+const functionSchema = Schema.declare<() => string>(
+  (value): value is () => string => typeof value === "function",
+);
+// @ts-expect-error Environment schemas cannot produce functions.
+server({ CALLBACK: functionSchema }, { runtimeEnv: { CALLBACK: () => "value" } });
 class SchemaPolicy extends Context.Service<
   SchemaPolicy,
   { readonly accepts: (value: string) => boolean }

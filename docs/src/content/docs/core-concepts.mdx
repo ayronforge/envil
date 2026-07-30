@@ -27,11 +27,12 @@ Fragments are the unit of composition and compilation. Their contents remain
 ordinary TypeScript expressions, so values may come from object spreads,
 factories, imported schemas, and custom resolver adapters.
 
-## Any Effect Schema
+## Effect Schema
 
-Every variable definition may use any Effect Schema, including transforms,
-refinements, asynchronous decoding, and schemas with context requirements.
-Schema errors and requirements are preserved in the resulting Effect type:
+Variable definitions may use Effect Schemas with transforms, refinements,
+asynchronous decoding, and context requirements. Schema outputs must not be
+functions. Schema errors and requirements are preserved in the resulting Effect
+type:
 
 ```ts
 const serverConfig = server({

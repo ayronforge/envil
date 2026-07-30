@@ -58,13 +58,8 @@ export function requestSecret(
 export function resolverRecord<Keys extends string>(
   entries: ReadonlyArray<readonly [Keys, ResolvedSecret]>,
 ): Readonly<Record<Keys, ResolvedSecret>> {
-  const result: Partial<Record<Keys, ResolvedSecret>> = {};
-  for (const [key, value] of entries) {
-    result[key] = value;
-  }
-
   // SAFETY: Every requested key is added exactly once by the adapter.
-  return Object.freeze(result) as Readonly<Record<Keys, ResolvedSecret>>;
+  return Object.freeze(Object.fromEntries(entries)) as Readonly<Record<Keys, ResolvedSecret>>;
 }
 
 /** Returns typed entries while preserving a finite resolver key union. */
