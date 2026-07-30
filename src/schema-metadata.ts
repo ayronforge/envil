@@ -21,6 +21,20 @@ function hasRedactedAnnotation(ast: SchemaAST.AST, visited: Set<SchemaAST.AST>):
   if (SchemaAST.isSuspend(ast)) {
     return hasRedactedAnnotation(ast.thunk(), visited);
   }
+  if (SchemaAST.isDeclaration(ast)) {
+    return ast.typeParameters.some((parameter) => hasRedactedAnnotation(parameter, visited));
+  }
+  if (SchemaAST.isArrays(ast)) {
+    return [...ast.elements, ...ast.rest].some((element) =>
+      hasRedactedAnnotation(element, visited),
+    );
+  }
+  if (SchemaAST.isObjects(ast)) {
+    return (
+      ast.propertySignatures.some((property) => hasRedactedAnnotation(property.type, visited)) ||
+      ast.indexSignatures.some((index) => hasRedactedAnnotation(index.type, visited))
+    );
+  }
 
   return false;
 }

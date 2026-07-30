@@ -416,12 +416,26 @@ type ResolverKeys<Values extends EnvValues> = {
       : Key
     : never;
 }[keyof Values];
+type ContainsRedacted<Value> =
+  Value extends Redacted.Redacted<unknown>
+    ? true
+    : Value extends readonly (infer Item)[]
+      ? ContainsRedacted<Item>
+      : Value extends (...arguments_: never[]) => unknown
+        ? false
+        : Value extends Readonly<Record<PropertyKey, unknown>>
+          ? true extends {
+              readonly [Key in keyof Value]: ContainsRedacted<Value[Key]>;
+            }[keyof Value]
+            ? true
+            : false
+          : false;
 type RedactedKeys<Values extends EnvValues> = {
   readonly [Key in keyof Values]: Values[Key] extends VariableDefinition
-    ? IsRedacted<Schema.Schema.Type<SchemaOf<Values[Key]>>> extends true
+    ? true extends ContainsRedacted<Schema.Schema.Type<SchemaOf<Values[Key]>>>
       ? Key
       : never
-    : IsRedacted<Values[Key]> extends true
+    : true extends ContainsRedacted<Values[Key]>
       ? Key
       : never;
 }[keyof Values];

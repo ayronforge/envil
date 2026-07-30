@@ -82,6 +82,14 @@ describe("envil init", () => {
     expect(source).not.toContain("private-value");
   });
 
+  test("infers numeric port values before boolean shorthand", () => {
+    const source = generateEnvSourceFromDotenv("PORT=1\nADMIN_PORT=0\nENABLED=1\n");
+
+    expect(source).toContain("PORT: port");
+    expect(source).toContain("ADMIN_PORT: port");
+    expect(source).toContain("ENABLED: boolean");
+  });
+
   test("rejects ambiguous known client prefixes without exposing values", () => {
     const secret = "private-value";
     expect(() =>
@@ -308,6 +316,21 @@ describe("envil example", () => {
     expect(() => inspectEnvContract(inputPath)).toThrow(
       "Envil could not determine the generated variable names. Keep prefixes and environment names as string literals instead of typing them as string.",
     );
+  });
+
+  test("rejects widened fragment records instead of emitting an empty example", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { createEnv, requiredString, server } from "../src/index.ts";',
+        "const values: Record<string, typeof requiredString> = { PORT: requiredString };",
+        "export const appEnv = createEnv(server(values));",
+      ].join("\n"),
+    );
+
+    expect(() => inspectEnvContract(inputPath)).toThrow("string index signature");
   });
 
   test("CLI stderr omits compiler source details", async () => {

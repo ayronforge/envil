@@ -8,6 +8,7 @@ export interface ImportedBindings {
   readonly server: ReadonlySet<ts.Symbol>;
   readonly client: ReadonlySet<ts.Symbol>;
   readonly configureResolver: ReadonlySet<ts.Symbol>;
+  readonly fromEnv: ReadonlySet<ts.Symbol>;
   readonly envilNamespaces: ReadonlySet<ts.Symbol>;
   readonly expo: ReadonlySet<ts.Symbol>;
   readonly presetNamespaces: ReadonlySet<ts.Symbol>;
@@ -43,6 +44,7 @@ function importedBindings(sourceFile: ts.SourceFile, checker: ts.TypeChecker): I
   const server = new Set<ts.Symbol>();
   const client = new Set<ts.Symbol>();
   const configureResolver = new Set<ts.Symbol>();
+  const fromEnv = new Set<ts.Symbol>();
   const envilNamespaces = new Set<ts.Symbol>();
   const expo = new Set<ts.Symbol>();
   const presetNamespaces = new Set<ts.Symbol>();
@@ -74,6 +76,8 @@ function importedBindings(sourceFile: ts.SourceFile, checker: ts.TypeChecker): I
         addImportedSymbol(client, element.name, checker);
       } else if (moduleName === envilModuleName && importedName === "configureResolver") {
         addImportedSymbol(configureResolver, element.name, checker);
+      } else if (moduleName === envilModuleName && importedName === "fromEnv") {
+        addImportedSymbol(fromEnv, element.name, checker);
       } else if (moduleName === presetsModuleName && importedName === "expo") {
         addImportedSymbol(expo, element.name, checker);
       }
@@ -84,6 +88,7 @@ function importedBindings(sourceFile: ts.SourceFile, checker: ts.TypeChecker): I
     server,
     client,
     configureResolver,
+    fromEnv,
     envilNamespaces,
     expo,
     presetNamespaces,

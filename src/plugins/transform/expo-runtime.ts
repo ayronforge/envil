@@ -44,7 +44,40 @@ function propertyNameText(name: ts.PropertyName): string | undefined {
   return undefined;
 }
 
-function expoRuntimeKeys(values: ts.Expression): ReadonlyArray<string> {
+function explicitRuntimeKey(
+  expression: ts.Expression,
+  context: TransformContext,
+): string | undefined {
+  let runtimeKey: string | undefined;
+
+  function visit(node: ts.Node): void {
+    if (
+      ts.isCallExpression(node) &&
+      isImportedMember(
+        node.expression,
+        "fromEnv",
+        context.bindings.fromEnv,
+        context.bindings.envilNamespaces,
+        context.checker,
+      )
+    ) {
+      const name = node.arguments[0];
+      if (name === undefined || !ts.isStringLiteralLike(name) || runtimeKey !== undefined) {
+        throw new Error(
+          "Envil's Expo compiler requires fromEnv() to contain one literal environment name.",
+        );
+      }
+      runtimeKey = name.text;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(expression);
+  return runtimeKey;
+}
+
+function expoRuntimeKeys(values: ts.Expression, context: TransformContext): ReadonlyArray<string> {
   if (!ts.isObjectLiteralExpression(values)) {
     throw new Error(
       "Envil's Expo compiler requires the client schema to be an inline object literal.",
@@ -54,13 +87,20 @@ function expoRuntimeKeys(values: ts.Expression): ReadonlyArray<string> {
   const keys: string[] = [];
   const seen = new Set<string>();
   for (const property of values.properties) {
-    if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property)) {
+    if (!ts.isPropertyAssignment(property)) {
       throw new Error(
         "Envil's Expo compiler requires explicit client schema properties without spreads or computed keys.",
       );
     }
     const logicalKey = propertyNameText(property.name);
-    const runtimeKey = logicalKey === undefined ? undefined : `${expoPrefix}${logicalKey}`;
+    const explicitKey = explicitRuntimeKey(property.initializer, context);
+    const runtimeKey =
+      explicitKey ?? (logicalKey === undefined ? undefined : `${expoPrefix}${logicalKey}`);
+    if (explicitKey !== undefined && !explicitKey.startsWith(expoPrefix)) {
+      throw new Error(
+        `Envil's Expo compiler requires fromEnv() names to start with "${expoPrefix}".`,
+      );
+    }
     if (
       runtimeKey === undefined ||
       !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(runtimeKey) ||
@@ -155,7 +195,7 @@ export function collectExpoRuntimeReplacements(
             context,
             options,
             kind,
-            expoRuntimeKeys(values),
+            expoRuntimeKeys(values, context),
           );
           if (replacement !== undefined) {
             replacements.push({

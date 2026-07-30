@@ -20,6 +20,7 @@ import {
   extendEnv,
   fromEnv,
   fromResolver,
+  json,
   optional,
   redacted,
   requiredString,
@@ -77,6 +78,11 @@ function verifyStaticValueTypes(): void {
   server({ CONFIG: { enabled: true } });
   // @ts-expect-error Raw structured client values require an Effect Schema.
   client({ CONFIG: ["public"] });
+  // @ts-expect-error Client schemas cannot produce nested redacted values.
+  client(
+    { CONFIG: Schema.Struct({ token: redacted(requiredString) }) },
+    { runtimeEnv: { CONFIG: { token: "secret" } } },
+  );
   // @ts-expect-error Shared values cannot contain Effect values recursively.
   shared({ CONFIG: { token: Redacted.make("secret") } });
   // @ts-expect-error Shared values cannot contain Effect Schemas recursively.
@@ -317,6 +323,34 @@ describe("environment composition", () => {
       CLIENT_CONFIG: { enabled: false },
     });
     expect(Effect.runSync(appEnv.client).CLIENT_CONFIG).toEqual({ enabled: false });
+  });
+
+  test("rejects client schemas that produce nested redacted values", () => {
+    const nestedSecret = json(
+      Schema.Struct({
+        token: redacted(requiredString),
+      }),
+    );
+    const fragment: unknown = Reflect.apply(client, undefined, [
+      { CONFIG: nestedSecret },
+      { runtimeEnv: { CONFIG: '{"token":"secret"}' } },
+    ]);
+    const appEnv: unknown = Reflect.apply(createEnv, undefined, [fragment]);
+    if (typeof appEnv !== "object" || appEnv === null) {
+      throw new Error("Expected an AppEnv");
+    }
+    const clientEffect = Reflect.get(appEnv, "client");
+    if (!Effect.isEffect(clientEffect)) {
+      throw new Error("Expected a client Effect");
+    }
+
+    const result = Effect.runSync(Effect.result(clientEffect));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(EnvConfigurationError);
+      expect(String(result.failure)).toContain("redacted in a client fragment");
+      expect(String(result.failure)).not.toContain("secret");
+    }
   });
 
   test("rejects nested Effect values from shared when JavaScript bypasses the types", () => {

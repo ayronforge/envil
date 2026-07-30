@@ -70,14 +70,13 @@ function inferSchemaKind(key: string, value: string): SchemaKind {
   } catch {
     // The value is not a URL and falls through to the scalar checks.
   }
+  if (/^[+-]?\d+$/.test(normalized) && key.toUpperCase().includes("PORT")) {
+    return "port";
+  }
   if (["true", "false", "1", "0"].includes(lower)) {
     return "boolean";
   }
   if (/^[+-]?\d+$/.test(normalized)) {
-    const numericValue = Number(normalized);
-    if (key.toUpperCase().includes("PORT") && numericValue >= 1 && numericValue <= 65535) {
-      return "port";
-    }
     return "integer";
   }
   if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(normalized)) {
