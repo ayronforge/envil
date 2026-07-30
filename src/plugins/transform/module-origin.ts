@@ -144,7 +144,21 @@ export function createExportOriginResolver(resolveModule: ModuleResolver): Expor
         if (
           !ts.isImportDeclaration(imported) ||
           imported.importClause?.isTypeOnly === true ||
-          !ts.isStringLiteral(imported.moduleSpecifier) ||
+          !ts.isStringLiteral(imported.moduleSpecifier)
+        ) {
+          continue;
+        }
+        if (imported.importClause?.name?.text === localName) {
+          const origin = await originOf(
+            imported.moduleSpecifier.text,
+            fileName,
+            "default",
+            nextVisiting,
+          );
+          origins.set(key, origin ?? null);
+          return origin;
+        }
+        if (
           imported.importClause?.namedBindings === undefined ||
           !ts.isNamedImports(imported.importClause.namedBindings)
         ) {

@@ -100,11 +100,22 @@ describe("envil init", () => {
   });
 
   test("infers numeric port values before boolean shorthand", () => {
-    const source = generateEnvSourceFromDotenv("PORT=1\nADMIN_PORT=0\nENABLED=1\n");
+    const source = generateEnvSourceFromDotenv("PORT=1\nADMIN_PORT=3000\nENABLED=0\n");
 
     expect(source).toContain("PORT: port");
     expect(source).toContain("ADMIN_PORT: port");
     expect(source).toContain("ENABLED: boolean");
+  });
+
+  test("infers schemas only from values their decoders accept", () => {
+    const source = generateEnvSourceFromDotenv(
+      'ENABLED=" true "\nDATABASE_URL=" postgres://user:password@host:5432/app "\nPORT=" 3000 "\n',
+    );
+
+    expect(source).toContain("ENABLED: requiredString");
+    expect(source).toContain("DATABASE_URL: redacted(requiredString)");
+    expect(source).toContain("PORT: port");
+    expect(source).not.toContain("postgresUrl");
   });
 
   test("rejects ambiguous known client prefixes without exposing values", () => {
@@ -347,7 +358,22 @@ describe("envil example", () => {
       ].join("\n"),
     );
 
-    expect(() => inspectEnvContract(inputPath)).toThrow("string index signature");
+    expect(() => inspectEnvContract(inputPath)).toThrow("index signature");
+  });
+
+  test("rejects widened numeric fragment records instead of emitting an empty example", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { createEnv, requiredString, server } from "../src/index.ts";',
+        "const values: Record<number, typeof requiredString> = { 1: requiredString };",
+        "export const appEnv = createEnv(server(values));",
+      ].join("\n"),
+    );
+
+    expect(() => inspectEnvContract(inputPath)).toThrow("index signature");
   });
 
   test("normalizes numeric fragment keys to their runtime string form", async () => {

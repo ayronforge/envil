@@ -415,6 +415,23 @@ describe("lazy runtime boundaries", () => {
     expect(reads).toBe(1);
   });
 
+  test("treats object sources with get and has methods as records", () => {
+    const appEnv = createEnv(
+      server(
+        { TOKEN: requiredString },
+        {
+          runtimeEnv: {
+            TOKEN: "record-value",
+            get: () => "map-value",
+            has: () => true,
+          },
+        },
+      ),
+    );
+
+    expect(Effect.runSync(appEnv.server).TOKEN).toBe("record-value");
+  });
+
   test("fromEnv overrides a fragment prefix", () => {
     const appEnv = createEnv(
       client(

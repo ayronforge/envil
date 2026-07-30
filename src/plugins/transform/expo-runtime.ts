@@ -119,7 +119,7 @@ function expoOptionsReplacements(
   }
   const replacements: Replacement[] = [];
   let hasExpoSpread = false;
-  let prefixOverride: ts.Expression | undefined;
+  let prefixOverride: ts.Expression | "spread" | undefined;
   for (const property of options.properties) {
     if (ts.isSpreadAssignment(property) && isExpoExpression(property.expression, context)) {
       hasExpoSpread = true;
@@ -136,6 +136,10 @@ function expoOptionsReplacements(
     if (!hasExpoSpread) {
       continue;
     }
+    if (ts.isSpreadAssignment(property)) {
+      prefixOverride = "spread";
+      continue;
+    }
     const initializer =
       ts.isPropertyAssignment(property) && propertyNameText(property.name) === "prefix"
         ? property.initializer
@@ -148,7 +152,9 @@ function expoOptionsReplacements(
   }
   if (
     prefixOverride !== undefined &&
-    (!ts.isStringLiteralLike(prefixOverride) || prefixOverride.text !== expoPrefix)
+    (prefixOverride === "spread" ||
+      !ts.isStringLiteralLike(prefixOverride) ||
+      prefixOverride.text !== expoPrefix)
   ) {
     throw new Error(
       `Envil's Expo compiler does not support overriding the preset prefix "${expoPrefix}".`,

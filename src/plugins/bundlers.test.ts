@@ -90,6 +90,14 @@ export const dependencyFragment = server(
     `export { server as default } from "@ayronforge/envil";\n`,
   );
   await writeFile(
+    join(root, "default-server-intermediate.ts"),
+    `
+import server from "./default-server-barrel.ts";
+
+export { server as serverFragment };
+`,
+  );
+  await writeFile(
     join(root, "envil-core.ts"),
     `
 export {
@@ -135,7 +143,7 @@ export const server = (value) => value;
 import { Effect, Option, Redacted } from "effect";
 import { dependencyFragment } from "envil-definitions";
 import * as mixed from "./mixed-barrel.ts";
-import defaultServer from "./default-server-barrel.ts";
+import { serverFragment as defaultServer } from "./default-server-intermediate.ts";
 import { defaultServerValue } from "./default-server-only.ts";
 import {
   client,

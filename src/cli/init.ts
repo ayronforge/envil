@@ -1,7 +1,17 @@
 import { parse } from "dotenv";
-import { Schema } from "effect";
+import { Option, Schema } from "effect";
 
-import { mongoUrl, mysqlUrl, postgresUrl, redisUrl } from "../schemas.ts";
+import {
+  boolean,
+  integer,
+  mongoUrl,
+  mysqlUrl,
+  number,
+  port,
+  postgresUrl,
+  redisUrl,
+  url,
+} from "../schemas.ts";
 
 import type { EnvironmentTarget, SchemaKind } from "./types.ts";
 
@@ -58,31 +68,27 @@ function detectClientPrefix(
 }
 
 function inferSchemaKind(key: string, value: string): SchemaKind {
-  const normalized = value.trim();
-  const lower = normalized.toLowerCase();
   for (const [kind, schema] of DATABASE_SCHEMAS) {
-    if (Schema.is(schema)(normalized)) {
+    if (Option.isSome(Schema.decodeUnknownOption(schema)(value))) {
       return kind;
     }
   }
-  try {
-    const parsed = new URL(normalized);
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-      return "url";
-    }
-  } catch {
-    // The value is not a URL and falls through to the scalar checks.
+  if (Option.isSome(Schema.decodeUnknownOption(url)(value))) {
+    return "url";
   }
-  if (/^[+-]?\d+$/.test(normalized) && key.toUpperCase().includes("PORT")) {
+  if (
+    key.toUpperCase().includes("PORT") &&
+    Option.isSome(Schema.decodeUnknownOption(port)(value))
+  ) {
     return "port";
   }
-  if (["true", "false", "1", "0"].includes(lower)) {
+  if (Option.isSome(Schema.decodeUnknownOption(boolean)(value))) {
     return "boolean";
   }
-  if (/^[+-]?\d+$/.test(normalized)) {
+  if (Option.isSome(Schema.decodeUnknownOption(integer)(value))) {
     return "integer";
   }
-  if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(normalized)) {
+  if (Option.isSome(Schema.decodeUnknownOption(number)(value))) {
     return "number";
   }
   return "requiredString";

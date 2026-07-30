@@ -94,9 +94,9 @@ function inspectTarget(
   }
 
   const targetType = checker.getTypeOfSymbolAtLocation(targetProperty, targetDeclaration);
-  if (targetType.getStringIndexType() !== undefined) {
+  if (checker.getIndexInfosOfType(targetType).length > 0) {
     throw new Error(
-      "Envil cannot inspect an environment contract with a string index signature. Keep fragment values as inferred object literals instead of widening them to Record<string, ...>.",
+      "Envil cannot inspect an environment contract with an index signature. Keep fragment values as inferred object literals instead of widening them to Record<...>.",
     );
   }
   return checker.getPropertiesOfType(targetType).map((variable) => {
