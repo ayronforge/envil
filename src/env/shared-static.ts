@@ -1,6 +1,7 @@
 import { Redacted } from "effect";
 
-const invalidSharedStaticValue = Symbol("@ayronforge/envil/invalid-shared-static-value");
+/** Marks shared data that failed snapshot validation. */
+export const INVALID_SHARED_STATIC_VALUE = Symbol("@ayronforge/envil/invalid-shared-static-value");
 
 function isStaticScalar(value: unknown): boolean {
   return (
@@ -12,89 +13,62 @@ function isStaticScalar(value: unknown): boolean {
   );
 }
 
-/** Returns whether a value is recursively safe public data for a shared fragment. */
-export function isSharedStaticValue(
+/** Copies and freezes recursively static public data in one pass. */
+export function snapshotSharedStaticValue(
   value: unknown,
   ancestors: ReadonlySet<object> = new Set(),
-): boolean {
+): unknown {
   if (isStaticScalar(value)) {
-    return true;
+    return value;
   }
-  if (typeof value !== "object" || value === null || Redacted.isRedacted(value)) {
-    return false;
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Redacted.isRedacted(value) ||
+    ancestors.has(value)
+  ) {
+    return INVALID_SHARED_STATIC_VALUE;
   }
 
+  const isArray = Array.isArray(value);
   const prototype = Object.getPrototypeOf(value);
-  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
-    return false;
-  }
-  if (ancestors.has(value)) {
-    return false;
+  if (!isArray && prototype !== Object.prototype && prototype !== null) {
+    return INVALID_SHARED_STATIC_VALUE;
   }
 
-  const nextAncestors = new Set(ancestors);
-  nextAncestors.add(value);
+  const nextAncestors = new Set(ancestors).add(value);
+  const properties: Array<readonly [string, unknown]> = [];
   for (const key of Reflect.ownKeys(value)) {
-    if (typeof key !== "string") {
-      return false;
-    }
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (
-      descriptor === undefined ||
-      !("value" in descriptor) ||
-      !isSharedStaticValue(descriptor.value, nextAncestors)
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function snapshotValidatedSharedValue(value: unknown): unknown {
-  if (isStaticScalar(value)) {
-    return value;
-  }
-  if (typeof value !== "object" || value === null) {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    const snapshot: unknown[] = [];
-    snapshot.length = value.length;
-    for (const key of Reflect.ownKeys(value)) {
-      if (key === "length") {
-        continue;
-      }
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (descriptor === undefined || !("value" in descriptor)) {
-        continue;
-      }
-      Object.defineProperty(snapshot, key, {
-        ...descriptor,
-        value: snapshotValidatedSharedValue(descriptor.value),
-      });
-    }
-    return Object.freeze(snapshot);
-  }
-
-  // SAFETY: isSharedStaticValue accepts only plain objects with Object.prototype or null.
-  const snapshot = Object.create(Object.getPrototypeOf(value)) as Record<string, unknown>;
-  for (const key of Reflect.ownKeys(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (descriptor === undefined || !("value" in descriptor)) {
+    if (isArray && key === "length") {
       continue;
     }
+    if (typeof key !== "string") {
+      return INVALID_SHARED_STATIC_VALUE;
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+      return INVALID_SHARED_STATIC_VALUE;
+    }
+    const property = snapshotSharedStaticValue(descriptor.value, nextAncestors);
+    if (property === INVALID_SHARED_STATIC_VALUE) {
+      return INVALID_SHARED_STATIC_VALUE;
+    }
+    properties.push([key, property]);
+  }
+
+  if (!isArray) {
+    return Object.freeze(Object.fromEntries(properties));
+  }
+
+  const snapshot: unknown[] = [];
+  snapshot.length = value.length;
+  for (const [key, item] of properties) {
     Object.defineProperty(snapshot, key, {
-      ...descriptor,
-      value: snapshotValidatedSharedValue(descriptor.value),
+      configurable: true,
+      enumerable: true,
+      value: item,
+      writable: true,
     });
   }
   return Object.freeze(snapshot);
-}
-
-/** Snapshots valid shared data and replaces invalid data for later typed validation. */
-export function snapshotSharedStaticValue(value: unknown): unknown {
-  return isSharedStaticValue(value)
-    ? snapshotValidatedSharedValue(value)
-    : invalidSharedStaticValue;
 }
