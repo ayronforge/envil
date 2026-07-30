@@ -35,6 +35,8 @@ Useful options:
 
 Values are held only in memory and are never copied into generated TypeScript.
 Connection URLs and credential-like server names are redacted automatically.
+The generated definition includes inferred schemas and any detected client
+prefix, but leaves `runtimeEnv` for the application to configure explicitly.
 
 ## `envil example`
 

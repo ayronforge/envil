@@ -116,9 +116,6 @@ function generateSource(variables: ReadonlyArray<GeneratedVariable>, clientPrefi
   }
   const lines = [
     `import { ${[...helpers].sort().join(", ")} } from "@ayronforge/envil";`,
-    ...(clientPrefix === "EXPO_PUBLIC_"
-      ? ['import { expo } from "@ayronforge/envil/presets";']
-      : []),
     "",
     "export const appEnv = createEnv(",
   ];
@@ -135,20 +132,8 @@ function generateSource(variables: ReadonlyArray<GeneratedVariable>, clientPrefi
       lines.push(`      ${quoteKey(variable.logicalKey)}: ${variable.schema},`);
     }
     lines.push("    },");
-    if (target === "client") {
-      if (clientPrefix === "EXPO_PUBLIC_") {
-        lines.push("    expo,");
-      } else {
-        const runtimeExpression =
-          clientPrefix === "VITE_" || clientPrefix === "PUBLIC_"
-            ? "import.meta.env"
-            : "process.env";
-        lines.push("    {", `      runtimeEnv: ${runtimeExpression},`);
-        if (clientPrefix.length > 0) {
-          lines.push(`      prefix: ${JSON.stringify(clientPrefix)},`);
-        }
-        lines.push("    },");
-      }
+    if (target === "client" && clientPrefix.length > 0) {
+      lines.push("    {", `      prefix: ${JSON.stringify(clientPrefix)},`, "    },");
     }
     lines.push("  ),", "");
   }
@@ -175,7 +160,6 @@ export function generateDefaultEnvSource(): string {
     "      APP_URL: url,",
     "    },",
     "    {",
-    "      runtimeEnv: import.meta.env,",
     '      prefix: "VITE_",',
     "    },",
     "  }),",

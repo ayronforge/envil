@@ -186,7 +186,12 @@ function groupResolverVariables(plans: ReadonlyArray<VariablePlan>): ReadonlyArr
       });
       continue;
     }
-    existing.referencesByKey[plan.key] = plan.source.reference;
+    Object.defineProperty(existing.referencesByKey, plan.key, {
+      value: plan.source.reference,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
   }
 
   return [...groups.values()];

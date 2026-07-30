@@ -1,48 +1,130 @@
-import { createUnplugin } from "unplugin";
+import { dirname } from "node:path";
+
+import type { PluginContext as RolldownPluginContext } from "rolldown";
+import type { PluginContext as RollupPluginContext } from "rollup";
+import { createUnplugin, type NativeBuildContext } from "unplugin";
 
 import {
   transformEnvilModule,
+  transformResolvedEnvilModule,
   type EnvilBuildTarget,
   type EnvilPluginOptions,
 } from "./transform.ts";
+import type { ModuleResolver } from "./transform/ast.ts";
 
 const pluginName = "@ayronforge/envil";
 
-function transformForTarget(code: string, id: string, target: EnvilBuildTarget) {
-  const transformed = transformEnvilModule(code, id, target);
+function nativeModuleResolver(context: NativeBuildContext): ModuleResolver | undefined {
+  if (context.framework === "esbuild") {
+    return async (specifier, importer) => {
+      const resolved = await context.build.resolve(specifier, {
+        kind: "import-statement",
+        resolveDir: dirname(importer),
+      });
+      return resolved.errors.length > 0 || resolved.external || resolved.path === ""
+        ? undefined
+        : resolved.path;
+    };
+  }
+  if (context.framework === "webpack") {
+    const resolve = context.loaderContext?.getResolve({ dependencyType: "esm" });
+    return resolve === undefined
+      ? undefined
+      : async (specifier, importer) => resolve(dirname(importer), specifier);
+  }
+  if (context.framework === "rspack") {
+    const loaderContext = context.loaderContext;
+    return loaderContext === undefined
+      ? undefined
+      : (specifier, importer) =>
+          new Promise((resolve, reject) => {
+            loaderContext.resolve(dirname(importer), specifier, (error, resolved) => {
+              if (error !== null && error !== undefined) {
+                reject(error);
+                return;
+              }
+              resolve(typeof resolved === "string" ? resolved : undefined);
+            });
+          });
+  }
+  return undefined;
+}
+
+function rollupModuleResolver(context: RollupPluginContext): ModuleResolver {
+  return async (specifier, importer) => {
+    const resolved = await context.resolve(specifier, importer, { skipSelf: true });
+    if (resolved === null || resolved.external) {
+      return undefined;
+    }
+    context.addWatchFile(resolved.id);
+    return resolved.id;
+  };
+}
+
+function rolldownModuleResolver(context: RolldownPluginContext): ModuleResolver {
+  return async (specifier, importer) => {
+    const resolved = await context.resolve(specifier, importer, { skipSelf: true });
+    if (resolved === null || resolved.external) {
+      return undefined;
+    }
+    context.addWatchFile(resolved.id);
+    return resolved.id;
+  };
+}
+
+async function transformForTarget(
+  code: string,
+  id: string,
+  target: EnvilBuildTarget,
+  resolveModule?: ModuleResolver,
+) {
+  const transformed =
+    resolveModule === undefined
+      ? transformEnvilModule(code, id, target)
+      : await transformResolvedEnvilModule(code, id, target, resolveModule);
   return transformed === undefined ? undefined : { code: transformed, map: null };
 }
 
-export const envilUnplugin = createUnplugin<EnvilPluginOptions | undefined>((options, meta) => {
+export const envilUnplugin = createUnplugin<EnvilPluginOptions | undefined>((options) => {
   const defaultTarget = options?.target ?? "client";
-
-  if (meta.framework === "vite") {
-    return {
-      name: pluginName,
-      enforce: "pre",
-      vite: {
-        config: () => ({
-          optimizeDeps: {
-            exclude: ["@ayronforge/envil"],
-          },
-        }),
-        transform(
-          code: string,
-          id: string,
-          transformOptions: { readonly ssr?: boolean } | undefined,
-        ) {
-          const target = transformOptions?.ssr ? "server" : "client";
-          return transformForTarget(code, id, target);
-        },
-      },
-    };
-  }
 
   return {
     name: pluginName,
     enforce: "pre",
-    transform(code, id) {
-      return transformForTarget(code, id, defaultTarget);
+    async transform(code, id) {
+      const nativeContext = this.getNativeBuildContext?.();
+      return transformForTarget(
+        code,
+        id,
+        defaultTarget,
+        nativeContext === undefined ? undefined : nativeModuleResolver(nativeContext),
+      );
+    },
+    rollup: {
+      async transform(this: RollupPluginContext, code, id) {
+        return transformForTarget(code, id, defaultTarget, rollupModuleResolver(this));
+      },
+    },
+    rolldown: {
+      async transform(this: RolldownPluginContext, code, id) {
+        return transformForTarget(code, id, defaultTarget, rolldownModuleResolver(this));
+      },
+    },
+    vite: {
+      config: () => ({
+        optimizeDeps: {
+          exclude: ["@ayronforge/envil"],
+        },
+      }),
+      async transform(
+        this: RollupPluginContext,
+        code: string,
+        id: string,
+        transformOptions: { readonly ssr?: boolean } | undefined,
+      ) {
+        const target = transformOptions?.ssr ? "server" : "client";
+        return transformForTarget(code, id, target, rollupModuleResolver(this));
+      },
     },
   };
 });

@@ -34,6 +34,39 @@ export const readServerValue = () => "IMPORTED_SERVER_ONLY_SENTINEL";
 `,
     );
     await writeFile(
+      join(root, "envil-core.ts"),
+      `
+export {
+  client as clientFragment,
+  configureResolver as configure,
+  createEnv as makeEnv,
+  extendEnv as extend,
+  fromEnv as runtimeName,
+  fromResolver as secretReference,
+  requiredString as stringValue,
+  server as serverFragment,
+  shared as sharedFragment,
+} from "@ayronforge/envil";
+`,
+    );
+    await writeFile(
+      join(root, "envil-barrel.ts"),
+      `
+export {
+  clientFragment as client,
+  configure as configureResolver,
+  makeEnv as createEnv,
+  extend as extendEnv,
+  runtimeName as fromEnv,
+  secretReference as fromResolver,
+  stringValue as requiredString,
+  serverFragment as server,
+  sharedFragment as shared,
+} from "./envil-core.ts";
+`,
+    );
+    await writeFile(join(root, "envil-package.ts"), `export * from "./envil-barrel.ts";\n`);
+    await writeFile(
       entry,
       `
 import { Effect, Option, Redacted } from "effect";
@@ -47,7 +80,7 @@ import {
   requiredString,
   server,
   shared,
-} from "@ayronforge/envil";
+} from "#envil-barrel";
 import { readServerValue } from "./server-only.ts";
 
 const baseEnv = createEnv(
@@ -113,6 +146,10 @@ export const revealRedacted = (value) => Redacted.value(value);
       plugins: [envil()],
       resolve: {
         alias: [
+          {
+            find: "#envil-barrel",
+            replacement: join(root, "envil-package.ts"),
+          },
           {
             find: "@ayronforge/envil",
             replacement: resolve(import.meta.dir, "../index.ts"),

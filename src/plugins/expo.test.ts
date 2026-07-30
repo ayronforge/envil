@@ -38,4 +38,28 @@ client({ APP_URL: requiredString }, expo);
       }
     }
   });
+
+  test("does not guess import identity without Metro's resolver", () => {
+    const source = `
+import { client, expo, fromEnv, requiredString } from "./envil-barrel.ts";
+client(
+  { URL: requiredString.pipe(fromEnv("EXPO_PUBLIC_API_URL")) },
+  expo,
+);
+`;
+    const result = transformSync(source, {
+      caller: {
+        name: "metro",
+        bundler: "metro",
+        platform: "ios",
+        isDev: false,
+        isServer: false,
+      },
+      filename: "src/env.ts",
+      plugins: [envilExpoPlugin],
+      presets: ["babel-preset-expo"],
+    });
+
+    expect(result?.code).not.toContain("process.env.EXPO_PUBLIC_API_URL");
+  });
 });

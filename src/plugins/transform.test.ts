@@ -165,6 +165,26 @@ export const appEnv = createEnv(
     expect(transformed).not.toContain('"EXPO_PUBLIC_URL": process.env.EXPO_PUBLIC_URL');
   });
 
+  test("compiles Expo runtime at the spread position", () => {
+    const source = `
+import { client, requiredString } from "@ayronforge/envil";
+import { expo } from "@ayronforge/envil/presets";
+
+const customEnv = {};
+const overrides = {};
+client({ URL: requiredString }, { runtimeEnv: customEnv, ...expo });
+client({ URL: requiredString }, { ...expo, runtimeEnv: customEnv });
+client({ URL: requiredString }, { ...expo, ...overrides });
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+    const compiledExpo =
+      '...{ ...expo, runtimeEnv: { "EXPO_PUBLIC_URL": process.env.EXPO_PUBLIC_URL } }';
+
+    expect(transformed).toContain(`runtimeEnv: customEnv, ${compiledExpo}`);
+    expect(transformed).toContain(`${compiledExpo}, runtimeEnv: customEnv`);
+    expect(transformed).toContain(`${compiledExpo}, ...overrides`);
+  });
+
   test("fails closed when Expo client keys are not statically enumerable", () => {
     const source = `
 import { client, requiredString } from "@ayronforge/envil";

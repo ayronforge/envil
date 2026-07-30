@@ -1,9 +1,18 @@
 import ts from "typescript6";
 
+import {
+  createExportOriginResolver,
+  terminalOrigin,
+  type IntrinsicName,
+  type ModuleResolver,
+} from "./module-origin.ts";
+
 const envilModuleName = "@ayronforge/envil";
 const presetsModuleName = "@ayronforge/envil/presets";
 
-/** Envil imports proven by symbols in one source file. */
+export type { IntrinsicName, ModuleResolver } from "./module-origin.ts";
+
+/** Envil import bindings proven within one source file. */
 export interface ImportedBindings {
   readonly server: ReadonlySet<ts.Symbol>;
   readonly client: ReadonlySet<ts.Symbol>;
@@ -21,7 +30,7 @@ export interface Replacement {
   readonly text: string;
 }
 
-/** Parsed single-file compiler state shared by target transforms. */
+/** Parsed compiler state shared by target transforms. */
 export interface TransformContext {
   readonly code: string;
   readonly sourceFile: ts.SourceFile;
@@ -29,70 +38,38 @@ export interface TransformContext {
   readonly bindings: ImportedBindings;
 }
 
-function addImportedSymbol(
-  bindings: Set<ts.Symbol>,
+interface MutableBindings {
+  readonly server: Set<ts.Symbol>;
+  readonly client: Set<ts.Symbol>;
+  readonly configureResolver: Set<ts.Symbol>;
+  readonly fromEnv: Set<ts.Symbol>;
+  readonly envilNamespaces: Set<ts.Symbol>;
+  readonly expo: Set<ts.Symbol>;
+  readonly presetNamespaces: Set<ts.Symbol>;
+}
+
+function emptyBindings(): MutableBindings {
+  return {
+    server: new Set(),
+    client: new Set(),
+    configureResolver: new Set(),
+    fromEnv: new Set(),
+    envilNamespaces: new Set(),
+    expo: new Set(),
+    presetNamespaces: new Set(),
+  };
+}
+
+function addBinding(
+  bindings: MutableBindings,
+  intrinsic: IntrinsicName,
   identifier: ts.Identifier,
   checker: ts.TypeChecker,
 ): void {
   const symbol = checker.getSymbolAtLocation(identifier);
   if (symbol !== undefined) {
-    bindings.add(symbol);
+    bindings[intrinsic].add(symbol);
   }
-}
-
-function importedBindings(sourceFile: ts.SourceFile, checker: ts.TypeChecker): ImportedBindings {
-  const server = new Set<ts.Symbol>();
-  const client = new Set<ts.Symbol>();
-  const configureResolver = new Set<ts.Symbol>();
-  const fromEnv = new Set<ts.Symbol>();
-  const envilNamespaces = new Set<ts.Symbol>();
-  const expo = new Set<ts.Symbol>();
-  const presetNamespaces = new Set<ts.Symbol>();
-
-  for (const statement of sourceFile.statements) {
-    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) {
-      continue;
-    }
-    const moduleName = statement.moduleSpecifier.text;
-    const namedBindings = statement.importClause?.namedBindings;
-    if (namedBindings === undefined) {
-      continue;
-    }
-
-    if (ts.isNamespaceImport(namedBindings)) {
-      if (moduleName === envilModuleName) {
-        addImportedSymbol(envilNamespaces, namedBindings.name, checker);
-      } else if (moduleName === presetsModuleName) {
-        addImportedSymbol(presetNamespaces, namedBindings.name, checker);
-      }
-      continue;
-    }
-
-    for (const element of namedBindings.elements) {
-      const importedName = element.propertyName?.text ?? element.name.text;
-      if (moduleName === envilModuleName && importedName === "server") {
-        addImportedSymbol(server, element.name, checker);
-      } else if (moduleName === envilModuleName && importedName === "client") {
-        addImportedSymbol(client, element.name, checker);
-      } else if (moduleName === envilModuleName && importedName === "configureResolver") {
-        addImportedSymbol(configureResolver, element.name, checker);
-      } else if (moduleName === envilModuleName && importedName === "fromEnv") {
-        addImportedSymbol(fromEnv, element.name, checker);
-      } else if (moduleName === presetsModuleName && importedName === "expo") {
-        addImportedSymbol(expo, element.name, checker);
-      }
-    }
-  }
-
-  return {
-    server,
-    client,
-    configureResolver,
-    fromEnv,
-    envilNamespaces,
-    expo,
-    presetNamespaces,
-  };
 }
 
 function scriptKindFor(id: string): ts.ScriptKind {
@@ -133,43 +110,223 @@ function createSingleFileProgram(sourceFile: ts.SourceFile, id: string, code: st
   );
 }
 
-/** Parses a source file only when it imports an Envil public module. */
-export function createTransformContext(code: string, id: string): TransformContext | undefined {
-  if (!code.includes(envilModuleName)) {
-    return undefined;
+function unwrappedExpression(expression: ts.Expression): ts.Expression {
+  if (
+    ts.isParenthesizedExpression(expression) ||
+    ts.isAsExpression(expression) ||
+    ts.isSatisfiesExpression(expression) ||
+    ts.isNonNullExpression(expression)
+  ) {
+    return unwrappedExpression(expression.expression);
+  }
+  return expression;
+}
+
+function rootIdentifier(expression: ts.Expression): ts.Identifier | undefined {
+  const unwrapped = unwrappedExpression(expression);
+  if (ts.isIdentifier(unwrapped)) {
+    return unwrapped;
+  }
+  if (ts.isPropertyAccessExpression(unwrapped) || ts.isElementAccessExpression(unwrapped)) {
+    return rootIdentifier(unwrapped.expression);
+  }
+  return undefined;
+}
+
+function callsImportedBinding(sourceFile: ts.SourceFile): boolean {
+  const importedNames = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement)) {
+      continue;
+    }
+    const namedBindings = statement.importClause?.namedBindings;
+    if (namedBindings === undefined) {
+      continue;
+    }
+    if (ts.isNamespaceImport(namedBindings)) {
+      importedNames.add(namedBindings.name.text);
+      continue;
+    }
+    for (const element of namedBindings.elements) {
+      importedNames.add(element.name.text);
+    }
   }
 
-  const sourceFile = ts.createSourceFile(id, code, ts.ScriptTarget.Latest, true, scriptKindFor(id));
+  let found = false;
+  function visit(node: ts.Node): void {
+    if (found) {
+      return;
+    }
+    if (ts.isCallExpression(node)) {
+      const root = rootIdentifier(node.expression);
+      if (root !== undefined && importedNames.has(root.text)) {
+        found = true;
+        return;
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(sourceFile);
+  return found;
+}
+
+function directBindings(sourceFile: ts.SourceFile, checker: ts.TypeChecker): ImportedBindings {
+  const bindings = emptyBindings();
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      statement.importClause?.isTypeOnly === true ||
+      !ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
+      continue;
+    }
+    const moduleName = statement.moduleSpecifier.text;
+    const namedBindings = statement.importClause?.namedBindings;
+    if (namedBindings === undefined) {
+      continue;
+    }
+    if (ts.isNamespaceImport(namedBindings)) {
+      const namespace =
+        moduleName === envilModuleName
+          ? bindings.envilNamespaces
+          : moduleName === presetsModuleName
+            ? bindings.presetNamespaces
+            : undefined;
+      const symbol = checker.getSymbolAtLocation(namedBindings.name);
+      if (namespace !== undefined && symbol !== undefined) {
+        namespace.add(symbol);
+      }
+      continue;
+    }
+    for (const element of namedBindings.elements) {
+      const origin = terminalOrigin(moduleName, element.propertyName?.text ?? element.name.text);
+      if (!element.isTypeOnly && origin !== undefined) {
+        addBinding(bindings, origin, element.name, checker);
+      }
+    }
+  }
+  return bindings;
+}
+
+async function resolvedBindings(
+  sourceFile: ts.SourceFile,
+  checker: ts.TypeChecker,
+  resolveModule: ModuleResolver,
+): Promise<ImportedBindings> {
+  const bindings = emptyBindings();
+  const originOf = createExportOriginResolver(resolveModule);
+
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      statement.importClause?.isTypeOnly === true ||
+      !ts.isStringLiteral(statement.moduleSpecifier)
+    ) {
+      continue;
+    }
+    const specifier = statement.moduleSpecifier.text;
+    const namedBindings = statement.importClause?.namedBindings;
+    if (namedBindings === undefined) {
+      continue;
+    }
+    if (ts.isNamespaceImport(namedBindings)) {
+      const symbol = checker.getSymbolAtLocation(namedBindings.name);
+      if (symbol === undefined) {
+        continue;
+      }
+      for (const intrinsic of [
+        "server",
+        "client",
+        "configureResolver",
+        "fromEnv",
+      ] satisfies ReadonlyArray<IntrinsicName>) {
+        if ((await originOf(specifier, sourceFile.fileName, intrinsic)) === intrinsic) {
+          bindings.envilNamespaces.add(symbol);
+          break;
+        }
+      }
+      if ((await originOf(specifier, sourceFile.fileName, "expo")) === "expo") {
+        bindings.presetNamespaces.add(symbol);
+      }
+      continue;
+    }
+    for (const element of namedBindings.elements) {
+      const origin = await originOf(
+        specifier,
+        sourceFile.fileName,
+        element.propertyName?.text ?? element.name.text,
+      );
+      if (!element.isTypeOnly && origin !== undefined) {
+        addBinding(bindings, origin, element.name, checker);
+      }
+    }
+  }
+  return bindings;
+}
+
+function parsedSource(code: string, id: string): ts.SourceFile {
+  return ts.createSourceFile(id, code, ts.ScriptTarget.Latest, true, scriptKindFor(id));
+}
+
+/** Parses direct Envil imports for synchronous transforms such as Babel. */
+export function createDirectTransformContext(
+  code: string,
+  id: string,
+): TransformContext | undefined {
+  const sourceFile = parsedSource(code, id);
+  if (!callsImportedBinding(sourceFile)) {
+    return undefined;
+  }
   const checker = createSingleFileProgram(sourceFile, id, code).getTypeChecker();
   return {
     code,
     sourceFile,
     checker,
-    bindings: importedBindings(sourceFile, checker),
+    bindings: directBindings(sourceFile, checker),
   };
 }
 
-/** Checks whether an expression resolves to an exact Envil import. */
+/** Parses Envil imports and follows re-exports through the active bundler resolver. */
+export async function createResolvedTransformContext(
+  code: string,
+  id: string,
+  resolveModule: ModuleResolver,
+): Promise<TransformContext | undefined> {
+  const sourceFile = parsedSource(code, id);
+  if (!callsImportedBinding(sourceFile)) {
+    return undefined;
+  }
+  const checker = createSingleFileProgram(sourceFile, id, code).getTypeChecker();
+  return {
+    code,
+    sourceFile,
+    checker,
+    bindings: await resolvedBindings(sourceFile, checker, resolveModule),
+  };
+}
+
+/** Checks whether an expression resolves to an exact Envil import binding. */
 export function isImportedMember(
   expression: ts.Expression,
-  memberName: string,
-  directBindings: ReadonlySet<ts.Symbol>,
-  namespaceBindings: ReadonlySet<ts.Symbol>,
-  checker: ts.TypeChecker,
+  memberName: IntrinsicName,
+  context: TransformContext,
 ): boolean {
-  if (ts.isIdentifier(expression)) {
-    const symbol = checker.getSymbolAtLocation(expression);
-    return symbol !== undefined && directBindings.has(symbol);
+  const unwrapped = unwrappedExpression(expression);
+  if (ts.isIdentifier(unwrapped)) {
+    const symbol = context.checker.getSymbolAtLocation(unwrapped);
+    return symbol !== undefined && context.bindings[memberName].has(symbol);
   }
   if (
-    !ts.isPropertyAccessExpression(expression) ||
-    !ts.isIdentifier(expression.expression) ||
-    expression.name.text !== memberName
+    !ts.isPropertyAccessExpression(unwrapped) ||
+    !ts.isIdentifier(unwrapped.expression) ||
+    unwrapped.name.text !== memberName
   ) {
     return false;
   }
-  const symbol = checker.getSymbolAtLocation(expression.expression);
-  return symbol !== undefined && namespaceBindings.has(symbol);
+  const symbol = context.checker.getSymbolAtLocation(unwrapped.expression);
+  const namespaces =
+    memberName === "expo" ? context.bindings.presetNamespaces : context.bindings.envilNamespaces;
+  return symbol !== undefined && namespaces.has(symbol);
 }
 
 /** Applies non-overlapping source replacements from right to left. */

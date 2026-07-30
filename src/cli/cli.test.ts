@@ -38,7 +38,7 @@ afterEach(async () => {
 });
 
 describe("envil init", () => {
-  test("generates the lazy Vite starter", () => {
+  test("generates a Vite-prefixed starter without choosing its runtime", () => {
     const source = generateDefaultEnvSource();
 
     expect(source).toContain("export const appEnv = createEnv");
@@ -46,7 +46,7 @@ describe("envil init", () => {
     expect(source).toContain("client(");
     expect(source).toContain("DATABASE_URL: redacted(requiredString)");
     expect(source).toContain('prefix: "VITE_"');
-    expect(source).toContain("runtimeEnv: import.meta.env");
+    expect(source).not.toContain("runtimeEnv:");
   });
 
   test("uses dotenv values only to infer target schemas", () => {
@@ -59,7 +59,7 @@ describe("envil init", () => {
     expect(source).toContain("APP_URL: url");
     expect(source).toContain("PORT: port");
     expect(source).toContain('prefix: "VITE_"');
-    expect(source).toContain("runtimeEnv: import.meta.env");
+    expect(source).not.toContain("runtimeEnv:");
     expect(source).not.toContain(secret);
   });
 
@@ -112,15 +112,15 @@ describe("envil init", () => {
     expect(source.indexOf("  client(")).toBeLessThan(source.indexOf("  server("));
   });
 
-  test("generates Expo clients with the compiler-backed preset", () => {
+  test("generates Expo-prefixed definitions without choosing a runtime", () => {
     const source = generateEnvSourceFromDotenv(
       "DATABASE_URL=postgres://user:password@host:5432/app\nEXPO_PUBLIC_APP_URL=https://example.com\n",
     );
 
-    expect(source).toContain('import { expo } from "@ayronforge/envil/presets";');
     expect(source).toContain("APP_URL: url");
-    expect(source).toContain("    expo,");
-    expect(source).not.toContain("runtimeEnv: process.env");
+    expect(source).toContain('prefix: "EXPO_PUBLIC_"');
+    expect(source).not.toContain("@ayronforge/envil/presets");
+    expect(source).not.toContain("runtimeEnv:");
   });
 
   test("rejects unsupported Nuxt environment sources", () => {

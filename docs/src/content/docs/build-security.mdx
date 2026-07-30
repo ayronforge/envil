@@ -40,7 +40,9 @@ execute its resolvers.
 
 The compiler treats `server(...)` as a target intrinsic. In a client transform,
 it replaces the complete call expression with `undefined` before the bundler
-follows the resulting module graph:
+follows the resulting module graph. The active bundler resolves module paths;
+Envil follows their static imports and re-exports, including renamed local and
+package barrels:
 
 ```ts
 const appEnv = createEnv(
@@ -142,7 +144,10 @@ module.exports = function (api) {
 The Expo plugin runs the Envil compiler before Expo parses and inlines public
 environment references. Alongside normal server-fragment pruning, it expands
 the `expo` preset into one static `process.env.EXPO_PUBLIC_*` property access
-for every inline client schema key.
+for every inline client schema key. Import compiler functions and the preset
+directly from `@ayronforge/envil` and `@ayronforge/envil/presets`; Babel does
+not expose Metro's module resolver, so this plugin does not infer their identity
+through barrels.
 
 ## What the Proxy guarantees
 

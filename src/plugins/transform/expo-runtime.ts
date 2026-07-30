@@ -5,32 +5,18 @@ import { isImportedMember, type Replacement, type TransformContext } from "./ast
 const expoPrefix = "EXPO_PUBLIC_";
 
 function isExpoExpression(expression: ts.Expression, context: TransformContext): boolean {
-  return isImportedMember(
-    expression,
-    "expo",
-    context.bindings.expo,
-    context.bindings.presetNamespaces,
-    context.checker,
-  );
+  return isImportedMember(expression, "expo", context);
 }
 
-function expoOptionsKind(
-  expression: ts.Expression,
-  context: TransformContext,
-): "direct" | "spread" | undefined {
-  if (isExpoExpression(expression, context)) {
-    return "direct";
-  }
-  if (
-    ts.isObjectLiteralExpression(expression) &&
-    expression.properties.some(
-      (property) =>
-        ts.isSpreadAssignment(property) && isExpoExpression(property.expression, context),
-    )
-  ) {
-    return "spread";
-  }
-  return undefined;
+function hasExpoOptions(expression: ts.Expression, context: TransformContext): boolean {
+  return (
+    isExpoExpression(expression, context) ||
+    (ts.isObjectLiteralExpression(expression) &&
+      expression.properties.some(
+        (property) =>
+          ts.isSpreadAssignment(property) && isExpoExpression(property.expression, context),
+      ))
+  );
 }
 
 function propertyNameText(name: ts.PropertyName): string | undefined {
@@ -51,16 +37,7 @@ function explicitRuntimeKey(
   let runtimeKey: string | undefined;
 
   function visit(node: ts.Node): void {
-    if (
-      ts.isCallExpression(node) &&
-      isImportedMember(
-        node.expression,
-        "fromEnv",
-        context.bindings.fromEnv,
-        context.bindings.envilNamespaces,
-        context.checker,
-      )
-    ) {
+    if (ts.isCallExpression(node) && isImportedMember(node.expression, "fromEnv", context)) {
       const name = node.arguments[0];
       if (name === undefined || !ts.isStringLiteralLike(name) || runtimeKey !== undefined) {
         throw new Error(
@@ -116,46 +93,43 @@ function expoRuntimeKeys(values: ts.Expression, context: TransformContext): Read
   return keys;
 }
 
-function hasRuntimeEnvProperty(options: ts.ObjectLiteralExpression): boolean {
-  return options.properties.some(
-    (property) =>
-      (ts.isPropertyAssignment(property) ||
-        ts.isShorthandPropertyAssignment(property) ||
-        ts.isMethodDeclaration(property) ||
-        ts.isGetAccessorDeclaration(property) ||
-        ts.isSetAccessorDeclaration(property)) &&
-      propertyNameText(property.name) === "runtimeEnv",
-  );
-}
-
-function expoOptionsReplacement(
-  context: TransformContext,
-  options: ts.Expression,
-  kind: "direct" | "spread",
-  runtimeKeys: ReadonlyArray<string>,
-): string | undefined {
-  if (
-    kind === "spread" &&
-    ts.isObjectLiteralExpression(options) &&
-    hasRuntimeEnvProperty(options)
-  ) {
-    return undefined;
-  }
-
-  const runtimeEnv = `{ ${runtimeKeys
+function expoRuntimeSource(runtimeKeys: ReadonlyArray<string>): string {
+  return `{ ${runtimeKeys
     .map((runtimeKey) => `${JSON.stringify(runtimeKey)}: process.env.${runtimeKey}`)
     .join(", ")} }`;
-  if (kind === "direct") {
-    return `{ ...${context.code.slice(options.getStart(), options.end)}, runtimeEnv: ${runtimeEnv} }`;
+}
+
+function expoOptionsReplacements(
+  context: TransformContext,
+  options: ts.Expression,
+  runtimeKeys: ReadonlyArray<string>,
+): ReadonlyArray<Replacement> {
+  const runtimeEnv = expoRuntimeSource(runtimeKeys);
+  if (isExpoExpression(options, context)) {
+    return [
+      {
+        start: options.getStart(context.sourceFile),
+        end: options.end,
+        text: `{ ...${context.code.slice(options.getStart(), options.end)}, runtimeEnv: ${runtimeEnv} }`,
+      },
+    ];
   }
   if (!ts.isObjectLiteralExpression(options)) {
-    return undefined;
+    return [];
   }
-
-  const interior = context.code.slice(options.getStart() + 1, options.end - 1);
-  const separator =
-    interior.trim().length === 0 ? "" : interior.trimEnd().endsWith(",") ? " " : ", ";
-  return `{${interior}${separator}runtimeEnv: ${runtimeEnv} }`;
+  return options.properties.flatMap((property): ReadonlyArray<Replacement> => {
+    if (!ts.isSpreadAssignment(property) || !isExpoExpression(property.expression, context)) {
+      return [];
+    }
+    const expression = property.expression;
+    return [
+      {
+        start: expression.getStart(context.sourceFile),
+        end: expression.end,
+        text: `{ ...${context.code.slice(expression.getStart(), expression.end)}, runtimeEnv: ${runtimeEnv} }`,
+      },
+    ];
+  });
 }
 
 function isInsideExcludedRange(
@@ -176,34 +150,17 @@ export function collectExpoRuntimeReplacements(
     if (isInsideExcludedRange(node, excludedRanges)) {
       return;
     }
-    if (
-      ts.isCallExpression(node) &&
-      isImportedMember(
-        node.expression,
-        "client",
-        context.bindings.client,
-        context.bindings.envilNamespaces,
-        context.checker,
-      )
-    ) {
+    if (ts.isCallExpression(node) && isImportedMember(node.expression, "client", context)) {
       const values = node.arguments[0];
       const options = node.arguments[1];
-      if (values !== undefined && options !== undefined) {
-        const kind = expoOptionsKind(options, context);
-        if (kind !== undefined) {
-          const replacement = expoOptionsReplacement(
-            context,
-            options,
-            kind,
-            expoRuntimeKeys(values, context),
-          );
-          if (replacement !== undefined) {
-            replacements.push({
-              start: options.getStart(context.sourceFile),
-              end: options.end,
-              text: replacement,
-            });
-          }
+      if (values !== undefined && options !== undefined && hasExpoOptions(options, context)) {
+        const optionReplacements = expoOptionsReplacements(
+          context,
+          options,
+          expoRuntimeKeys(values, context),
+        );
+        if (optionReplacements.length > 0) {
+          replacements.push(...optionReplacements);
         }
       }
     }

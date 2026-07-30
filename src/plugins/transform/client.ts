@@ -2,7 +2,6 @@ import ts from "typescript6";
 
 import {
   applyReplacements,
-  createTransformContext,
   isImportedMember,
   type Replacement,
   type TransformContext,
@@ -41,13 +40,7 @@ function configuredResolverReplacements(
       !ts.isIdentifier(declaration.name) ||
       declaration.initializer === undefined ||
       !ts.isCallExpression(declaration.initializer) ||
-      !isImportedMember(
-        declaration.initializer.expression,
-        "configureResolver",
-        context.bindings.configureResolver,
-        context.bindings.envilNamespaces,
-        context.checker,
-      )
+      !isImportedMember(declaration.initializer.expression, "configureResolver", context)
     ) {
       continue;
     }
@@ -86,16 +79,7 @@ function serverFragmentReplacements(context: TransformContext): {
   const replacements: Replacement[] = [];
 
   function visit(node: ts.Node): void {
-    if (
-      ts.isCallExpression(node) &&
-      isImportedMember(
-        node.expression,
-        "server",
-        context.bindings.server,
-        context.bindings.envilNamespaces,
-        context.checker,
-      )
-    ) {
+    if (ts.isCallExpression(node) && isImportedMember(node.expression, "server", context)) {
       const start = node.getStart(context.sourceFile);
       ranges.push([start, node.end]);
       replacements.push({ start, end: node.end, text: "undefined" });
@@ -109,14 +93,9 @@ function serverFragmentReplacements(context: TransformContext): {
 }
 
 /** Compiles one module for a public client target. */
-export function transformClientModule(code: string, id: string): string {
-  const context = createTransformContext(code, id);
-  if (context === undefined) {
-    return code;
-  }
-
+export function transformClientModule(context: TransformContext): string {
   const serverFragments = serverFragmentReplacements(context);
-  return applyReplacements(code, [
+  return applyReplacements(context.code, [
     ...serverFragments.replacements,
     ...configuredResolverReplacements(context, serverFragments.ranges),
     ...collectExpoRuntimeReplacements(context, serverFragments.ranges),

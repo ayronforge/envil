@@ -48,6 +48,39 @@ async function createFixture(): Promise<BundlerFixture> {
     `export const readServerValue = () => "${serverSentinel}";\n`,
   );
   await writeFile(
+    join(root, "envil-core.ts"),
+    `
+export {
+  client as clientFragment,
+  configureResolver as configure,
+  createEnv as makeEnv,
+  extendEnv as extend,
+  fromEnv as runtimeName,
+  fromResolver as secretReference,
+  requiredString as stringValue,
+  server as serverFragment,
+  shared as sharedFragment,
+} from "@ayronforge/envil";
+`,
+  );
+  await writeFile(
+    join(root, "envil-barrel.ts"),
+    `
+export {
+  clientFragment as client,
+  configure as configureResolver,
+  makeEnv as createEnv,
+  extend as extendEnv,
+  runtimeName as fromEnv,
+  secretReference as fromResolver,
+  stringValue as requiredString,
+  serverFragment as server,
+  sharedFragment as shared,
+} from "./envil-core.ts";
+`,
+  );
+  await writeFile(join(root, "envil-package.ts"), `export * from "./envil-barrel.ts";\n`);
+  await writeFile(
     entry,
     `
 import { Effect, Option, Redacted } from "effect";
@@ -61,7 +94,7 @@ import {
   requiredString,
   server,
   shared,
-} from "@ayronforge/envil";
+} from "#envil-barrel";
 import { readServerValue } from "./server-only.ts";
 
 const resolver = configureResolver(
@@ -139,11 +172,14 @@ function outputChunkCode(
   return chunk.code;
 }
 
-function createSourceResolver() {
+function createSourceResolver(fixture: BundlerFixture) {
   return {
     name: "envil-integration-source",
     resolveId(source: string) {
-      return source === "@ayronforge/envil" ? envilEntry : null;
+      if (source === "@ayronforge/envil") {
+        return envilEntry;
+      }
+      return source === "#envil-barrel" ? join(fixture.root, "envil-package.ts") : null;
     },
   };
 }
@@ -252,7 +288,11 @@ async function buildRollupBundle(
   const bundle = await rollup({
     input: fixture.entry,
     external: ["effect"],
-    plugins: [createSourceResolver(), rollupPlugin({ target }), createTypeScriptTranspiler()],
+    plugins: [
+      createSourceResolver(fixture),
+      rollupPlugin({ target }),
+      createTypeScriptTranspiler(),
+    ],
   });
   try {
     const generated = await bundle.generate({ format: "es" });
@@ -272,7 +312,11 @@ async function buildRolldownBundle(
   const bundle = await rolldown({
     input: fixture.entry,
     external: ["effect"],
-    plugins: [createSourceResolver(), rolldownPlugin({ target }), createTypeScriptTranspiler()],
+    plugins: [
+      createSourceResolver(fixture),
+      rolldownPlugin({ target }),
+      createTypeScriptTranspiler(),
+    ],
   });
   try {
     const generated = await bundle.generate({ format: "es" });
@@ -291,6 +335,7 @@ async function buildEsbuildBundle(
 ): Promise<BuiltBundle> {
   const result = await buildWithEsbuild({
     alias: {
+      "#envil-barrel": join(fixture.root, "envil-package.ts"),
       "@ayronforge/envil": envilEntry,
     },
     entryPoints: [fixture.entry],
@@ -350,6 +395,7 @@ async function buildWebpackBundle(
     plugins: [WebpackPlugin({ target })],
     resolve: {
       alias: {
+        "#envil-barrel": join(fixture.root, "envil-package.ts"),
         "@ayronforge/envil": envilEntry,
       },
       extensions: [".ts", ".js"],
@@ -423,6 +469,7 @@ async function buildRspackBundle(
     plugins: [RspackPlugin({ target })],
     resolve: {
       alias: {
+        "#envil-barrel": join(fixture.root, "envil-package.ts"),
         "@ayronforge/envil": envilEntry,
       },
       extensions: [".ts", ".js"],

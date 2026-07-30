@@ -44,7 +44,12 @@ function resolveRecordingSecrets<const Keys extends string>(
     // SAFETY: Object.keys returns exactly the own string keys from the typed
     // reference record; the standard library only widens their finite union.
     for (const key of Object.keys(options.referencesByKey) as Keys[]) {
-      result[key] = Option.some(Redacted.make(`resolved:${options.referencesByKey[key]}`));
+      Object.defineProperty(result, key, {
+        value: Option.some(Redacted.make(`resolved:${options.referencesByKey[key]}`)),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     }
 
     // SAFETY: Every key from the input record is populated exactly once above.
@@ -525,6 +530,27 @@ describe("variable sources", () => {
     ]);
     expect(Redacted.value(env.FIRST)).toBe("resolved:first-reference");
     expect(Redacted.value(env.SECOND)).toBe("resolved:second-reference");
+  });
+
+  test('preserves a resolver key named "__proto__"', () => {
+    const calls: Array<Readonly<Record<string, string>>> = [];
+    const resolver = configureResolver(recordingResolverAdapter, { calls });
+    const appEnv = createEnv(
+      server({
+        FIRST: requiredString.pipe(fromResolver(resolver, "first-reference")),
+        ["__proto__"]: requiredString.pipe(fromResolver(resolver, "proto-reference")),
+      }),
+    );
+
+    const env = Effect.runSync(appEnv.server);
+
+    expect(calls.map((call) => Object.entries(call))).toEqual([
+      [
+        ["FIRST", "first-reference"],
+        ["__proto__", "proto-reference"],
+      ],
+    ]);
+    expect(Redacted.value(env.__proto__)).toBe("resolved:proto-reference");
   });
 
   test("supports ergonomic custom Effect resolvers at runtime", () => {
