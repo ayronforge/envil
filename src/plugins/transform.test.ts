@@ -243,6 +243,7 @@ import { expo } from "@ayronforge/envil/presets";
 
 const customEnv = {};
 const overrides = {};
+client({ URL: requiredString }, { prefix: "EXPO_PUBLIC_ALT_", ...expo });
 client({ URL: requiredString }, { runtimeEnv: customEnv, ...expo });
 client({ URL: requiredString }, { ...expo, runtimeEnv: customEnv });
 client({ URL: requiredString }, { ...expo, ...overrides });
@@ -254,6 +255,19 @@ client({ URL: requiredString }, { ...expo, ...overrides });
     expect(transformed).toContain(`runtimeEnv: customEnv, ${compiledExpo}`);
     expect(transformed).toContain(`${compiledExpo}, runtimeEnv: customEnv`);
     expect(transformed).toContain(`${compiledExpo}, ...overrides`);
+  });
+
+  test("rejects prefix overrides after the Expo preset spread", () => {
+    const source = `
+import { client, requiredString } from "@ayronforge/envil";
+import { expo } from "@ayronforge/envil/presets";
+
+client({ URL: requiredString }, { ...expo, prefix: "EXPO_PUBLIC_ALT_" });
+`;
+
+    expect(() => transformEnvilModule(source, "src/env.ts", "client")).toThrow(
+      'does not support overriding the preset prefix "EXPO_PUBLIC_"',
+    );
   });
 
   test("fails closed when Expo client keys are not statically enumerable", () => {

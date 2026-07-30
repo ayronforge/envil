@@ -117,19 +117,44 @@ function expoOptionsReplacements(
   if (!ts.isObjectLiteralExpression(options)) {
     return [];
   }
-  return options.properties.flatMap((property): ReadonlyArray<Replacement> => {
-    if (!ts.isSpreadAssignment(property) || !isExpoExpression(property.expression, context)) {
-      return [];
-    }
-    const expression = property.expression;
-    return [
-      {
+  const replacements: Replacement[] = [];
+  let hasExpoSpread = false;
+  let prefixOverride: ts.Expression | undefined;
+  for (const property of options.properties) {
+    if (ts.isSpreadAssignment(property) && isExpoExpression(property.expression, context)) {
+      hasExpoSpread = true;
+      prefixOverride = undefined;
+      const expression = property.expression;
+      replacements.push({
         start: expression.getStart(context.sourceFile),
         end: expression.end,
         text: `{ ...${context.code.slice(expression.getStart(), expression.end)}, runtimeEnv: ${runtimeEnv} }`,
-      },
-    ];
-  });
+      });
+      continue;
+    }
+
+    if (!hasExpoSpread) {
+      continue;
+    }
+    const initializer =
+      ts.isPropertyAssignment(property) && propertyNameText(property.name) === "prefix"
+        ? property.initializer
+        : ts.isShorthandPropertyAssignment(property) && property.name.text === "prefix"
+          ? property.name
+          : undefined;
+    if (initializer !== undefined) {
+      prefixOverride = initializer;
+    }
+  }
+  if (
+    prefixOverride !== undefined &&
+    (!ts.isStringLiteralLike(prefixOverride) || prefixOverride.text !== expoPrefix)
+  ) {
+    throw new Error(
+      `Envil's Expo compiler does not support overriding the preset prefix "${expoPrefix}".`,
+    );
+  }
+  return replacements;
 }
 
 function isInsideExcludedRange(
