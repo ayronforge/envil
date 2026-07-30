@@ -63,6 +63,7 @@ const recordingResolverAdapter: ResolverAdapter<
 };
 
 function verifyStaticValueTypes(): void {
+  const symbolKey = Symbol("fragment-key");
   server({ LABEL: "server" });
   client({ LABEL: "client" });
   shared({
@@ -80,6 +81,18 @@ function verifyStaticValueTypes(): void {
   shared({ CONFIG: { token: Redacted.make("secret") } });
   // @ts-expect-error Shared values cannot contain Effect Schemas recursively.
   shared({ CONFIG: { parser: requiredString } });
+  // @ts-expect-error Environment fragment keys must be strings.
+  server({ [symbolKey]: requiredString });
+  // @ts-expect-error Environment fragment keys must be strings.
+  client({ [symbolKey]: "public" });
+  // @ts-expect-error Environment fragment keys must be strings.
+  shared({ [symbolKey]: "public" });
+
+  const mutableConfig = { nested: { enabled: true } };
+  const sharedEnvironment = createEnv(shared({ CONFIG: mutableConfig }));
+  const materializedShared = Effect.runSync(sharedEnvironment.client);
+  // @ts-expect-error Shared environment values are recursively readonly.
+  materializedShared.CONFIG.nested.enabled = false;
 }
 
 void verifyStaticValueTypes;
@@ -250,6 +263,42 @@ describe("environment composition", () => {
 
     expect(Effect.runSync(appEnv.client).CONFIG).toEqual(config);
     expect(Effect.runSync(appEnv.server).CONFIG).toEqual(config);
+  });
+
+  test("snapshots and recursively freezes shared data", () => {
+    const config = {
+      routes: ["/"],
+      nested: { retries: 3 },
+    };
+    const appEnv = createEnv(shared({ CONFIG: config }));
+
+    config.routes.push("/health");
+    config.nested.retries = 4;
+
+    const clientEnv = Effect.runSync(appEnv.client);
+    expect(clientEnv.CONFIG).toEqual({
+      routes: ["/"],
+      nested: { retries: 3 },
+    });
+    expect(Object.isFrozen(clientEnv.CONFIG)).toBe(true);
+    expect(Object.isFrozen(clientEnv.CONFIG.routes)).toBe(true);
+    expect(Object.isFrozen(clientEnv.CONFIG.nested)).toBe(true);
+    expect(Reflect.set(clientEnv.CONFIG.nested, "retries", 5)).toBe(false);
+    expect(Effect.runSync(appEnv.client).CONFIG.nested.retries).toBe(3);
+  });
+
+  test("rejects symbol fragment keys when JavaScript bypasses the types", () => {
+    const symbolKey = Symbol("fragment-key");
+
+    expect(() => Reflect.apply(server, undefined, [{ [symbolKey]: "server" }])).toThrow(
+      "Environment fragment keys must be strings",
+    );
+    expect(() => Reflect.apply(client, undefined, [{ [symbolKey]: "client" }])).toThrow(
+      "Environment fragment keys must be strings",
+    );
+    expect(() => Reflect.apply(shared, undefined, [{ [symbolKey]: "shared" }])).toThrow(
+      "Environment fragment keys must be strings",
+    );
   });
 
   test("requires Effect Schemas for structured server and client values", () => {

@@ -141,9 +141,19 @@ type VariableOutput<Variable extends VariableDefinition> =
 type EntryOutput<Entry> =
   Entry extends VariableEntry<infer Definition, infer _Prefix, infer _Target>
     ? VariableOutput<Definition>
-    : Entry extends StaticEntry<infer Value, infer _Target>
-      ? Value
+    : Entry extends StaticEntry<infer Value, infer Target>
+      ? Target extends "shared"
+        ? DeepReadonly<Value>
+        : Value
       : never;
+
+type DeepReadonly<Value> = Value extends StaticScalar
+  ? Value
+  : Value extends readonly unknown[]
+    ? { readonly [Key in keyof Value]: DeepReadonly<Value[Key]> }
+    : Value extends Readonly<Record<PropertyKey, unknown>>
+      ? { readonly [Key in keyof Value]: DeepReadonly<Value[Key]> }
+      : Value;
 
 type Simplify<Value> = { readonly [Key in keyof Value]: Value[Key] };
 type ContextOutput<Entries extends DefinitionEntries> = Simplify<{

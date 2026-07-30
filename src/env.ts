@@ -1,6 +1,7 @@
 import { Pipeable } from "effect";
 
 import { buildEnvironmentEffect } from "./env/runtime.ts";
+import { snapshotSharedStaticValue } from "./env/shared-static.ts";
 import type {
   AnyAppEnv,
   AnyEnvFragment,
@@ -35,9 +36,17 @@ type UnprefixedFragmentOptions<Runtime extends RuntimeEnv | undefined> = Omit<
 };
 
 type EnvPlan = ReadonlyArray<AnyEnvFragment>;
+type ValidFragmentKeys<Values extends EnvValues> =
+  Extract<keyof Values, symbol> extends never ? unknown : never;
 
 const fragments = new WeakSet<object>();
 const plans = new WeakMap<object, EnvPlan>();
+
+function assertStringKeys(values: EnvValues): void {
+  if (Reflect.ownKeys(values).some((key) => typeof key !== "string")) {
+    throw new TypeError("Environment fragment keys must be strings. Symbols are not supported.");
+  }
+}
 
 function makeFragment<
   const Target extends "server" | "client" | "shared",
@@ -49,9 +58,16 @@ function makeFragment<
   values: Values,
   options: FragmentOptions<Prefix, Runtime> | undefined,
 ): EnvFragment<Target, Values, Prefix, Runtime> {
+  assertStringKeys(values);
+  const fragmentValues =
+    target === "shared"
+      ? Object.fromEntries(
+          Object.entries(values).map(([key, value]) => [key, snapshotSharedStaticValue(value)]),
+        )
+      : { ...values };
   const fragment = Object.freeze({
     target,
-    values: Object.freeze({ ...values }),
+    values: Object.freeze(fragmentValues),
     prefix: options?.prefix,
     runtimeEnv: options?.runtimeEnv,
     emptyStringAsUndefined: options?.emptyStringAsUndefined,
@@ -92,13 +108,13 @@ function makeAppEnv(plan: EnvPlan): AnyAppEnv {
 
 /** Defines server-only schemas and values. */
 export function server<const Values extends EnvValues>(
-  values: Values & ValidServerValues<Values>,
+  values: Values & ValidFragmentKeys<Values> & ValidServerValues<Values>,
 ): EnvFragment<"server", Values, undefined, undefined>;
 export function server<
   const Values extends EnvValues,
   const Runtime extends RuntimeEnv | undefined,
 >(
-  values: Values & ValidServerValues<Values>,
+  values: Values & ValidFragmentKeys<Values> & ValidServerValues<Values>,
   options: UnprefixedFragmentOptions<Runtime>,
 ): EnvFragment<"server", Values, undefined, Runtime>;
 export function server<
@@ -106,7 +122,7 @@ export function server<
   const Prefix extends string,
   const Runtime extends RuntimeEnv | undefined,
 >(
-  values: Values & ValidServerValues<Values>,
+  values: Values & ValidFragmentKeys<Values> & ValidServerValues<Values>,
   options: FragmentOptions<Prefix, Runtime> & { readonly prefix: Prefix },
 ): EnvFragment<"server", Values, Prefix, Runtime>;
 export function server(
@@ -119,6 +135,7 @@ export function server(
 /** Defines public client schemas and values. Schema-backed entries require runtimeEnv. */
 export function client<const Values extends EnvValues>(
   values: Values &
+    ValidFragmentKeys<Values> &
     ValidClientValues<Values> &
     (HasRuntimeVariables<Values> extends true ? never : unknown),
 ): EnvFragment<"client", Values, undefined, undefined>;
@@ -126,7 +143,7 @@ export function client<
   const Values extends EnvValues,
   const Runtime extends RuntimeEnv | undefined,
 >(
-  values: Values & ValidClientValues<Values>,
+  values: Values & ValidFragmentKeys<Values> & ValidClientValues<Values>,
   options: UnprefixedFragmentOptions<Runtime> &
     (HasRuntimeVariables<Values> extends true
       ? { readonly runtimeEnv: Exclude<Runtime, undefined> }
@@ -137,7 +154,7 @@ export function client<
   const Prefix extends string,
   const Runtime extends RuntimeEnv | undefined,
 >(
-  values: Values & ValidClientValues<Values>,
+  values: Values & ValidFragmentKeys<Values> & ValidClientValues<Values>,
   options: FragmentOptions<Prefix, Runtime> & {
     readonly prefix: Prefix;
   } & (HasRuntimeVariables<Values> extends true
@@ -153,7 +170,7 @@ export function client(
 
 /** Defines static public values available in both runtime contexts. */
 export function shared<const Values extends EnvValues>(
-  values: Values & ValidSharedValues<Values>,
+  values: Values & ValidFragmentKeys<Values> & ValidSharedValues<Values>,
 ): EnvFragment<"shared", Values, undefined, undefined> {
   return makeFragment("shared", values, undefined);
 }

@@ -1,4 +1,4 @@
-import { siAstro, siExpo, siNuxt, siSvelte, siVite, type SimpleIcon } from "simple-icons";
+import { siAstro, siExpo, siSvelte, siVite, type SimpleIcon } from "simple-icons";
 
 import pkg from "../../../package.json";
 
@@ -42,7 +42,7 @@ export const features = [
     name: "Presets",
     headline: "Framework Presets",
     description:
-      "Prefix presets for Vite, Expo, Nuxt, SvelteKit, and Astro compose directly with client fragment options.",
+      "Prefix presets for Vite, Expo, SvelteKit, and Astro compose directly with client fragment options.",
   },
   {
     name: "Secret Managers",
@@ -159,21 +159,6 @@ const appEnv = createEnv(
   client(
     { API_URL: url },
     { ...expo, runtimeEnv: process.env },
-  ),
-)`,
-  },
-  {
-    name: "Nuxt",
-    iconLight: brandIcon(siNuxt),
-    iconDark: brandIcon(siNuxt),
-    prefix: "NUXT_PUBLIC_",
-    code: `import { client, createEnv, url } from "@ayronforge/envil"
-import { nuxt } from "@ayronforge/envil/presets"
-
-const appEnv = createEnv(
-  client(
-    { API_URL: url },
-    { ...nuxt, runtimeEnv: process.env },
   ),
 )`,
   },

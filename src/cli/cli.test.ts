@@ -44,7 +44,7 @@ describe("envil init", () => {
     expect(source).toContain("export const appEnv = createEnv");
     expect(source).toContain("server({");
     expect(source).toContain("client(");
-    expect(source).toContain("DATABASE_URL: redacted(url)");
+    expect(source).toContain("DATABASE_URL: redacted(requiredString)");
     expect(source).toContain('prefix: "VITE_"');
     expect(source).toContain("runtimeEnv: import.meta.env");
   });
@@ -113,6 +113,15 @@ describe("envil init", () => {
     expect(source).toContain("APP_URL: url");
     expect(source).toContain("    expo,");
     expect(source).not.toContain("runtimeEnv: process.env");
+  });
+
+  test("rejects unsupported Nuxt environment sources", () => {
+    expect(() => generateEnvSourceFromDotenv("NUXT_PUBLIC_API_URL=https://example.com")).toThrow(
+      "Nuxt is not supported",
+    );
+    expect(() =>
+      generateEnvSourceFromDotenv("API_URL=https://example.com", "NUXT_PUBLIC_"),
+    ).toThrow("Nuxt is not supported");
   });
 
   test("CLI writes one app environment definition", async () => {

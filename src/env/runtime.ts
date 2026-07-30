@@ -12,6 +12,8 @@ import { getSchemaIdentifier, isRedactedSchema } from "../schema-metadata.ts";
 import type { AnyEnvFragment, AnySchema, RuntimeEnv } from "../types.ts";
 import { isSourcedVariable, type VariableSource } from "../variable-source.ts";
 
+import { isSharedStaticValue } from "./shared-static.ts";
+
 const expoRuntimeEnvMarker = Symbol.for("@ayronforge/envil/expo-runtime-env");
 
 interface VariablePlan {
@@ -74,40 +76,6 @@ function isStaticScalar(value: unknown): boolean {
     typeof value === "number" ||
     typeof value === "boolean"
   );
-}
-
-function isSharedStaticValue(value: unknown, ancestors: ReadonlySet<object> = new Set()): boolean {
-  if (isStaticScalar(value)) {
-    return true;
-  }
-  if (typeof value !== "object" || value === null || Redacted.isRedacted(value)) {
-    return false;
-  }
-
-  const prototype = Object.getPrototypeOf(value);
-  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
-    return false;
-  }
-  if (ancestors.has(value)) {
-    return false;
-  }
-
-  const nextAncestors = new Set(ancestors);
-  nextAncestors.add(value);
-  for (const key of Reflect.ownKeys(value)) {
-    if (typeof key !== "string") {
-      return false;
-    }
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (
-      descriptor === undefined ||
-      !("value" in descriptor) ||
-      !isSharedStaticValue(descriptor.value, nextAncestors)
-    ) {
-      return false;
-    }
-  }
-  return true;
 }
 
 function createVariablePlan(

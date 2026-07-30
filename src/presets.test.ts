@@ -3,13 +3,12 @@ import { describe, expect, test } from "bun:test";
 import { Effect } from "effect";
 
 import { client, createEnv } from "./env.ts";
-import { astro, expo, nuxt, sveltekit, vite } from "./presets.ts";
+import { astro, expo, sveltekit, vite } from "./presets.ts";
 import { requiredString } from "./schemas.ts";
 
 const presetCases = [
   ["vite", vite, "VITE_"],
   ["expo", expo, "EXPO_PUBLIC_"],
-  ["nuxt", nuxt, "NUXT_PUBLIC_"],
   ["sveltekit", sveltekit, "PUBLIC_"],
   ["astro", astro, "PUBLIC_"],
 ] as const;

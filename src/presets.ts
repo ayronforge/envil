@@ -13,6 +13,5 @@ export const expo = {
   runtimeEnv: Object.freeze({ [expoRuntimeEnvMarker]: true }),
 } as const;
 
-export const nuxt = { prefix: "NUXT_PUBLIC_" } as const;
 export const sveltekit = { prefix: "PUBLIC_" } as const;
 export const astro = { prefix: "PUBLIC_" } as const;

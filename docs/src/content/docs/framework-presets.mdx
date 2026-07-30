@@ -1,6 +1,6 @@
 ---
 title: Framework Presets
-description: Client fragment prefix settings for Vite, Expo, Nuxt, SvelteKit, and Astro.
+description: Client fragment prefix settings for Vite, Expo, SvelteKit, and Astro.
 order: 6
 ---
 
@@ -14,7 +14,6 @@ compiler-backed runtime source.
 import {
   astro,
   expo,
-  nuxt,
   sveltekit,
   vite,
 } from "@ayronforge/envil/presets";
@@ -23,7 +22,6 @@ import {
 <TypeTable showDefault={false} rows={[
   { name: "vite", type: "{ prefix: \"VITE_\" }", description: "Vite public client prefix" },
   { name: "expo", type: "{ prefix: \"EXPO_PUBLIC_\", runtimeEnv: compiled }", description: "Expo public prefix and compiler-backed runtime source" },
-  { name: "nuxt", type: "{ prefix: \"NUXT_PUBLIC_\" }", description: "Nuxt public client prefix" },
   { name: "sveltekit", type: "{ prefix: \"PUBLIC_\" }", description: "SvelteKit public client prefix" },
   { name: "astro", type: "{ prefix: \"PUBLIC_\" }", description: "Astro public client prefix" },
 ]} />

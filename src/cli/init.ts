@@ -2,7 +2,8 @@ import { parse } from "dotenv";
 
 import type { EnvironmentTarget, SchemaKind } from "./types.ts";
 
-const KNOWN_CLIENT_PREFIXES = ["VITE_", "EXPO_PUBLIC_", "NUXT_PUBLIC_", "PUBLIC_"] as const;
+const KNOWN_CLIENT_PREFIXES = ["VITE_", "EXPO_PUBLIC_", "PUBLIC_"] as const;
+const NUXT_CLIENT_PREFIX = "NUXT_PUBLIC_";
 
 interface ParsedVariable {
   readonly runtimeKey: string;
@@ -23,6 +24,14 @@ function detectClientPrefix(
   variables: ReadonlyArray<ParsedVariable>,
   explicitPrefix: string | undefined,
 ): string {
+  if (
+    explicitPrefix === NUXT_CLIENT_PREFIX ||
+    variables.some((variable) => variable.runtimeKey.startsWith(NUXT_CLIENT_PREFIX))
+  ) {
+    throw new Error(
+      `Nuxt is not supported. "${NUXT_CLIENT_PREFIX}" requires Nuxt runtime config instead of a portable environment source.`,
+    );
+  }
   if (explicitPrefix !== undefined) {
     return explicitPrefix;
   }
@@ -155,11 +164,11 @@ function generateSource(variables: ReadonlyArray<GeneratedVariable>, clientPrefi
 /** Generates the safe default `env.ts` starter. */
 export function generateDefaultEnvSource(): string {
   return [
-    'import { client, createEnv, redacted, server, url } from "@ayronforge/envil";',
+    'import { client, createEnv, redacted, requiredString, server, url } from "@ayronforge/envil";',
     "",
     "export const appEnv = createEnv(",
     "  server({",
-    "    DATABASE_URL: redacted(url),",
+    "    DATABASE_URL: redacted(requiredString),",
     "  }),",
     "",
     "  client(",
