@@ -32,7 +32,7 @@ function resolveGcpSecrets<const Keys extends string>(
   return Effect.gen(function* () {
     const requested = resolverEntries(options.referencesByKey);
     const usesShortName = requested.some(([, secretName]) => !secretName.startsWith("projects/"));
-    if (usesShortName && options.projectId === undefined) {
+    if (usesShortName && (options.projectId === undefined || options.projectId.length === 0)) {
       return yield* new ResolverConfigurationError({
         adapter: "gcp",
         operation: "configure",

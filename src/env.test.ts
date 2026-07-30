@@ -553,7 +553,7 @@ describe("variable sources", () => {
     expect(Redacted.value(env.__proto__)).toBe("resolved:proto-reference");
   });
 
-  test("supports ergonomic custom Effect resolvers at runtime", () => {
+  test("snapshots custom resolver options before runtime", () => {
     const calls: string[] = [];
     const adapter: ResolverAdapter<
       "custom-test",
@@ -573,7 +573,9 @@ describe("variable sources", () => {
           return result;
         }),
     };
-    const resolver = configureResolver(adapter, { prefix: "resolved" });
+    const options = { prefix: "resolved" };
+    const resolver = configureResolver(adapter, options);
+    options.prefix = "mutated";
     const appEnv = createEnv(
       server({
         TOKEN: requiredString.pipe(fromResolver(resolver, "token-reference")),

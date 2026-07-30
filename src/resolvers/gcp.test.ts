@@ -31,6 +31,20 @@ describe("gcpSecretsAdapter", () => {
     expect(String(exit)).not.toContain("short-name");
   });
 
+  test("rejects an empty project ID before initializing the SDK", async () => {
+    const exit = await Effect.runPromiseExit(
+      gcpSecretsAdapter.resolve({
+        projectId: "",
+        referencesByKey: { TOKEN: "short-name" },
+      }),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("ResolverConfigurationError");
+    expect(String(exit)).toContain('Set "projectId"');
+    expect(String(exit)).not.toContain("short-name");
+  });
+
   test("maps the SDK not-found code to Option.none", async () => {
     accessGcpSecret = () => Promise.reject({ code: 5 });
 

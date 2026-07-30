@@ -14,9 +14,10 @@ export function configureResolver<
   adapter: ResolverAdapter<Name, Reference, Options, Error, Requirements>,
   options: Options,
 ): ConfiguredResolver<Name, Reference, Error, Requirements> {
+  const configuredOptions = { ...options };
   return Object.freeze({
     name: adapter.name,
     resolve: <const Keys extends string>(referencesByKey: Readonly<Record<Keys, Reference>>) =>
-      adapter.resolve({ ...options, referencesByKey }),
+      adapter.resolve({ ...configuredOptions, referencesByKey }),
   });
 }

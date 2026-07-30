@@ -156,7 +156,11 @@ function callsImportedBinding(sourceFile: ts.SourceFile): boolean {
     if (!ts.isImportDeclaration(statement)) {
       continue;
     }
-    const namedBindings = statement.importClause?.namedBindings;
+    const importClause = statement.importClause;
+    if (importClause?.name !== undefined) {
+      importedNames.add(importClause.name.text);
+    }
+    const namedBindings = importClause?.namedBindings;
     if (namedBindings === undefined) {
       continue;
     }
@@ -247,7 +251,14 @@ async function resolvedBindings(
       continue;
     }
     const specifier = statement.moduleSpecifier.text;
-    const namedBindings = statement.importClause?.namedBindings;
+    const importClause = statement.importClause;
+    if (importClause?.name !== undefined) {
+      const origin = await originOf(specifier, sourceFile.fileName, "default");
+      if (origin !== undefined) {
+        addBinding(bindings, origin, importClause.name, checker);
+      }
+    }
+    const namedBindings = importClause?.namedBindings;
     if (namedBindings === undefined) {
       continue;
     }

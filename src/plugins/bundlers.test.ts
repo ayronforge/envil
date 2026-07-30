@@ -36,6 +36,7 @@ const runtimeResultKey = "__ENVIL_INTEGRATION_RESULT__";
 const serverSentinel = "IMPORTED_SERVER_ONLY_SENTINEL";
 const resolverSentinel = "CUSTOM_RESOLVER_SERVER_ONLY_SENTINEL";
 const dependencySentinel = "DEPENDENCY_SERVER_ONLY_SENTINEL";
+const defaultImportSentinel = "DEFAULT_IMPORTED_SERVER_ONLY_SENTINEL";
 const namespaceSentinel = "MIXED_NAMESPACE_SENTINEL";
 const clientSentinel = "CLIENT_ONLY_SENTINEL";
 let importSequence = 0;
@@ -79,6 +80,14 @@ export const dependencyFragment = server(
   await writeFile(
     join(root, "server-only.ts"),
     `export const readServerValue = () => "${serverSentinel}";\n`,
+  );
+  await writeFile(
+    join(root, "default-server-only.ts"),
+    `export const defaultServerValue = "${defaultImportSentinel}";\n`,
+  );
+  await writeFile(
+    join(root, "default-server-barrel.ts"),
+    `export { server as default } from "@ayronforge/envil";\n`,
   );
   await writeFile(
     join(root, "envil-core.ts"),
@@ -126,6 +135,8 @@ export const server = (value) => value;
 import { Effect, Option, Redacted } from "effect";
 import { dependencyFragment } from "envil-definitions";
 import * as mixed from "./mixed-barrel.ts";
+import defaultServer from "./default-server-barrel.ts";
+import { defaultServerValue } from "./default-server-only.ts";
 import {
   client,
   configureResolver,
@@ -140,6 +151,10 @@ import {
 import { readServerValue } from "./server-only.ts";
 
 const mixedNamespaceValue = mixed.server("${namespaceSentinel}");
+const defaultFragment = defaultServer(
+  { DEFAULT_SECRET: requiredString },
+  { runtimeEnv: { DEFAULT_SECRET: defaultServerValue } },
+);
 
 const resolver = configureResolver(
   {
@@ -160,6 +175,7 @@ const resolver = configureResolver(
 const baseEnv = createEnv(
   shared({ APP_NAME: "Base" }),
   dependencyFragment,
+  defaultFragment,
   client(
     { PUBLIC: requiredString },
     {
@@ -295,6 +311,7 @@ function expectServerRuntime(result: Readonly<Record<string, unknown>>): void {
   expect(Reflect.get(environment, "APP_NAME")).toBe("Application");
   expect(Reflect.get(environment, "PUBLIC")).toBe(clientSentinel);
   expect(Reflect.get(environment, "SECRET")).toBe(serverSentinel);
+  expect(Reflect.get(environment, "DEFAULT_SECRET")).toBe(defaultImportSentinel);
   expect(Reflect.get(environment, "DEPENDENCY_SECRET")).toBe(dependencySentinel);
   expect(Reflect.get(result, "mixedNamespaceValue")).toBe(namespaceSentinel);
   const resolved: unknown = Reflect.get(environment, "RESOLVED");
@@ -313,11 +330,13 @@ async function verifyTargets(buildBundle: BuildBundle): Promise<void> {
   expect(clientBundle.code).not.toContain(serverSentinel);
   expect(clientBundle.code).not.toContain(resolverSentinel);
   expect(clientBundle.code).not.toContain(dependencySentinel);
+  expect(clientBundle.code).not.toContain(defaultImportSentinel);
   expect(clientBundle.code).toContain(namespaceSentinel);
   expect(serverBundle.code).toContain(clientSentinel);
   expect(serverBundle.code).toContain(serverSentinel);
   expect(serverBundle.code).toContain(resolverSentinel);
   expect(serverBundle.code).toContain(dependencySentinel);
+  expect(serverBundle.code).toContain(defaultImportSentinel);
   expect(serverBundle.code).toContain(namespaceSentinel);
 
   expectClientRuntime(await executeBundle(clientBundle));
