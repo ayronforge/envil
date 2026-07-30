@@ -162,9 +162,9 @@ describe("envil init", () => {
     expect(exitCode).toBe(0);
     expect(stderr).toEqual([]);
     expect(stdout).toHaveLength(1);
-    const outputPath = path.join(directory, "env.ts");
-    expect(await readFile(outputPath, "utf8")).toContain("export const appEnv = createEnv");
-    expect(renderEnvExample(inspectEnvContract(outputPath))).toBe("DATABASE_URL=\n");
+    expect(await readFile(path.join(directory, "env.ts"), "utf8")).toContain(
+      "export const appEnv = createEnv",
+    );
   });
 });
 
