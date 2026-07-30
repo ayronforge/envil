@@ -42,7 +42,7 @@ export default function envilExpoPlugin(api: BabelApi): BabelPlugin {
     },
     parserOverride(code, parserOptions, parse) {
       const id = parserOptions.sourceFilename ?? sourceFilename;
-      return parse(transformEnvilModule(code, id, target) ?? code, parserOptions);
+      return parse(transformEnvilModule(code, id, target)?.code ?? code, parserOptions);
     },
   };
 }

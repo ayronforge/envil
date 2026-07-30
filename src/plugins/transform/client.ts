@@ -1,11 +1,6 @@
 import ts from "typescript6";
 
-import {
-  applyReplacements,
-  isImportedMember,
-  type Replacement,
-  type TransformContext,
-} from "./ast.ts";
+import { isImportedMember, type Replacement, type TransformContext } from "./ast.ts";
 import { collectExpoRuntimeReplacements } from "./expo-runtime.ts";
 
 function collectSymbolReferences(
@@ -24,6 +19,88 @@ function isInsideRange(node: ts.Node, ranges: ReadonlyArray<readonly [number, nu
   return ranges.some(([start, end]) => node.getStart() >= start && node.end <= end);
 }
 
+function isUnusedConfiguredResolver(
+  declaration: ts.VariableDeclaration,
+  context: TransformContext,
+  serverRanges: ReadonlyArray<readonly [number, number]>,
+): boolean {
+  if (
+    !ts.isIdentifier(declaration.name) ||
+    declaration.initializer === undefined ||
+    !ts.isCallExpression(declaration.initializer) ||
+    !isImportedMember(declaration.initializer.expression, "configureResolver", context)
+  ) {
+    return false;
+  }
+
+  const symbol = context.checker.getSymbolAtLocation(declaration.name);
+  if (symbol === undefined) {
+    return false;
+  }
+  const references: ts.Identifier[] = [];
+  collectSymbolReferences(context.sourceFile, symbol, context.checker, references);
+  const externalReferences = references.filter(
+    (reference) =>
+      reference.getStart(context.sourceFile) !== declaration.name.getStart(context.sourceFile) ||
+      reference.end !== declaration.name.end,
+  );
+  return (
+    externalReferences.length > 0 &&
+    externalReferences.every((reference) => isInsideRange(reference, serverRanges))
+  );
+}
+
+function declarationReplacements(
+  statement: ts.VariableStatement,
+  removable: ReadonlySet<ts.VariableDeclaration>,
+  context: TransformContext,
+): ReadonlyArray<Replacement> {
+  const declarations = statement.declarationList.declarations;
+  if (removable.size === 0) {
+    return [];
+  }
+  if (removable.size === declarations.length) {
+    return [
+      {
+        start: statement.getStart(context.sourceFile),
+        end: statement.end,
+        text: "",
+      },
+    ];
+  }
+
+  const replacements: Replacement[] = [];
+  let index = 0;
+  while (index < declarations.length) {
+    const first = declarations[index];
+    if (first === undefined || !removable.has(first)) {
+      index += 1;
+      continue;
+    }
+
+    const runStart = index;
+    while (index < declarations.length) {
+      const declaration = declarations[index];
+      if (declaration === undefined || !removable.has(declaration)) {
+        break;
+      }
+      index += 1;
+    }
+    const last = declarations[index - 1];
+    if (last === undefined) {
+      continue;
+    }
+    const previous = declarations[runStart - 1];
+    const next = declarations[index];
+    replacements.push({
+      start: previous === undefined ? first.pos : previous.end,
+      end: previous === undefined && next !== undefined ? next.pos : last.end,
+      text: "",
+    });
+  }
+  return replacements;
+}
+
 function configuredResolverReplacements(
   context: TransformContext,
   serverRanges: ReadonlyArray<readonly [number, number]>,
@@ -31,41 +108,18 @@ function configuredResolverReplacements(
   const replacements: Replacement[] = [];
 
   for (const statement of context.sourceFile.statements) {
-    if (!ts.isVariableStatement(statement) || statement.declarationList.declarations.length !== 1) {
-      continue;
-    }
-    const declaration = statement.declarationList.declarations[0];
     if (
-      declaration === undefined ||
-      !ts.isIdentifier(declaration.name) ||
-      declaration.initializer === undefined ||
-      !ts.isCallExpression(declaration.initializer) ||
-      !isImportedMember(declaration.initializer.expression, "configureResolver", context)
+      !ts.isVariableStatement(statement) ||
+      statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
     ) {
       continue;
     }
-
-    const symbol = context.checker.getSymbolAtLocation(declaration.name);
-    if (symbol === undefined) {
-      continue;
-    }
-    const references: ts.Identifier[] = [];
-    collectSymbolReferences(context.sourceFile, symbol, context.checker, references);
-    const externalReferences = references.filter(
-      (reference) =>
-        reference.getStart(context.sourceFile) !== declaration.name.getStart(context.sourceFile) ||
-        reference.end !== declaration.name.end,
+    const removable = new Set(
+      statement.declarationList.declarations.filter((declaration) =>
+        isUnusedConfiguredResolver(declaration, context, serverRanges),
+      ),
     );
-    if (
-      externalReferences.length > 0 &&
-      externalReferences.every((reference) => isInsideRange(reference, serverRanges))
-    ) {
-      replacements.push({
-        start: statement.getStart(context.sourceFile),
-        end: statement.end,
-        text: "",
-      });
-    }
+    replacements.push(...declarationReplacements(statement, removable, context));
   }
 
   return replacements;
@@ -92,12 +146,12 @@ function serverFragmentReplacements(context: TransformContext): {
   return { ranges, replacements };
 }
 
-/** Compiles one module for a public client target. */
-export function transformClientModule(context: TransformContext): string {
+/** Collects the source edits required for a public client target. */
+export function collectClientReplacements(context: TransformContext): ReadonlyArray<Replacement> {
   const serverFragments = serverFragmentReplacements(context);
-  return applyReplacements(context.code, [
+  return [
     ...serverFragments.replacements,
     ...configuredResolverReplacements(context, serverFragments.ranges),
     ...collectExpoRuntimeReplacements(context, serverFragments.ranges),
-  ]);
+  ];
 }

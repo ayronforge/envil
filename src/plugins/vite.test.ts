@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -26,7 +26,38 @@ describe("Envil Vite integration", () => {
     const entry = join(root, "entry.ts");
     const clientOutDir = join(root, "dist-client");
     const serverOutDir = join(root, "dist-server");
+    const dependencyRoot = join(root, "node_modules", "envil-definitions");
 
+    await mkdir(dependencyRoot, { recursive: true });
+    await writeFile(
+      join(dependencyRoot, "server-only.js"),
+      `export const dependencySecret = "DEPENDENCY_SERVER_ONLY_SENTINEL";\n`,
+    );
+    await writeFile(
+      join(dependencyRoot, "package.json"),
+      JSON.stringify({
+        name: "envil-definitions",
+        peerDependencies: {
+          "@ayronforge/envil": "*",
+        },
+      }),
+    );
+    await writeFile(
+      join(dependencyRoot, "envil-barrel.js"),
+      `export { requiredString, server } from "@ayronforge/envil";\n`,
+    );
+    await writeFile(
+      join(dependencyRoot, "index.js"),
+      `
+import { requiredString, server } from "./envil-barrel.js";
+import { dependencySecret } from "./server-only.js";
+
+export const dependencyFragment = server(
+  { DEPENDENCY_SECRET: requiredString },
+  { runtimeEnv: { DEPENDENCY_SECRET: dependencySecret } },
+);
+`,
+    );
     await writeFile(
       join(root, "server-only.ts"),
       `
@@ -67,9 +98,18 @@ export {
     );
     await writeFile(join(root, "envil-package.ts"), `export * from "./envil-barrel.ts";\n`);
     await writeFile(
+      join(root, "mixed-barrel.ts"),
+      `
+export { client } from "@ayronforge/envil";
+export const server = (value) => value;
+`,
+    );
+    await writeFile(
       entry,
       `
 import { Effect, Option, Redacted } from "effect";
+import { dependencyFragment } from "envil-definitions";
+import * as mixed from "./mixed-barrel.ts";
 import {
   client,
   configureResolver,
@@ -83,8 +123,11 @@ import {
 } from "#envil-barrel";
 import { readServerValue } from "./server-only.ts";
 
+export const mixedNamespaceValue = mixed.server("MIXED_NAMESPACE_SENTINEL");
+
 const baseEnv = createEnv(
   shared({ APP_NAME: "Base" }),
+  dependencyFragment,
   client(
     { CLIENT_ONLY_SENTINEL: requiredString },
     {
@@ -155,6 +198,10 @@ export const revealRedacted = (value) => Redacted.value(value);
             replacement: resolve(import.meta.dir, "../index.ts"),
           },
           {
+            find: "envil-definitions",
+            replacement: join(dependencyRoot, "index.js"),
+          },
+          {
             find: /^effect$/,
             replacement: resolve(import.meta.dir, "../../node_modules/effect/dist/index.js"),
           },
@@ -194,10 +241,14 @@ export const revealRedacted = (value) => Redacted.value(value);
     const serverBundle = await readFile(serverBundlePath, "utf8");
     expect(clientBundle).not.toContain("IMPORTED_SERVER_ONLY_SENTINEL");
     expect(clientBundle).not.toContain("CUSTOM_RESOLVER_SERVER_ONLY_SENTINEL");
+    expect(clientBundle).not.toContain("DEPENDENCY_SERVER_ONLY_SENTINEL");
+    expect(clientBundle).toContain("MIXED_NAMESPACE_SENTINEL");
     expect(clientBundle).not.toContain("__ENVIL_RUNTIME_TARGET__");
     expect(clientBundle).toContain("CLIENT_ONLY_SENTINEL");
     expect(serverBundle).toContain("IMPORTED_SERVER_ONLY_SENTINEL");
     expect(serverBundle).toContain("CUSTOM_RESOLVER_SERVER_ONLY_SENTINEL");
+    expect(serverBundle).toContain("DEPENDENCY_SERVER_ONLY_SENTINEL");
+    expect(serverBundle).toContain("MIXED_NAMESPACE_SENTINEL");
     expect(serverBundle).not.toContain("__ENVIL_RUNTIME_TARGET__");
     expect(serverBundle).toContain("CLIENT_ONLY_SENTINEL");
 

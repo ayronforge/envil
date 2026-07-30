@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -35,6 +35,8 @@ const envilEntry = resolve(import.meta.dir, "../index.ts");
 const runtimeResultKey = "__ENVIL_INTEGRATION_RESULT__";
 const serverSentinel = "IMPORTED_SERVER_ONLY_SENTINEL";
 const resolverSentinel = "CUSTOM_RESOLVER_SERVER_ONLY_SENTINEL";
+const dependencySentinel = "DEPENDENCY_SERVER_ONLY_SENTINEL";
+const namespaceSentinel = "MIXED_NAMESPACE_SENTINEL";
 const clientSentinel = "CLIENT_ONLY_SENTINEL";
 let importSequence = 0;
 
@@ -42,7 +44,38 @@ async function createFixture(): Promise<BundlerFixture> {
   const root = await mkdtemp(join(process.cwd(), ".envil-bundler-"));
   temporaryDirectories.push(root);
   const entry = join(root, "entry.ts");
+  const dependencyRoot = join(root, "node_modules", "envil-definitions");
 
+  await mkdir(dependencyRoot, { recursive: true });
+  await writeFile(
+    join(dependencyRoot, "server-only.js"),
+    `export const dependencySecret = "${dependencySentinel}";\n`,
+  );
+  await writeFile(
+    join(dependencyRoot, "package.json"),
+    JSON.stringify({
+      name: "envil-definitions",
+      peerDependencies: {
+        "@ayronforge/envil": "*",
+      },
+    }),
+  );
+  await writeFile(
+    join(dependencyRoot, "envil-barrel.js"),
+    `export { requiredString, server } from "@ayronforge/envil";\n`,
+  );
+  await writeFile(
+    join(dependencyRoot, "index.js"),
+    `
+import { requiredString, server } from "./envil-barrel.js";
+import { dependencySecret } from "./server-only.js";
+
+export const dependencyFragment = server(
+  { DEPENDENCY_SECRET: requiredString },
+  { runtimeEnv: { DEPENDENCY_SECRET: dependencySecret } },
+);
+`,
+  );
   await writeFile(
     join(root, "server-only.ts"),
     `export const readServerValue = () => "${serverSentinel}";\n`,
@@ -81,9 +114,18 @@ export {
   );
   await writeFile(join(root, "envil-package.ts"), `export * from "./envil-barrel.ts";\n`);
   await writeFile(
+    join(root, "mixed-barrel.ts"),
+    `
+export { client } from "@ayronforge/envil";
+export const server = (value) => value;
+`,
+  );
+  await writeFile(
     entry,
     `
 import { Effect, Option, Redacted } from "effect";
+import { dependencyFragment } from "envil-definitions";
+import * as mixed from "./mixed-barrel.ts";
 import {
   client,
   configureResolver,
@@ -96,6 +138,8 @@ import {
   shared,
 } from "#envil-barrel";
 import { readServerValue } from "./server-only.ts";
+
+const mixedNamespaceValue = mixed.server("${namespaceSentinel}");
 
 const resolver = configureResolver(
   {
@@ -115,6 +159,7 @@ const resolver = configureResolver(
 
 const baseEnv = createEnv(
   shared({ APP_NAME: "Base" }),
+  dependencyFragment,
   client(
     { PUBLIC: requiredString },
     {
@@ -150,6 +195,7 @@ const appEnv = baseEnv.pipe(
 Reflect.set(globalThis, "${runtimeResultKey}", {
   client: Effect.runSync(appEnv.client),
   server: Effect.runSync(Effect.result(appEnv.server)),
+  mixedNamespaceValue,
 });
 `,
   );
@@ -178,6 +224,9 @@ function createSourceResolver(fixture: BundlerFixture) {
     resolveId(source: string) {
       if (source === "@ayronforge/envil") {
         return envilEntry;
+      }
+      if (source === "envil-definitions") {
+        return join(fixture.root, "node_modules", "envil-definitions", "index.js");
       }
       return source === "#envil-barrel" ? join(fixture.root, "envil-package.ts") : null;
     },
@@ -233,6 +282,7 @@ function expectClientRuntime(result: Readonly<Record<string, unknown>>): void {
   expect(Reflect.get(client, "APP_NAME")).toBe("Application");
   expect(Reflect.get(client, "PUBLIC")).toBe(clientSentinel);
   expect(Reflect.get(server, "_tag")).toBe("Failure");
+  expect(Reflect.get(result, "mixedNamespaceValue")).toBe(namespaceSentinel);
 }
 
 function expectServerRuntime(result: Readonly<Record<string, unknown>>): void {
@@ -245,6 +295,8 @@ function expectServerRuntime(result: Readonly<Record<string, unknown>>): void {
   expect(Reflect.get(environment, "APP_NAME")).toBe("Application");
   expect(Reflect.get(environment, "PUBLIC")).toBe(clientSentinel);
   expect(Reflect.get(environment, "SECRET")).toBe(serverSentinel);
+  expect(Reflect.get(environment, "DEPENDENCY_SECRET")).toBe(dependencySentinel);
+  expect(Reflect.get(result, "mixedNamespaceValue")).toBe(namespaceSentinel);
   const resolved: unknown = Reflect.get(environment, "RESOLVED");
   expect(Redacted.isRedacted(resolved)).toBe(true);
   if (Redacted.isRedacted(resolved)) {
@@ -260,9 +312,13 @@ async function verifyTargets(buildBundle: BuildBundle): Promise<void> {
   expect(clientBundle.code).toContain(clientSentinel);
   expect(clientBundle.code).not.toContain(serverSentinel);
   expect(clientBundle.code).not.toContain(resolverSentinel);
+  expect(clientBundle.code).not.toContain(dependencySentinel);
+  expect(clientBundle.code).toContain(namespaceSentinel);
   expect(serverBundle.code).toContain(clientSentinel);
   expect(serverBundle.code).toContain(serverSentinel);
   expect(serverBundle.code).toContain(resolverSentinel);
+  expect(serverBundle.code).toContain(dependencySentinel);
+  expect(serverBundle.code).toContain(namespaceSentinel);
 
   expectClientRuntime(await executeBundle(clientBundle));
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
@@ -337,6 +393,7 @@ async function buildEsbuildBundle(
     alias: {
       "#envil-barrel": join(fixture.root, "envil-package.ts"),
       "@ayronforge/envil": envilEntry,
+      "envil-definitions": join(fixture.root, "node_modules", "envil-definitions", "index.js"),
     },
     entryPoints: [fixture.entry],
     bundle: true,
@@ -397,6 +454,7 @@ async function buildWebpackBundle(
       alias: {
         "#envil-barrel": join(fixture.root, "envil-package.ts"),
         "@ayronforge/envil": envilEntry,
+        "envil-definitions": join(fixture.root, "node_modules", "envil-definitions", "index.js"),
       },
       extensions: [".ts", ".js"],
     },
@@ -471,6 +529,7 @@ async function buildRspackBundle(
       alias: {
         "#envil-barrel": join(fixture.root, "envil-package.ts"),
         "@ayronforge/envil": envilEntry,
+        "envil-definitions": join(fixture.root, "node_modules", "envil-definitions", "index.js"),
       },
       extensions: [".ts", ".js"],
     },
@@ -511,6 +570,35 @@ afterEach(async () => {
 describe("Envil bundler integration", () => {
   test("compiles and executes client and server targets with Rollup", async () => {
     await verifyTargets(buildRollupBundle);
+  });
+
+  test("returns source maps that Rollup composes with its output", async () => {
+    const root = await mkdtemp(join(process.cwd(), ".envil-sourcemap-"));
+    temporaryDirectories.push(root);
+    const entry = join(root, "entry.js");
+    const source = `
+import { server } from "@ayronforge/envil";
+export const fragment = server({
+  SECRET: "private",
+});
+`;
+    await writeFile(entry, source);
+
+    const bundle = await rollup({
+      input: entry,
+      external: ["@ayronforge/envil"],
+      plugins: [rollupPlugin({ target: "client" })],
+    });
+    try {
+      const generated = await bundle.generate({ format: "es", sourcemap: true });
+      const chunk = generated.output.find((output) => output.type === "chunk");
+
+      expect(chunk?.code).toContain("fragment = undefined");
+      expect(chunk?.map?.sourcesContent).toContain(source);
+      expect(chunk?.map?.mappings.length).toBeGreaterThan(0);
+    } finally {
+      await bundle.close();
+    }
   });
 
   test("compiles and executes client and server targets with Rolldown", async () => {

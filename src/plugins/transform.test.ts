@@ -1,6 +1,17 @@
 import { describe, expect, test } from "bun:test";
 
-import { transformEnvilModule } from "./transform.ts";
+import {
+  transformEnvilModule as transformEnvilModuleWithMap,
+  type EnvilBuildTarget,
+} from "./transform.ts";
+
+function transformEnvilModule(
+  code: string,
+  id: string,
+  target: EnvilBuildTarget,
+): string | undefined {
+  return transformEnvilModuleWithMap(code, id, target)?.code;
+}
 
 const definition = `
 import { client, createEnv, server as serverFragment, shared } from "@ayronforge/envil";
@@ -78,6 +89,26 @@ function runCallback(server: () => string) {
     expect(transformed).toBe('const target = "client";');
   });
 
+  test("maps all edits from one transform back to the original module", () => {
+    const source = `
+import { server } from "@ayronforge/envil";
+const target = Reflect.get(
+  globalThis,
+  Symbol.for("__ENVIL_RUNTIME_TARGET__"),
+);
+const fragment = server({
+  SECRET: "private",
+});
+`;
+    const transformed = transformEnvilModuleWithMap(source, "src/env.ts?client", "client");
+
+    expect(transformed?.code).toContain('const target = "client";');
+    expect(transformed?.code).toContain("const fragment = undefined;");
+    expect(transformed?.map.sources).toEqual(["src/env.ts"]);
+    expect(transformed?.map.sourcesContent).toEqual([source]);
+    expect(transformed?.map.mappings.length).toBeGreaterThan(0);
+  });
+
   test("removes configured resolvers referenced only by pruned server fragments", () => {
     const source = `
 import { configureResolver, createEnv, fromResolver, requiredString, server } from "@ayronforge/envil";
@@ -110,6 +141,46 @@ export const appEnv = createEnv(
 
     expect(transformed).toContain("const secrets = configureResolver");
     expect(transformed).toContain("configuredName = secrets.name");
+  });
+
+  test("keeps exported configured resolvers", () => {
+    const source = `
+import { configureResolver, fromResolver, requiredString, server } from "@ayronforge/envil";
+import { adapter } from "./server-adapter.ts";
+
+export const secrets = configureResolver(adapter, {});
+export const fragment = server({
+  TOKEN: requiredString.pipe(fromResolver(secrets, "token")),
+});
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).toContain("export const secrets = configureResolver(adapter, {});");
+    expect(transformed).toContain("export const fragment = undefined;");
+  });
+
+  test("removes only an unused resolver declarator from a shared statement", () => {
+    const source = `
+import { configureResolver, fromResolver, requiredString, server } from "@ayronforge/envil";
+import { adapter } from "./server-adapter.ts";
+
+const before = 1, secrets = configureResolver(adapter, {}), after = 2;
+const leading = configureResolver(adapter, {}), right = 3;
+const left = 4, trailing = configureResolver(adapter, {});
+export const markers = [before, after];
+export const fragment = server({
+  TOKEN: requiredString.pipe(fromResolver(secrets, "token")),
+  LEADING: requiredString.pipe(fromResolver(leading, "leading")),
+  TRAILING: requiredString.pipe(fromResolver(trailing, "trailing")),
+});
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).toContain("const before = 1, after = 2;");
+    expect(transformed).toContain("const right = 3;");
+    expect(transformed).toContain("const left = 4;");
+    expect(transformed).not.toContain("configureResolver(adapter");
+    expect(transformed).toContain("export const markers = [before, after];");
   });
 
   test("compiles Expo preset keys into static process.env references", () => {

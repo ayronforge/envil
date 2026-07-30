@@ -1,3 +1,4 @@
+import MagicString from "magic-string";
 import ts from "typescript6";
 
 import {
@@ -7,9 +8,6 @@ import {
   type ModuleResolver,
 } from "./module-origin.ts";
 
-const envilModuleName = "@ayronforge/envil";
-const presetsModuleName = "@ayronforge/envil/presets";
-
 export type { IntrinsicName, ModuleResolver } from "./module-origin.ts";
 
 /** Envil import bindings proven within one source file. */
@@ -18,9 +16,10 @@ export interface ImportedBindings {
   readonly client: ReadonlySet<ts.Symbol>;
   readonly configureResolver: ReadonlySet<ts.Symbol>;
   readonly fromEnv: ReadonlySet<ts.Symbol>;
-  readonly envilNamespaces: ReadonlySet<ts.Symbol>;
   readonly expo: ReadonlySet<ts.Symbol>;
-  readonly presetNamespaces: ReadonlySet<ts.Symbol>;
+  readonly namespaces: {
+    readonly [Name in IntrinsicName]: ReadonlySet<ts.Symbol>;
+  };
 }
 
 /** One source edit using offsets from the original source file. */
@@ -28,6 +27,18 @@ export interface Replacement {
   readonly start: number;
   readonly end: number;
   readonly text: string;
+}
+
+/** Rewritten module source and its mapping back to the original module. */
+export interface TransformResult {
+  readonly code: string;
+  readonly map: {
+    readonly version: 3;
+    readonly sources: string[];
+    readonly sourcesContent: string[];
+    readonly names: string[];
+    readonly mappings: string;
+  };
 }
 
 /** Parsed compiler state shared by target transforms. */
@@ -43,9 +54,10 @@ interface MutableBindings {
   readonly client: Set<ts.Symbol>;
   readonly configureResolver: Set<ts.Symbol>;
   readonly fromEnv: Set<ts.Symbol>;
-  readonly envilNamespaces: Set<ts.Symbol>;
   readonly expo: Set<ts.Symbol>;
-  readonly presetNamespaces: Set<ts.Symbol>;
+  readonly namespaces: {
+    readonly [Name in IntrinsicName]: Set<ts.Symbol>;
+  };
 }
 
 function emptyBindings(): MutableBindings {
@@ -54,9 +66,14 @@ function emptyBindings(): MutableBindings {
     client: new Set(),
     configureResolver: new Set(),
     fromEnv: new Set(),
-    envilNamespaces: new Set(),
     expo: new Set(),
-    presetNamespaces: new Set(),
+    namespaces: {
+      server: new Set(),
+      client: new Set(),
+      configureResolver: new Set(),
+      fromEnv: new Set(),
+      expo: new Set(),
+    },
   };
 }
 
@@ -186,15 +203,20 @@ function directBindings(sourceFile: ts.SourceFile, checker: ts.TypeChecker): Imp
       continue;
     }
     if (ts.isNamespaceImport(namedBindings)) {
-      const namespace =
-        moduleName === envilModuleName
-          ? bindings.envilNamespaces
-          : moduleName === presetsModuleName
-            ? bindings.presetNamespaces
-            : undefined;
       const symbol = checker.getSymbolAtLocation(namedBindings.name);
-      if (namespace !== undefined && symbol !== undefined) {
-        namespace.add(symbol);
+      if (symbol === undefined) {
+        continue;
+      }
+      for (const intrinsic of [
+        "server",
+        "client",
+        "configureResolver",
+        "fromEnv",
+        "expo",
+      ] satisfies ReadonlyArray<IntrinsicName>) {
+        if (terminalOrigin(moduleName, intrinsic) === intrinsic) {
+          bindings.namespaces[intrinsic].add(symbol);
+        }
       }
       continue;
     }
@@ -239,14 +261,11 @@ async function resolvedBindings(
         "client",
         "configureResolver",
         "fromEnv",
+        "expo",
       ] satisfies ReadonlyArray<IntrinsicName>) {
         if ((await originOf(specifier, sourceFile.fileName, intrinsic)) === intrinsic) {
-          bindings.envilNamespaces.add(symbol);
-          break;
+          bindings.namespaces[intrinsic].add(symbol);
         }
-      }
-      if ((await originOf(specifier, sourceFile.fileName, "expo")) === "expo") {
-        bindings.presetNamespaces.add(symbol);
       }
       continue;
     }
@@ -324,16 +343,36 @@ export function isImportedMember(
     return false;
   }
   const symbol = context.checker.getSymbolAtLocation(unwrapped.expression);
-  const namespaces =
-    memberName === "expo" ? context.bindings.presetNamespaces : context.bindings.envilNamespaces;
-  return symbol !== undefined && namespaces.has(symbol);
+  return symbol !== undefined && context.bindings.namespaces[memberName].has(symbol);
 }
 
-/** Applies non-overlapping source replacements from right to left. */
-export function applyReplacements(code: string, replacements: ReadonlyArray<Replacement>): string {
-  let transformed = code;
-  for (const replacement of [...replacements].sort((left, right) => right.start - left.start)) {
-    transformed = `${transformed.slice(0, replacement.start)}${replacement.text}${transformed.slice(replacement.end)}`;
+/** Applies non-overlapping source replacements and maps the result to the original module. */
+export function applyReplacements(
+  code: string,
+  id: string,
+  replacements: ReadonlyArray<Replacement>,
+): TransformResult | undefined {
+  if (replacements.length === 0) {
+    return undefined;
   }
-  return transformed;
+
+  const transformed = new MagicString(code);
+  for (const replacement of replacements) {
+    transformed.overwrite(replacement.start, replacement.end, replacement.text);
+  }
+  const map = transformed.generateMap({
+    source: id,
+    includeContent: true,
+    hires: true,
+  });
+  return {
+    code: transformed.toString(),
+    map: {
+      version: 3,
+      sources: map.sources,
+      sourcesContent: [code],
+      names: map.names,
+      mappings: map.mappings,
+    },
+  };
 }

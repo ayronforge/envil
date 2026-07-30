@@ -82,7 +82,7 @@ async function transformForTarget(
     resolveModule === undefined
       ? transformEnvilModule(code, id, target)
       : await transformResolvedEnvilModule(code, id, target, resolveModule);
-  return transformed === undefined ? undefined : { code: transformed, map: null };
+  return transformed;
 }
 
 export const envilUnplugin = createUnplugin<EnvilPluginOptions | undefined>((options) => {
