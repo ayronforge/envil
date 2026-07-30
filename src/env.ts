@@ -1,7 +1,6 @@
-import { Pipeable } from "effect";
+import { Pipeable, Redacted } from "effect";
 
 import { buildEnvironmentEffect } from "./env/runtime.ts";
-import { snapshotSharedStaticValue } from "./env/shared-static.ts";
 import type {
   AnyAppEnv,
   AnyEnvFragment,
@@ -41,11 +40,67 @@ type ValidFragmentKeys<Values extends EnvValues> =
 
 const fragments = new WeakSet<object>();
 const plans = new WeakMap<object, EnvPlan>();
+const invalidSharedValueMessage =
+  "shared() accepts only scalar, array, and plain-object values without Effect values.";
 
 function assertStringKeys(values: EnvValues): void {
   if (Reflect.ownKeys(values).some((key) => typeof key !== "string")) {
     throw new TypeError("Environment fragment keys must be strings. Symbols are not supported.");
   }
+}
+
+function snapshotSharedValue(value: unknown, ancestors: ReadonlySet<object> = new Set()): unknown {
+  if (
+    value === null ||
+    value === undefined ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  if (typeof value !== "object" || Redacted.isRedacted(value) || ancestors.has(value)) {
+    throw new TypeError(invalidSharedValueMessage);
+  }
+
+  const isArray = Array.isArray(value);
+  const prototype = Object.getPrototypeOf(value);
+  if (!isArray && prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(invalidSharedValueMessage);
+  }
+
+  const nextAncestors = new Set(ancestors).add(value);
+  const properties: Array<readonly [string, unknown]> = [];
+  for (const key of Reflect.ownKeys(value)) {
+    if (isArray && key === "length") {
+      continue;
+    }
+    if (typeof key !== "string") {
+      throw new TypeError(invalidSharedValueMessage);
+    }
+
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !descriptor.enumerable || !("value" in descriptor)) {
+      throw new TypeError(invalidSharedValueMessage);
+    }
+    properties.push([key, snapshotSharedValue(descriptor.value, nextAncestors)]);
+  }
+
+  if (!isArray) {
+    return Object.freeze(Object.fromEntries(properties));
+  }
+
+  const snapshot: unknown[] = [];
+  snapshot.length = value.length;
+  for (const [key, item] of properties) {
+    Object.defineProperty(snapshot, key, {
+      configurable: true,
+      enumerable: true,
+      value: item,
+      writable: true,
+    });
+  }
+  return Object.freeze(snapshot);
 }
 
 function makeFragment<
@@ -62,7 +117,7 @@ function makeFragment<
   const fragmentValues =
     target === "shared"
       ? Object.fromEntries(
-          Object.entries(values).map(([key, value]) => [key, snapshotSharedStaticValue(value)]),
+          Object.entries(values).map(([key, value]) => [key, snapshotSharedValue(value)]),
         )
       : { ...values };
   const fragment = Object.freeze({

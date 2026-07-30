@@ -12,8 +12,6 @@ import { getSchemaIdentifier, isRedactedSchema } from "../schema-metadata.ts";
 import type { AnyEnvFragment, AnySchema, RuntimeEnv } from "../types.ts";
 import { isSourcedVariable, type VariableSource } from "../variable-source.ts";
 
-import { INVALID_SHARED_STATIC_VALUE } from "./shared-static.ts";
-
 const expoRuntimeEnvMarker = Symbol.for("@ayronforge/envil/expo-runtime-env");
 
 interface VariablePlan {
@@ -132,11 +130,6 @@ function createEnvironmentPlans(
 
     for (const [key, definition] of Object.entries(fragment.values)) {
       if (fragment.target === "shared") {
-        if (definition === INVALID_SHARED_STATIC_VALUE) {
-          throw configurationFailure(
-            `"${key}" is not recursively static public data. shared() accepts only scalar, array, and plain-object values without Effect values.`,
-          );
-        }
         plans.set(key, { _tag: "static", key, value: definition });
         continue;
       }

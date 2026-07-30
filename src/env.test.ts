@@ -320,29 +320,23 @@ describe("environment composition", () => {
   });
 
   test("rejects nested Effect values from shared when JavaScript bypasses the types", () => {
-    const fragment: unknown = Reflect.apply(shared, undefined, [
-      {
-        CONFIG: {
-          token: Redacted.make("secret"),
+    let failure: unknown;
+    try {
+      Reflect.apply(shared, undefined, [
+        {
+          CONFIG: {
+            token: Redacted.make("secret"),
+          },
         },
-      },
-    ]);
-    const appEnv: unknown = Reflect.apply(createEnv, undefined, [fragment]);
-    if (typeof appEnv !== "object" || appEnv === null) {
-      throw new Error("Expected an AppEnv");
+      ]);
+    } catch (cause: unknown) {
+      failure = cause;
     }
-    const clientEffect = Reflect.get(appEnv, "client");
-    if (!Effect.isEffect(clientEffect)) {
-      throw new Error("Expected a client Effect");
-    }
-
-    const result = Effect.runSync(Effect.result(clientEffect));
-    expect(Result.isFailure(result)).toBe(true);
-    if (Result.isFailure(result)) {
-      expect(result.failure).toBeInstanceOf(EnvConfigurationError);
-      expect(String(result.failure)).toContain("not recursively static public data");
-      expect(String(result.failure)).not.toContain("secret");
-    }
+    expect(failure).toBeInstanceOf(TypeError);
+    expect(String(failure)).toContain(
+      "shared() accepts only scalar, array, and plain-object values",
+    );
+    expect(String(failure)).not.toContain("secret");
   });
 
   test("rejects raw structured runtime values when JavaScript bypasses the types", () => {
