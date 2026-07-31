@@ -172,6 +172,27 @@ export const appEnv = createEnv(
     expect(transformed).toContain("undefined");
   });
 
+  test("removes configured resolvers referenced through server-only aliases", () => {
+    const source = `
+import { configureResolver, createEnv, fromResolver, requiredString, server } from "@ayronforge/envil";
+import { adapter } from "./server-adapter.ts";
+
+const secrets = configureResolver(adapter, {});
+const scopedSecrets = secrets;
+const serverSecrets = scopedSecrets;
+export const appEnv = createEnv(
+  server({ TOKEN: requiredString.pipe(fromResolver(serverSecrets, "token")) }),
+);
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).not.toContain("const secrets = configureResolver");
+    expect(transformed).not.toContain("const scopedSecrets = secrets");
+    expect(transformed).not.toContain("const serverSecrets = scopedSecrets");
+    expect(transformed).toContain("createEnv(");
+    expect(transformed).toContain("undefined");
+  });
+
   test("ignores type-only resolver references when pruning client builds", () => {
     const source = `
 import { configureResolver, createEnv, fromResolver, requiredString, server } from "@ayronforge/envil";
@@ -204,6 +225,25 @@ export const appEnv = createEnv(
 
     expect(transformed).toContain("const secrets = configureResolver");
     expect(transformed).toContain("configuredName = secrets.name");
+  });
+
+  test("keeps resolver alias chains used outside a server fragment", () => {
+    const source = `
+import { configureResolver, createEnv, fromResolver, requiredString, server } from "@ayronforge/envil";
+import { adapter } from "./server-adapter.ts";
+
+const secrets = configureResolver(adapter, {});
+const sharedSecrets = secrets;
+export const configuredName = sharedSecrets.name;
+export const appEnv = createEnv(
+  server({ TOKEN: requiredString.pipe(fromResolver(sharedSecrets, "token")) }),
+);
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).toContain("const secrets = configureResolver");
+    expect(transformed).toContain("const sharedSecrets = secrets");
+    expect(transformed).toContain("configuredName = sharedSecrets.name");
   });
 
   test("keeps exported configured resolvers", () => {
