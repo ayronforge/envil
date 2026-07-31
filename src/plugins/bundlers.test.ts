@@ -124,7 +124,7 @@ export const transitiveDependencyFragment = server(
     `
 import server from "./default-server-barrel.ts";
 
-export { server as serverFragment };
+export const serverFragment = server;
 `,
   );
   await writeFile(

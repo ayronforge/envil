@@ -44,8 +44,13 @@ const invalidSharedValueMessage =
   "shared() accepts only scalar, array, and plain-object values without Effect values.";
 
 function assertStringKeys(values: EnvValues): void {
-  if (Reflect.ownKeys(values).some((key) => typeof key !== "string")) {
-    throw new TypeError("Environment fragment keys must be strings. Symbols are not supported.");
+  for (const key of Reflect.ownKeys(values)) {
+    if (typeof key !== "string") {
+      throw new TypeError("Environment fragment keys must be strings. Symbols are not supported.");
+    }
+    if (Object.getOwnPropertyDescriptor(values, key)?.enumerable !== true) {
+      throw new TypeError("Environment fragment entries must be enumerable own properties.");
+    }
   }
 }
 

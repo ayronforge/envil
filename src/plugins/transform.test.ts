@@ -295,6 +295,38 @@ client({ APP_URL: requiredString }, expo);
     }
   });
 
+  test("prunes intrinsic aliases exported as const declarations", async () => {
+    const root = await mkdtemp(join(tmpdir(), "envil-transform-"));
+    const barrel = join(root, "envil-barrel.ts");
+    const sourceId = join(root, "env.ts");
+    await writeFile(
+      barrel,
+      `
+import { server } from "@ayronforge/envil";
+export const serverFragment = server;
+`,
+    );
+
+    try {
+      const transformed = await transformResolvedEnvilModule(
+        `
+import { serverFragment } from "./envil-barrel.ts";
+const values = makeArbitraryValues();
+export const fragment = serverFragment(values);
+`,
+        sourceId,
+        "client",
+        async (specifier, importer) =>
+          specifier === "./envil-barrel.ts" && importer === sourceId ? barrel : undefined,
+      );
+
+      expect(transformed).toBeDefined();
+      expect(transformed?.code).not.toContain("serverFragment(values)");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("compiles explicit Expo fromEnv names", () => {
     const source = `
 import { client, createEnv, fromEnv, requiredString } from "@ayronforge/envil";

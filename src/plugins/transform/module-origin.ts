@@ -69,6 +69,24 @@ function exportsDeclaration(statement: ts.Statement, exportName: string): boolea
   );
 }
 
+function constInitializer(sourceFile: ts.SourceFile, name: string): ts.Expression | undefined {
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isVariableStatement(statement) ||
+      (ts.getCombinedNodeFlags(statement.declarationList) & ts.NodeFlags.Const) === 0
+    ) {
+      continue;
+    }
+    const declaration = statement.declarationList.declarations.find(
+      (candidate) => ts.isIdentifier(candidate.name) && candidate.name.text === name,
+    );
+    if (declaration?.initializer !== undefined) {
+      return declaration.initializer;
+    }
+  }
+  return undefined;
+}
+
 /** Creates a per-transform re-export tracer backed by the bundler resolver. */
 export function createExportOriginResolver(resolveModule: ModuleResolver): ExportOriginResolver {
   const sourceFiles = new Map<string, ts.SourceFile>();
@@ -109,7 +127,58 @@ export function createExportOriginResolver(resolveModule: ModuleResolver): Expor
       );
       sourceFiles.set(fileName, sourceFile);
     }
+    const currentSourceFile = sourceFile;
     const nextVisiting = new Set(visiting).add(key);
+
+    async function importedOrigin(localName: string): Promise<IntrinsicName | undefined> {
+      for (const imported of currentSourceFile.statements) {
+        if (
+          !ts.isImportDeclaration(imported) ||
+          imported.importClause?.isTypeOnly === true ||
+          !ts.isStringLiteral(imported.moduleSpecifier)
+        ) {
+          continue;
+        }
+        if (imported.importClause?.name?.text === localName) {
+          return originOf(imported.moduleSpecifier.text, fileName, "default", nextVisiting);
+        }
+        if (
+          imported.importClause?.namedBindings === undefined ||
+          !ts.isNamedImports(imported.importClause.namedBindings)
+        ) {
+          continue;
+        }
+        const element = imported.importClause.namedBindings.elements.find(
+          (candidate) => !candidate.isTypeOnly && candidate.name.text === localName,
+        );
+        if (element !== undefined) {
+          return originOf(
+            imported.moduleSpecifier.text,
+            fileName,
+            element.propertyName?.text ?? element.name.text,
+            nextVisiting,
+          );
+        }
+      }
+      return undefined;
+    }
+
+    async function localOrigin(
+      localName: string,
+      visited: ReadonlySet<string>,
+    ): Promise<IntrinsicName | undefined> {
+      if (visited.has(localName)) {
+        return undefined;
+      }
+      const imported = await importedOrigin(localName);
+      if (imported !== undefined) {
+        return imported;
+      }
+      const initializer = constInitializer(currentSourceFile, localName);
+      return initializer !== undefined && ts.isIdentifier(initializer)
+        ? localOrigin(initializer.text, new Set(visited).add(localName))
+        : undefined;
+    }
 
     const namespaceSeparator = exportName.indexOf(".");
     if (namespaceSeparator > 0) {
@@ -167,46 +236,20 @@ export function createExportOriginResolver(resolveModule: ModuleResolver): Expor
         origins.set(key, origin ?? null);
         return origin;
       }
-      for (const imported of sourceFile.statements) {
-        if (
-          !ts.isImportDeclaration(imported) ||
-          imported.importClause?.isTypeOnly === true ||
-          !ts.isStringLiteral(imported.moduleSpecifier)
-        ) {
-          continue;
-        }
-        if (imported.importClause?.name?.text === localName) {
-          const origin = await originOf(
-            imported.moduleSpecifier.text,
-            fileName,
-            "default",
-            nextVisiting,
-          );
-          origins.set(key, origin ?? null);
-          return origin;
-        }
-        if (
-          imported.importClause?.namedBindings === undefined ||
-          !ts.isNamedImports(imported.importClause.namedBindings)
-        ) {
-          continue;
-        }
-        const element = imported.importClause.namedBindings.elements.find(
-          (candidate) => !candidate.isTypeOnly && candidate.name.text === localName,
-        );
-        if (element !== undefined) {
-          const origin = await originOf(
-            imported.moduleSpecifier.text,
-            fileName,
-            element.propertyName?.text ?? element.name.text,
-            nextVisiting,
-          );
-          origins.set(key, origin ?? null);
-          return origin;
-        }
-      }
-      origins.set(key, null);
-      return undefined;
+      const origin = await localOrigin(localName, new Set());
+      origins.set(key, origin ?? null);
+      return origin;
+    }
+
+    const initializer = constInitializer(sourceFile, exportName);
+    if (
+      initializer !== undefined &&
+      ts.isIdentifier(initializer) &&
+      sourceFile.statements.some((statement) => exportsDeclaration(statement, exportName))
+    ) {
+      const origin = await localOrigin(initializer.text, new Set([exportName]));
+      origins.set(key, origin ?? null);
+      return origin;
     }
 
     if (sourceFile.statements.some((statement) => exportsDeclaration(statement, exportName))) {

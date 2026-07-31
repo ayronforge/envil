@@ -103,12 +103,19 @@ function inspectTarget(
     const declaration =
       variable.valueDeclaration ?? variable.declarations?.[0] ?? targetDeclaration;
     const metadataType = checker.getTypeOfSymbolAtLocation(variable, declaration);
+    const runtimeKey = literalString(checker, metadataType, "runtimeKey", declaration);
+    const source = literalSourceKind(checker, metadataType, declaration);
+    if (source === "env" && runtimeKey.length === 0) {
+      throw new Error(
+        "Envil cannot render an empty environment variable name. Pass a non-empty name to fromEnv() and avoid empty fragment keys.",
+      );
+    }
     return {
       target,
       logicalKey: variable.getName(),
-      runtimeKey: literalString(checker, metadataType, "runtimeKey", declaration),
+      runtimeKey,
       secret: literalBoolean(checker, metadataType, "secret", declaration),
-      source: literalSourceKind(checker, metadataType, declaration),
+      source,
       optional: literalBoolean(checker, metadataType, "optional", declaration),
     };
   });

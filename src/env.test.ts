@@ -312,6 +312,16 @@ describe("environment composition", () => {
     );
   });
 
+  test("rejects non-enumerable fragment entries", () => {
+    const values = { HIDDEN: requiredString };
+    Object.defineProperty(values, "HIDDEN", {
+      enumerable: false,
+      value: requiredString,
+    });
+
+    expect(() => server(values)).toThrow("Environment fragment entries must be enumerable");
+  });
+
   test("requires Effect Schemas for structured server and client values", () => {
     const structured = Schema.fromJsonString(
       Schema.Struct({

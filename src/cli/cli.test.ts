@@ -235,6 +235,32 @@ describe("envil example", () => {
     expect(renderEnvExample(inspectEnvContract(inputPath))).toBe("POSTGRES_URL=\n");
   });
 
+  test("rejects empty runtime names instead of rendering invalid dotenv entries", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { createEnv, fromEnv, requiredString, server } from "../src/index.ts";',
+        "export const appEnv = createEnv(",
+        '  server({ TOKEN: requiredString.pipe(fromEnv("")) }),',
+        ");",
+      ].join("\n"),
+    );
+
+    expect(() => inspectEnvContract(inputPath)).toThrow("empty environment variable name");
+
+    await writeFile(
+      inputPath,
+      [
+        'import { createEnv, requiredString, server } from "../src/index.ts";',
+        'export const appEnv = createEnv(server({ "": requiredString }));',
+      ].join("\n"),
+    );
+
+    expect(() => inspectEnvContract(inputPath)).toThrow("empty environment variable name");
+  });
+
   test('treats a resolver named "env" as resolver-backed metadata', async () => {
     const directory = await createFixture();
     const inputPath = path.join(directory, "env.ts");
