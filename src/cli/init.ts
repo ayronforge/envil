@@ -104,6 +104,9 @@ function isSensitiveKey(key: string): boolean {
 }
 
 function quoteKey(key: string): string {
+  if (key === "__proto__") {
+    return `[${JSON.stringify(key)}]`;
+  }
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key);
 }
 

@@ -140,6 +140,13 @@ describe("envil init", () => {
     expect(source.indexOf("  client(")).toBeLessThan(source.indexOf("  server("));
   });
 
+  test("emits __proto__ as a computed property", () => {
+    const source = generateEnvSourceFromDotenv("VITE___proto__=public\n");
+
+    expect(source).toContain('["__proto__"]: requiredString');
+    expect(source).not.toContain("\n      __proto__:");
+  });
+
   test("generates Expo-prefixed definitions without choosing a runtime", () => {
     const source = generateEnvSourceFromDotenv(
       "DATABASE_URL=postgres://user:password@host:5432/app\nEXPO_PUBLIC_APP_URL=https://example.com\n",

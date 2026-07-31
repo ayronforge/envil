@@ -280,6 +280,11 @@ describe("redisUrl", () => {
     expect(decode(redisUrl, rUrl)).toBe(rUrl);
   });
 
+  test("accepts redis:// URL with a bracketed IPv6 host", () => {
+    const rUrl = "redis://[::1]:6379/0";
+    expect(decode(redisUrl, rUrl)).toBe(rUrl);
+  });
+
   test("accepts redis:// URL without auth", () => {
     const rUrl = "redis://host:6379/0";
     expect(decode(redisUrl, rUrl)).toBe(rUrl);
@@ -562,6 +567,10 @@ describe("mongoUrl", () => {
     expect(decode(mongoUrl, mUrl)).toBe(mUrl);
   });
 
+  test("rejects mongodb:// URLs without a host", () => {
+    expect(() => decode(mongoUrl, "mongodb://?retryWrites=true")).toThrow();
+  });
+
   test("rejects other protocols", () => {
     expect(() => decode(mongoUrl, "postgres://user:pass@host:5432/db")).toThrow();
   });
@@ -580,6 +589,11 @@ describe("mysqlUrl", () => {
   test("accepts mysqls:// URL", () => {
     const mUrl = "mysqls://user:pass@host:3306/db";
     expect(decode(mysqlUrl, mUrl)).toBe(mUrl);
+  });
+
+  test("accepts mysql:// URL with a bracketed IPv6 host", () => {
+    const value = "mysql://user:pass@[::1]:3306/app";
+    expect(decode(mysqlUrl, value)).toBe(value);
   });
 
   test("rejects missing port", () => {

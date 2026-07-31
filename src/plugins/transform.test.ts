@@ -81,6 +81,21 @@ export const appEnv = envil.createEnv(envil["server"](values), envil["client"]({
     expect(transformed).toContain('envil["client"]({ URL: "public" })');
   });
 
+  test("supports immutable local aliases of imported intrinsics", () => {
+    const source = `
+import { server } from "@ayronforge/envil";
+import * as envil from "@ayronforge/envil";
+const directServer = server;
+const { server: namespaceServer } = envil;
+const values = makeArbitraryValues();
+export const fragments = [directServer(values), namespaceServer(values)];
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).not.toContain("directServer(values)");
+    expect(transformed).not.toContain("namespaceServer(values)");
+  });
+
   test("does not rewrite local bindings that shadow the imported intrinsic", () => {
     const source = `
 import { createEnv, server } from "@ayronforge/envil";

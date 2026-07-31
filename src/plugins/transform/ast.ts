@@ -150,7 +150,49 @@ function rootIdentifier(expression: ts.Expression): ts.Identifier | undefined {
   return undefined;
 }
 
-function transformCandidateBindings(sourceFile: ts.SourceFile): ReadonlySet<string> {
+function immutableAliasDeclaration(
+  identifier: ts.Identifier,
+  checker: ts.TypeChecker,
+): ts.VariableDeclaration | ts.BindingElement | undefined {
+  const symbol = checker.getSymbolAtLocation(identifier);
+  const declaration = symbol?.declarations?.find(
+    (candidate): candidate is ts.VariableDeclaration | ts.BindingElement =>
+      ts.isVariableDeclaration(candidate) || ts.isBindingElement(candidate),
+  );
+  if (declaration === undefined) {
+    return undefined;
+  }
+  const variableDeclaration = ts.isVariableDeclaration(declaration)
+    ? declaration
+    : ts.isVariableDeclaration(declaration.parent.parent)
+      ? declaration.parent.parent
+      : undefined;
+  if (
+    variableDeclaration === undefined ||
+    !ts.isVariableDeclarationList(variableDeclaration.parent) ||
+    (ts.getCombinedNodeFlags(variableDeclaration.parent) & ts.NodeFlags.Const) === 0
+  ) {
+    return undefined;
+  }
+  return declaration;
+}
+
+function aliasInitializer(
+  declaration: ts.VariableDeclaration | ts.BindingElement,
+): ts.Expression | undefined {
+  if (ts.isVariableDeclaration(declaration)) {
+    return declaration.initializer;
+  }
+  const variableDeclaration = declaration.parent.parent;
+  return ts.isVariableDeclaration(variableDeclaration)
+    ? variableDeclaration.initializer
+    : undefined;
+}
+
+function transformCandidateBindings(
+  sourceFile: ts.SourceFile,
+  checker: ts.TypeChecker,
+): ReadonlySet<string> {
   const importedNames = new Set<string>();
   for (const statement of sourceFile.statements) {
     if (!ts.isImportDeclaration(statement)) {
@@ -174,12 +216,41 @@ function transformCandidateBindings(sourceFile: ts.SourceFile): ReadonlySet<stri
   }
 
   const candidateNames = new Set<string>();
-  function addImportedRoot(expression: ts.Expression): boolean {
+  function importedRootName(
+    expression: ts.Expression,
+    visited: Set<ts.Symbol>,
+  ): string | undefined {
     const root = rootIdentifier(expression);
-    if (root === undefined || !importedNames.has(root.text)) {
+    if (root === undefined) {
+      return undefined;
+    }
+    const symbol = checker.getSymbolAtLocation(root);
+    if (symbol === undefined || visited.has(symbol)) {
+      return undefined;
+    }
+    visited.add(symbol);
+    if (
+      importedNames.has(root.text) &&
+      symbol.declarations?.some(
+        (declaration) =>
+          ts.isImportSpecifier(declaration) ||
+          ts.isNamespaceImport(declaration) ||
+          ts.isImportClause(declaration),
+      )
+    ) {
+      return root.text;
+    }
+    const declaration = immutableAliasDeclaration(root, checker);
+    const initializer = declaration === undefined ? undefined : aliasInitializer(declaration);
+    return initializer === undefined ? undefined : importedRootName(initializer, visited);
+  }
+
+  function addImportedRoot(expression: ts.Expression): boolean {
+    const importedName = importedRootName(expression, new Set());
+    if (importedName === undefined) {
       return false;
     }
-    candidateNames.add(root.text);
+    candidateNames.add(importedName);
     return true;
   }
 
@@ -342,10 +413,10 @@ export function createDirectTransformContext(
   id: string,
 ): TransformContext | undefined {
   const sourceFile = parsedSource(code, id);
-  if (transformCandidateBindings(sourceFile).size === 0) {
+  const checker = createSingleFileProgram(sourceFile, id, code).getTypeChecker();
+  if (transformCandidateBindings(sourceFile, checker).size === 0) {
     return undefined;
   }
-  const checker = createSingleFileProgram(sourceFile, id, code).getTypeChecker();
   return {
     code,
     sourceFile,
@@ -361,11 +432,11 @@ export async function createResolvedTransformContext(
   resolveModule: ModuleResolver,
 ): Promise<TransformContext | undefined> {
   const sourceFile = parsedSource(code, id);
-  const candidateNames = transformCandidateBindings(sourceFile);
+  const checker = createSingleFileProgram(sourceFile, id, code).getTypeChecker();
+  const candidateNames = transformCandidateBindings(sourceFile, checker);
   if (candidateNames.size === 0) {
     return undefined;
   }
-  const checker = createSingleFileProgram(sourceFile, id, code).getTypeChecker();
   return {
     code,
     sourceFile,
@@ -380,29 +451,82 @@ export function isImportedMember(
   memberName: IntrinsicName,
   context: TransformContext,
 ): boolean {
-  const unwrapped = unwrappedExpression(expression);
-  if (ts.isIdentifier(unwrapped)) {
+  const visited = new Set<ts.Symbol>();
+
+  function bindingElementName(declaration: ts.BindingElement): string | undefined {
+    const name = declaration.propertyName ?? declaration.name;
+    if (ts.isIdentifier(name) || ts.isStringLiteralLike(name)) {
+      return name.text;
+    }
+    if (ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)) {
+      return name.expression.text;
+    }
+    return undefined;
+  }
+
+  function isImportedNamespace(candidate: ts.Expression): boolean {
+    const unwrapped = unwrappedExpression(candidate);
+    if (!ts.isIdentifier(unwrapped)) {
+      return false;
+    }
     const symbol = context.checker.getSymbolAtLocation(unwrapped);
-    return symbol !== undefined && context.bindings[memberName].has(symbol);
+    if (symbol === undefined) {
+      return false;
+    }
+    if (context.bindings.namespaces[memberName].has(symbol)) {
+      return true;
+    }
+    if (visited.has(symbol)) {
+      return false;
+    }
+    visited.add(symbol);
+    const declaration = immutableAliasDeclaration(unwrapped, context.checker);
+    const initializer = declaration === undefined ? undefined : aliasInitializer(declaration);
+    return (
+      declaration !== undefined &&
+      ts.isVariableDeclaration(declaration) &&
+      initializer !== undefined &&
+      isImportedNamespace(initializer)
+    );
   }
-  if (
-    ts.isPropertyAccessExpression(unwrapped) &&
-    ts.isIdentifier(unwrapped.expression) &&
-    unwrapped.name.text === memberName
-  ) {
-    const symbol = context.checker.getSymbolAtLocation(unwrapped.expression);
-    return symbol !== undefined && context.bindings.namespaces[memberName].has(symbol);
+
+  function isMember(candidate: ts.Expression): boolean {
+    const unwrapped = unwrappedExpression(candidate);
+    if (ts.isIdentifier(unwrapped)) {
+      const symbol = context.checker.getSymbolAtLocation(unwrapped);
+      if (symbol === undefined) {
+        return false;
+      }
+      if (context.bindings[memberName].has(symbol)) {
+        return true;
+      }
+      if (visited.has(symbol)) {
+        return false;
+      }
+      visited.add(symbol);
+      const declaration = immutableAliasDeclaration(unwrapped, context.checker);
+      const initializer = declaration === undefined ? undefined : aliasInitializer(declaration);
+      if (declaration === undefined || initializer === undefined) {
+        return false;
+      }
+      return ts.isBindingElement(declaration)
+        ? bindingElementName(declaration) === memberName && isImportedNamespace(initializer)
+        : isMember(initializer);
+    }
+    if (ts.isPropertyAccessExpression(unwrapped) && unwrapped.name.text === memberName) {
+      return isImportedNamespace(unwrapped.expression);
+    }
+    if (
+      ts.isElementAccessExpression(unwrapped) &&
+      ts.isStringLiteralLike(unwrapped.argumentExpression) &&
+      unwrapped.argumentExpression.text === memberName
+    ) {
+      return isImportedNamespace(unwrapped.expression);
+    }
+    return false;
   }
-  if (
-    ts.isElementAccessExpression(unwrapped) &&
-    ts.isIdentifier(unwrapped.expression) &&
-    ts.isStringLiteralLike(unwrapped.argumentExpression) &&
-    unwrapped.argumentExpression.text === memberName
-  ) {
-    const symbol = context.checker.getSymbolAtLocation(unwrapped.expression);
-    return symbol !== undefined && context.bindings.namespaces[memberName].has(symbol);
-  }
-  return false;
+
+  return isMember(expression);
 }
 
 /** Applies non-overlapping source replacements and maps the result to the original module. */

@@ -199,6 +199,7 @@ import {
 } from "#envil-barrel";
 import { readServerValue } from "./server-only.ts";
 
+const localServer = server;
 const mixedNamespaceValue = mixed.server("${namespaceSentinel}");
 const defaultFragment = defaultServer(
   { DEFAULT_SECRET: requiredString },
@@ -243,7 +244,7 @@ const baseEnv = createEnv(
 const appEnv = baseEnv.pipe(
   extendEnv(
     createEnv(
-      server(
+      localServer(
         {
           SECRET: requiredString.pipe(fromEnv("service.secret")),
           RESOLVED: requiredString.pipe(

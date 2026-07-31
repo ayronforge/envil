@@ -133,6 +133,25 @@ export const postgresUrl = Schema.String.check(
 );
 export type PostgresUrl = Schema.Schema.Type<typeof postgresUrl>;
 
+function isRedisUrl(value: string): boolean {
+  if (value !== value.trim()) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    return (
+      (parsed.protocol === "redis:" || parsed.protocol === "rediss:") &&
+      parsed.hostname.length > 0 &&
+      (parsed.username.length === 0 || parsed.password.length > 0) &&
+      (parsed.pathname === "" || /^\/\d+$/.test(parsed.pathname)) &&
+      parsed.search === "" &&
+      parsed.hash === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
 export const redisUrl = Schema.String.check(
   Schema.makeFilter<string>(
     (value) => value.startsWith("redis://") || value.startsWith("rediss://"),
@@ -141,7 +160,7 @@ export const redisUrl = Schema.String.check(
       message: "Use a complete Redis connection URL",
     },
   ),
-  Schema.isPattern(/^rediss?:\/\/(?:[^:]*:[^@]+@)?[^:]+(?::\d+)?(?:\/\d+)?$/, {
+  Schema.makeFilter<string>(isRedisUrl, {
     message: "Check the Redis host, optional credentials, port, and database number",
   }),
 );
@@ -155,11 +174,30 @@ export const mongoUrl = Schema.String.check(
       message: "Use a complete MongoDB connection URL",
     },
   ),
-  Schema.isPattern(/^mongodb(\+srv)?:\/\/(?:[^:]+:[^@]+@)?[^/]+(?:\/[^?]*)?(?:\?.*)?$/, {
+  Schema.isPattern(/^mongodb(\+srv)?:\/\/(?:[^:]+:[^@]+@)?[^/?#@]+(?:\/[^?]*)?(?:\?.*)?$/, {
     message: "Check the MongoDB host, optional credentials, database, and query parameters",
   }),
 );
 export type MongoUrl = Schema.Schema.Type<typeof mongoUrl>;
+
+function isMysqlUrl(value: string): boolean {
+  if (value !== value.trim()) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    return (
+      (parsed.protocol === "mysql:" || parsed.protocol === "mysqls:") &&
+      parsed.username.length > 0 &&
+      parsed.password.length > 0 &&
+      parsed.hostname.length > 0 &&
+      parsed.port.length > 0 &&
+      parsed.pathname.length > 1
+    );
+  } catch {
+    return false;
+  }
+}
 
 export const mysqlUrl = Schema.String.check(
   Schema.makeFilter<string>(
@@ -169,7 +207,7 @@ export const mysqlUrl = Schema.String.check(
       message: "Use a complete MySQL connection URL",
     },
   ),
-  Schema.isPattern(/^mysqls?:\/\/[^:]+:[^@]+@[^:]+:\d+\/.+$/, {
+  Schema.makeFilter<string>(isMysqlUrl, {
     message: "Include username, password, host, port, and database name",
   }),
 );
