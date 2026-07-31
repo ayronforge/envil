@@ -204,6 +204,33 @@ export function createExportOriginResolver(
         : undefined;
     }
 
+    async function localNamespaceOrigin(
+      localName: string,
+      memberName: string,
+      visited: ReadonlySet<string>,
+    ): Promise<IntrinsicName | undefined> {
+      if (visited.has(localName)) {
+        return undefined;
+      }
+      for (const imported of currentSourceFile.statements) {
+        if (
+          !ts.isImportDeclaration(imported) ||
+          imported.importClause?.isTypeOnly === true ||
+          !ts.isStringLiteral(imported.moduleSpecifier) ||
+          imported.importClause?.namedBindings === undefined ||
+          !ts.isNamespaceImport(imported.importClause.namedBindings) ||
+          imported.importClause.namedBindings.name.text !== localName
+        ) {
+          continue;
+        }
+        return originOf(imported.moduleSpecifier.text, fileName, memberName, nextVisiting);
+      }
+      const initializer = constInitializer(currentSourceFile, localName);
+      return initializer !== undefined && ts.isIdentifier(initializer)
+        ? localNamespaceOrigin(initializer.text, memberName, new Set(visited).add(localName))
+        : undefined;
+    }
+
     const namespaceSeparator = exportName.indexOf(".");
     if (namespaceSeparator > 0) {
       const namespaceName = exportName.slice(0, namespaceSeparator);
@@ -216,26 +243,40 @@ export function createExportOriginResolver(
             ts.isIdentifier(statement.expression),
         );
         if (assignment !== undefined && ts.isIdentifier(assignment.expression)) {
-          for (const statement of sourceFile.statements) {
-            if (
-              !ts.isImportDeclaration(statement) ||
-              statement.importClause?.isTypeOnly === true ||
-              !ts.isStringLiteral(statement.moduleSpecifier) ||
-              statement.importClause?.namedBindings === undefined ||
-              !ts.isNamespaceImport(statement.importClause.namedBindings) ||
-              statement.importClause.namedBindings.name.text !== assignment.expression.text
-            ) {
-              continue;
-            }
-            const origin = await originOf(
-              statement.moduleSpecifier.text,
-              fileName,
-              memberName,
-              nextVisiting,
-            );
-            cache.origins.set(key, origin ?? null);
-            return origin;
+          const origin = await localNamespaceOrigin(
+            assignment.expression.text,
+            memberName,
+            new Set(),
+          );
+          cache.origins.set(key, origin ?? null);
+          return origin;
+        }
+        let localExport: ts.ExportSpecifier | undefined;
+        for (const statement of sourceFile.statements) {
+          if (
+            !ts.isExportDeclaration(statement) ||
+            statement.isTypeOnly ||
+            statement.moduleSpecifier !== undefined ||
+            statement.exportClause === undefined ||
+            !ts.isNamedExports(statement.exportClause)
+          ) {
+            continue;
           }
+          localExport = statement.exportClause.elements.find(
+            (element) => !element.isTypeOnly && element.name.text === "default",
+          );
+          if (localExport !== undefined) {
+            break;
+          }
+        }
+        if (localExport !== undefined) {
+          const origin = await localNamespaceOrigin(
+            localExport.propertyName?.text ?? localExport.name.text,
+            memberName,
+            new Set(),
+          );
+          cache.origins.set(key, origin ?? null);
+          return origin;
         }
       }
       for (const statement of sourceFile.statements) {

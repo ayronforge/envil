@@ -19,6 +19,17 @@ function isInsideRange(node: ts.Node, ranges: ReadonlyArray<readonly [number, nu
   return ranges.some(([start, end]) => node.getStart() >= start && node.end <= end);
 }
 
+function isTypeOnlyReference(node: ts.Identifier): boolean {
+  if (ts.isPartOfTypeNode(node)) {
+    return true;
+  }
+  let parent = node.parent;
+  while (ts.isQualifiedName(parent)) {
+    parent = parent.parent;
+  }
+  return ts.isTypeQueryNode(parent);
+}
+
 function isUnusedConfiguredResolver(
   declaration: ts.VariableDeclaration,
   context: TransformContext,
@@ -41,8 +52,9 @@ function isUnusedConfiguredResolver(
   collectSymbolReferences(context.sourceFile, symbol, context.checker, references);
   const externalReferences = references.filter(
     (reference) =>
-      reference.getStart(context.sourceFile) !== declaration.name.getStart(context.sourceFile) ||
-      reference.end !== declaration.name.end,
+      !isTypeOnlyReference(reference) &&
+      (reference.getStart(context.sourceFile) !== declaration.name.getStart(context.sourceFile) ||
+        reference.end !== declaration.name.end),
   );
   return (
     externalReferences.length > 0 &&

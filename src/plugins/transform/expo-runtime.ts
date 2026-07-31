@@ -80,7 +80,12 @@ function explicitRuntimeKey(
         return;
       }
       const moduleName = importedModuleName(node, context);
-      if (moduleName?.startsWith(".") === true || moduleName?.startsWith("/") === true) {
+      if (
+        moduleName !== undefined &&
+        moduleName !== "@ayronforge/envil" &&
+        moduleName !== "effect" &&
+        !moduleName.startsWith("effect/")
+      ) {
         hasUnresolvedImportedSchema = true;
       }
     }

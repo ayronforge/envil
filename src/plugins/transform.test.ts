@@ -172,6 +172,23 @@ export const appEnv = createEnv(
     expect(transformed).toContain("undefined");
   });
 
+  test("ignores type-only resolver references when pruning client builds", () => {
+    const source = `
+import { configureResolver, createEnv, fromResolver, requiredString, server } from "@ayronforge/envil";
+import { adapter } from "./server-adapter.ts";
+
+const secrets = configureResolver(adapter, {});
+type Resolver = typeof secrets;
+export const appEnv = createEnv(
+  server({ TOKEN: requiredString.pipe(fromResolver(secrets, "token")) }),
+);
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).not.toContain("const secrets = configureResolver");
+    expect(transformed).toContain("type Resolver = typeof secrets");
+  });
+
   test("keeps configured resolvers that are also used outside a server fragment", () => {
     const source = `
 import { configureResolver, createEnv, fromResolver, requiredString, server } from "@ayronforge/envil";
@@ -427,6 +444,38 @@ export const fragment = envil.server(values);
     }
   });
 
+  test("prunes namespace objects exported as defaults through export lists", async () => {
+    const root = await mkdtemp(join(tmpdir(), "envil-transform-"));
+    const barrel = join(root, "envil-barrel.ts");
+    const sourceId = join(root, "env.ts");
+    await writeFile(
+      barrel,
+      `
+import * as envil from "@ayronforge/envil";
+export { envil as default };
+`,
+    );
+
+    try {
+      const transformed = await transformResolvedEnvilModule(
+        `
+import envil from "./envil-barrel.ts";
+const values = makeArbitraryValues();
+export const fragment = envil.server(values);
+`,
+        sourceId,
+        "client",
+        async (specifier, importer) =>
+          specifier === "./envil-barrel.ts" && importer === sourceId ? barrel : undefined,
+      );
+
+      expect(transformed).toBeDefined();
+      expect(transformed?.code).not.toContain("envil.server(values)");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("compiles explicit Expo fromEnv names", () => {
     const source = `
 import { client, createEnv, fromEnv, requiredString } from "@ayronforge/envil";
@@ -473,6 +522,33 @@ client({ URL: importedSchema }, expo);
     expect(() => transformEnvilModule(source, "src/env.ts", "client")).toThrow(
       "cannot prove the runtime source of imported client schemas",
     );
+  });
+
+  test("fails closed when a package schema may hide an explicit Expo source", () => {
+    const source = `
+import { client } from "@ayronforge/envil";
+import { expo } from "@ayronforge/envil/presets";
+import { importedSchema } from "@example/env-schemas";
+
+client({ URL: importedSchema }, expo);
+`;
+
+    expect(() => transformEnvilModule(source, "src/env.ts", "client")).toThrow(
+      "cannot prove the runtime source of imported client schemas",
+    );
+  });
+
+  test("accepts schemas imported from Effect package entrypoints", () => {
+    const source = `
+import { client } from "@ayronforge/envil";
+import { expo } from "@ayronforge/envil/presets";
+import * as Schema from "effect/Schema";
+
+client({ URL: Schema.String }, expo);
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).toContain('"EXPO_PUBLIC_URL": process.env.EXPO_PUBLIC_URL');
   });
 
   test("compiles Expo presets factored into local const options", () => {
