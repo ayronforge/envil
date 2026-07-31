@@ -702,6 +702,28 @@ describe("variable sources", () => {
     expect(() => Effect.runSync(appEnv.server)).toThrow('did not return "TOKEN"');
   });
 
+  test("rejects resolver values inherited from the result prototype", () => {
+    const inheritedAdapter: ResolverAdapter<"inherited", string, {}, never, never> = {
+      name: "inherited",
+      resolve: () =>
+        Effect.sync(() => {
+          const result: Record<string, ResolvedSecret> = {};
+          Object.setPrototypeOf(result, {
+            TOKEN: Option.some(Redacted.make("inherited-value")),
+          });
+          return result;
+        }),
+    };
+    const source = configureResolver(inheritedAdapter, {});
+    const appEnv = createEnv(
+      server({
+        TOKEN: optional(requiredString).pipe(fromResolver(source, "remote-reference")),
+      }),
+    );
+
+    expect(() => Effect.runSync(appEnv.server)).toThrow('did not return "TOKEN"');
+  });
+
   test("client materialization never executes server resolvers", async () => {
     let calls = 0;
     const source = configureResolver(customSecretsAdapter, {});

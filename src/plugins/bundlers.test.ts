@@ -690,6 +690,47 @@ export const fragment = server({
     }
   });
 
+  test("traces server through Rollup virtual barrels", async () => {
+    const root = await mkdtemp(join(process.cwd(), ".envil-rollup-virtual-"));
+    temporaryDirectories.push(root);
+    const entry = join(root, "entry.js");
+    const virtualBarrelId = "\0virtual-envil-barrel";
+    const virtualSentinel = "VIRTUAL_SERVER_ONLY_SENTINEL";
+    await writeFile(
+      entry,
+      `
+import { server } from "virtual-envil-barrel";
+export const fragment = server({ SECRET: "${virtualSentinel}" });
+`,
+    );
+
+    const bundle = await rollup({
+      input: entry,
+      external: ["@ayronforge/envil"],
+      plugins: [
+        {
+          name: "virtual-envil-barrel",
+          resolveId(source) {
+            return source === "virtual-envil-barrel" ? virtualBarrelId : null;
+          },
+          load(id) {
+            return id === virtualBarrelId ? 'export { server } from "@ayronforge/envil";\n' : null;
+          },
+        },
+        rollupPlugin({ target: "client" }),
+      ],
+    });
+    try {
+      const generated = await bundle.generate({ format: "es" });
+      const code = outputChunkCode(generated.output);
+
+      expect(code).toContain("fragment = undefined");
+      expect(code).not.toContain(virtualSentinel);
+    } finally {
+      await bundle.close();
+    }
+  });
+
   test("compiles and executes client and server targets with Rolldown", async () => {
     await verifyTargets(buildRolldownBundle);
   });

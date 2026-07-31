@@ -60,6 +60,13 @@ function rollupModuleResolver(context: RollupPluginContext): ModuleResolver {
     if (resolved === null || resolved.external) {
       return undefined;
     }
+    if (resolved.id.startsWith("\0")) {
+      const loaded = await context.load({ id: resolved.id });
+      if (loaded.code === null) {
+        throw new Error(`Envil could not inspect virtual module "${resolved.id}".`);
+      }
+      return { id: resolved.id, source: loaded.code };
+    }
     context.addWatchFile(resolved.id);
     return resolved.id;
   };
@@ -70,6 +77,13 @@ function rolldownModuleResolver(context: RolldownPluginContext): ModuleResolver 
     const resolved = await context.resolve(specifier, importer, { skipSelf: true });
     if (resolved === null || resolved.external) {
       return undefined;
+    }
+    if (resolved.id.startsWith("\0")) {
+      const loaded = await context.load({ id: resolved.id });
+      if (loaded.code === null) {
+        throw new Error(`Envil could not inspect virtual module "${resolved.id}".`);
+      }
+      return { id: resolved.id, source: loaded.code };
     }
     context.addWatchFile(resolved.id);
     return resolved.id;

@@ -5,8 +5,17 @@ import ts from "typescript6";
 /** Envil exports with compiler behavior. */
 export type IntrinsicName = "server" | "client" | "configureResolver" | "fromEnv" | "expo";
 
+/** Bundler-resolved module identity and optional in-memory source. */
+export interface ResolvedModule {
+  readonly id: string;
+  readonly source?: string;
+}
+
 /** Resolves one module specifier with the active bundler. */
-export type ModuleResolver = (specifier: string, importer: string) => Promise<string | undefined>;
+export type ModuleResolver = (
+  specifier: string,
+  importer: string,
+) => Promise<string | ResolvedModule | undefined>;
 
 /** Finds the Envil intrinsic behind one imported export name. */
 export type ExportOriginResolver = (
@@ -17,7 +26,7 @@ export type ExportOriginResolver = (
 
 /** Module resolution and source analysis reused for one build. */
 export interface ExportOriginCache {
-  readonly resolvedModules: Map<string, string | null>;
+  readonly resolvedModules: Map<string, ResolvedModule | null>;
   readonly sourceFiles: Map<string, ts.SourceFile>;
   readonly origins: Map<string, IntrinsicName | null>;
 }
@@ -122,16 +131,21 @@ export function createExportOriginResolver(
     const resolutionKey = `${importer}\0${specifier}`;
     let resolved = cache.resolvedModules.get(resolutionKey);
     if (resolved === undefined) {
-      resolved = (await resolveModule(specifier, importer)) ?? null;
+      const resolution = await resolveModule(specifier, importer);
+      resolved =
+        resolution === undefined
+          ? null
+          : typeof resolution === "string"
+            ? { id: resolution }
+            : resolution;
       cache.resolvedModules.set(resolutionKey, resolved);
     }
     if (resolved === null) {
       return undefined;
     }
-    if (resolved.startsWith("\0")) {
-      return undefined;
-    }
-    const fileName = resolved.split(/[?#]/, 1)[0] ?? resolved;
+    const fileName = resolved.id.startsWith("\0")
+      ? resolved.id
+      : (resolved.id.split(/[?#]/, 1)[0] ?? resolved.id);
     const key = `${fileName}\0${exportName}`;
     if (visiting.has(key)) {
       return undefined;
@@ -144,7 +158,7 @@ export function createExportOriginResolver(
     if (sourceFile === undefined) {
       sourceFile = ts.createSourceFile(
         fileName,
-        await readFile(fileName, "utf8"),
+        resolved.source ?? (await readFile(fileName, "utf8")),
         ts.ScriptTarget.Latest,
         true,
         scriptKindFor(fileName),

@@ -236,7 +236,7 @@ function collectResolvedValues(
 
   for (const [group, result] of groups) {
     for (const key of Object.keys(group.referencesByKey)) {
-      const value = result[key];
+      const value = Object.hasOwn(result, key) ? result[key] : undefined;
       if (value === undefined || !Option.isOption(value)) {
         throw configurationFailure(
           `Resolver "${group.resolver.name}" did not return "${key}". Check the resolver implementation and try again.`,
