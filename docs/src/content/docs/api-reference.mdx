@@ -1,300 +1,186 @@
 ---
 title: API Reference
-description: Complete API reference for @ayronforge/envil — all functions, schemas, errors, and types.
-order: 15
+description: Public fragment, composition, source, inference, resolver, result, and error APIs.
 ---
 
-import TypeTable from "@/components/docs/TypeTable.astro";
+## Environment definition
 
-## createEnv
+### `server(values, options?)`
 
-The main function for creating a type-safe environment object.
-
-### Without resolvers
+Creates an immutable server fragment. `options` accepts:
 
 ```ts
-function createEnv<TServer, TClient, TShared, TExtends>(
-  opts: EnvOptions<TServer, TClient, TShared, TExtends>
-): EnvResult<TExtends, TServer, TClient, TShared>
-```
-
-Returns a fully typed, readonly environment object immediately.
-
-### With resolvers
-
-```ts
-function createEnv<TServer, TClient, TShared, TExtends>(
-  opts: EnvOptions<TServer, TClient, TShared, TExtends> & {
-    resolvers: readonly Effect.Effect<ResolverResult, ResolverError>[]
-  }
-): Effect.Effect<EnvResult<TExtends, TServer, TClient, TShared>, ResolverError | EnvValidationError>
-```
-
-Returns an `Effect` that resolves secrets, validates all variables, and produces the env object.
-
-### Options
-
-<TypeTable rows={[
-  { name: "server", type: "Record<string, Schema>", description: "Server-only environment variable schemas. Not validated on client." },
-  { name: "client", type: "Record<string, Schema>", description: "Client-safe environment variable schemas. Validated everywhere." },
-  { name: "shared", type: "Record<string, Schema>", description: "Shared environment variable schemas. Validated and accessible everywhere." },
-  { name: "extends", type: "readonly AnyEnv[]", description: "Array of existing env objects to merge into this one." },
-  { name: "prefix", type: "string | PrefixMap", description: "Prefix applied to env var names when reading from the environment." },
-  { name: "runtimeEnv", type: "Record<string, string | undefined>", description: "Override process.env with a custom environment source." },
-  { name: "isServer", type: "boolean", description: "Override server detection. Defaults to typeof window === 'undefined'." },
-  { name: "emptyStringAsUndefined", type: "boolean", description: "Treat empty string values as undefined." },
-  { name: "onValidationError", type: "(errors: string[]) => void", description: "Callback fired before EnvValidationError is thrown." },
-  { name: "resolvers", type: "readonly Effect.Effect<ResolverResult, ResolverError>[]", description: "Array of resolver Effects. When present, createEnv returns an Effect." },
-  { name: "autoRedactResolver", type: "boolean", description: "Default true. Auto-wraps resolver-provided values in Redacted. Types reflect this automatically." },
-]} />
-
-### PrefixMap
-
-```ts
-interface PrefixMap {
-  server?: string
-  client?: string
-  shared?: string
+{
+  runtimeEnv?: RuntimeEnv;
+  prefix?: string;
+  emptyStringAsUndefined?: boolean;
 }
 ```
 
----
+The runtime source defaults to `process.env`. Values may contain static values,
+Effect Schemas whose outputs are not functions, `fromEnv` definitions, and
+`fromResolver` definitions.
 
-## safeCreateEnv
+### `client(values, options?)`
 
-A safe alternative to `createEnv` that returns discriminated result objects instead of raising exceptions.
+Creates an immutable public client fragment with the same runtime options.
+`runtimeEnv` is required when `values` contains a schema. Resolver-backed and
+redacted definitions are rejected.
 
-### Without resolvers
+### `shared(values)`
 
-```ts
-function safeCreateEnv<TServer, TClient, TShared, TExtends>(
-  opts: EnvOptions<TServer, TClient, TShared, TExtends>
-): SafeCreateEnvResult<EnvResult<TExtends, TServer, TClient, TShared>, EnvValidationError>
-```
+Creates an immutable fragment of public static values available to both
+contexts. Schemas and redacted values are rejected.
 
-Returns `{ success: true, data }` or `{ success: false, error }` synchronously.
+### `createEnv(...fragments)`
 
-### With resolvers
-
-```ts
-function safeCreateEnv<TServer, TClient, TShared, TExtends>(
-  opts: EnvOptions<TServer, TClient, TShared, TExtends> & {
-    resolvers: readonly Effect.Effect<ResolverResult, ResolverError>[]
-  }
-): Effect.Effect<
-  SafeCreateEnvResult<EnvResult<...>, ResolverError | EnvValidationError>,
-  never
->
-```
-
-Returns an `Effect` that **never fails** — both resolver and validation errors are captured in the result.
-
-### Result types
-
-<TypeTable rows={[
-  { name: "SafeCreateEnvSuccess<T>", type: "{ success: true; data: T }", description: "Success branch of the result." },
-  { name: "SafeCreateEnvFailure<E>", type: "{ success: false; error: E }", description: "Failure branch of the result." },
-  { name: "SafeCreateEnvResult<T, E>", type: "SafeCreateEnvSuccess<T> | SafeCreateEnvFailure<E>", description: "Discriminated union of success and failure." },
-]} showDefault={false} />
-
-Accepts the same options as `createEnv` — see [Safe Parsing](/envil/docs/safe-parsing) for full usage details.
-
----
-
-## Schemas
-
-All schemas are exported from `@ayronforge/envil`.
-
-### String schemas
-
-<TypeTable rows={[
-  { name: "requiredString", type: "Schema<string, string>", description: "Non-empty string (minLength: 1)." },
-]} />
-
-### Number schemas
-
-<TypeTable rows={[
-  { name: "number", type: "Schema<number, string>", description: "Any number parsed from string via NumberFromString." },
-  { name: "positiveNumber", type: "Schema<number, string>", description: "Positive number parsed from string (> 0)." },
-  { name: "integer", type: "Schema<number, string>", description: "Integer parsed from string." },
-  { name: "nonNegativeNumber", type: "Schema<number, string>", description: "Non-negative number parsed from string (>= 0)." },
-  { name: "port", type: "Schema<number, string>", description: "Port number 1–65535, parsed from string." },
-]} />
-
-### Boolean schema
-
-<TypeTable rows={[
-  { name: "boolean", type: "Schema<boolean, string>", description: "Parses 'true', 'false', '1', '0' into boolean." },
-]} />
-
-### URL schemas
-
-<TypeTable rows={[
-  { name: "url", type: "Schema<string, string>", description: "Valid HTTP or HTTPS URL." },
-  { name: "postgresUrl", type: "Schema<string, string>", description: "PostgreSQL connection URL." },
-  { name: "redisUrl", type: "Schema<string, string>", description: "Redis connection URL." },
-  { name: "mongoUrl", type: "Schema<string, string>", description: "MongoDB connection URL." },
-  { name: "mysqlUrl", type: "Schema<string, string>", description: "MySQL connection URL." },
-  { name: "commaSeparatedUrls", type: "Schema<string[], string>", description: "Comma-separated HTTP/HTTPS URLs." },
-]} />
-
-### Collection schemas
-
-<TypeTable rows={[
-  { name: "commaSeparated", type: "Schema<string[], string>", description: "Comma-separated string to trimmed string array." },
-  { name: "commaSeparatedNumbers", type: "Schema<number[], string>", description: "Comma-separated string to number array." },
-]} />
-
-### Parameterized schemas
-
-<TypeTable rows={[
-  { name: "stringEnum(values)", type: "(values: string[]) => Schema<string, string>", description: "Creates a literal union schema from the provided values." },
-  { name: "json(schema)", type: "(schema: Schema) => Schema<T, string>", description: "Parses JSON string and validates against the inner schema." },
-]} />
-
----
-
-## Helpers
-
-<TypeTable rows={[
-  { name: "withDefault(schema, value)", type: "(schema: S, default: T) => Schema", description: "Makes a schema optional with a default value. Supports data-first and pipe style." },
-  { name: "optional(schema)", type: "(schema: S) => Schema<T | undefined>", description: "Makes a schema accept undefined. Shorthand for Schema.UndefinedOr(schema)." },
-  { name: "redacted(schema)", type: "(schema: S) => Schema<Redacted<T>>", description: "Wraps schema output in Effect Redacted. Use Redacted.value() to unwrap." },
-]} />
-
----
-
-## Error classes
-
-### EnvValidationError
+Creates one AppEnv from `server`, `client`, and `shared` fragments:
 
 ```ts
-class EnvValidationError extends Error {
-  readonly _tag: "EnvValidationError"
-  readonly errors: ReadonlyArray<string>
-}
+const appEnv = createEnv(
+  shared({ APP_NAME: "My App" }),
+  server({ DATABASE_URL: postgresUrl }),
+  client({ APP_URL: url }, { runtimeEnv: import.meta.env }),
+);
 ```
 
-Thrown when environment variable validation fails. Contains all validation error messages.
-
-### ClientAccessError
+The returned object exposes two lazy Effect properties:
 
 ```ts
-class ClientAccessError extends Error {
-  readonly _tag: "ClientAccessError"
-  readonly variableName: string
-}
+appEnv.server
+appEnv.client
 ```
 
-Thrown when client code accesses a server-only variable.
+The server Effect produces server, client, and shared values. The client Effect
+produces client and shared values.
 
-### ResolverError
+### `extendEnv(...inputs)`
+
+Returns a pipeable extension function:
 
 ```ts
-class ResolverError extends Data.TaggedError("ResolverError")<{
-  readonly resolver: string
-  readonly message: string
-  readonly cause?: unknown
-}>
+const appEnv = baseEnv.pipe(
+  extendEnv(featureEnv),
+  extendEnv(server({ PORT: port })),
+);
 ```
 
-Effect tagged error for resolver failures.
+Inputs may be AppEnv values or individual fragments. They are applied from left
+to right, and the last complete definition for a key wins. `createEnv` does not
+accept existing AppEnv values.
 
----
+### `fromEnv(name)`
 
-## Presets
+Schema pipe combinator that maps one property to an exact runtime name:
 
-Exported from `@ayronforge/envil/presets`.
+```ts
+API_KEY: requiredString.pipe(fromEnv("PUBLIC_API_KEY"))
+```
 
-<TypeTable rows={[
-  { name: "nextjs", type: "{ prefix: { client: \"NEXT_PUBLIC_\" } }", description: "Next.js client prefix preset." },
-  { name: "vite", type: "{ prefix: { client: \"VITE_\" } }", description: "Vite client prefix preset." },
-  { name: "expo", type: "{ prefix: { client: \"EXPO_PUBLIC_\" } }", description: "Expo client prefix preset." },
-  { name: "nuxt", type: "{ prefix: { client: \"NUXT_PUBLIC_\" } }", description: "Nuxt client prefix preset." },
-  { name: "sveltekit", type: "{ prefix: { client: \"PUBLIC_\" } }", description: "SvelteKit client prefix preset." },
-  { name: "astro", type: "{ prefix: { client: \"PUBLIC_\" } }", description: "Astro client prefix preset." },
-]} />
+Apply schema combinators before `fromEnv`; the returned sourced definition is
+terminal so the source cannot be accidentally erased.
 
----
+Runtime sources accept an environment object, parsed JSON object, or
+`ReadonlyMap<string, unknown>`. Object sources support exact keys and
+dot-separated paths; exact keys take precedence. Map sources use exact keys.
 
 ## Resolvers
 
-### fromAwsSecrets
+### `configureResolver(adapter, options)`
+
+Configures any `ResolverAdapter` with ordinary runtime options. No compiler
+metadata is required from custom adapters. The configured resolver can be
+reused by multiple `fromResolver` definitions.
+
+Resolver adapters receive requested provider references as `referencesByKey`,
+keyed by application property:
 
 ```ts
-import { fromAwsSecrets } from "@ayronforge/envil/aws"
+resolve: ({ referencesByKey }) =>
+  Effect.succeed({
+    TOKEN: resolveReference(referencesByKey.TOKEN),
+  })
 ```
 
-<TypeTable rows={[
-  { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → secret IDs. Supports #jsonKey syntax." },
-  { name: "region", type: "string", description: "AWS region." },
-  { name: "strict", type: "boolean", default: "false", description: "When true, secret fetch/parsing errors fail with ResolverError instead of returning undefined." },
-]} />
+### `fromResolver(resolver, reference)`
 
-### fromGcpSecrets
+Makes one server variable authoritative from a provider reference:
 
 ```ts
-import { fromGcpSecrets } from "@ayronforge/envil/gcp"
+TOKEN: requiredString.pipe(
+  fromResolver(aws, "production/token"),
+)
 ```
 
-<TypeTable rows={[
-  { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → secret names or full resource paths." },
-  { name: "projectId", type: "string", description: "GCP project ID." },
-  { name: "version", type: "string", default: '"latest"', description: "Secret version." },
-  { name: "strict", type: "boolean", default: "false", description: "When true, secret fetch errors fail with ResolverError instead of returning undefined." },
-]} />
+Resolver-backed schemas are server-only, automatically redacted, and batched by
+configured resolver.
 
-### fromAzureKeyVault
+### Built-in adapters
+
+- `awsSecretsAdapter`
+- `gcpSecretsAdapter`
+- `azureKeyVaultAdapter`
+- `onePasswordSecretsAdapter`
+- `customSecretsAdapter`
+
+## Inference
 
 ```ts
-import { fromAzureKeyVault } from "@ayronforge/envil/azure"
+InferServerEnv<typeof appEnv>
+InferClientEnv<typeof appEnv>
+InferEnv<typeof appEnv.server>
+InferEnv<typeof appEnv.client>
 ```
 
-<TypeTable rows={[
-  { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → Key Vault secret names." },
-  { name: "vaultUrl", type: "string", required: true, description: "Azure Key Vault URL." },
-  { name: "credential", type: "unknown", description: "Azure credential. Defaults to DefaultAzureCredential." },
-  { name: "strict", type: "boolean", default: "false", description: "When true, secret fetch errors fail with ResolverError instead of returning undefined." },
-]} />
+`InferEnv` also accepts Promise-like materialization results.
 
-### fromOnePassword
+## Result conversion
+
+### `asResult()`
+
+Converts only an Effect's typed error channel:
 
 ```ts
-import { fromOnePassword } from "@ayronforge/envil/1password"
+const result = await Effect.runPromise(
+  appEnv.server.pipe(asResult()),
+);
 ```
 
-<TypeTable rows={[
-  { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → 1Password secret references (op:// URIs)." },
-  { name: "serviceAccountToken", type: "string", description: "1Password service account token." },
-  { name: "strict", type: "boolean", default: "false", description: "When true, batch resolution errors fail with ResolverError instead of returning undefined." },
-]} />
+Defects and interruptions are not converted into result values.
 
-### fromRemoteSecrets
+## Errors
 
-```ts
-import { fromRemoteSecrets } from "@ayronforge/envil"
-```
+### `EnvValidationError`
 
-<TypeTable rows={[
-  { name: "secrets", type: "Record<string, string>", required: true, description: "Env var names → secret identifiers passed to the client." },
-  { name: "client", type: "SecretClient", required: true, description: "Custom client implementing the SecretClient interface." },
-  { name: "strict", type: "boolean", default: "false", description: "When true, client fetch errors fail with ResolverError instead of returning undefined." },
-]} />
+Contains frozen, secret-safe issues for missing and invalid values.
 
----
+### `EnvConfigurationError`
 
-## SecretClient
+Reports invalid fragments, duplicate runtime mappings, malformed runtime
+sources, and malformed resolver results.
 
-The client interface for `fromRemoteSecrets` and custom integrations.
+### `ServerEnvironmentAccessError`
 
-```ts
-import type { SecretClient } from "@ayronforge/envil"
+An `EnvConfigurationError` subclass returned when `appEnv.server` executes in a
+client or unproven runtime.
 
-interface SecretClient {
-  getSecret: (secretId: string) => Promise<string | undefined>
-  getSecrets?: (secretIds: string[]) => Promise<Map<string, string | undefined>>
-}
-```
+### `EnvironmentAccessError`
 
-- `getSecret` — required. Fetches a single secret by ID.
-- `getSecrets` — optional. When provided and there are multiple secrets, enables batch fetching.
+An `EnvConfigurationError` subclass raised when code reads a property that is
+not present in the materialized target.
+
+### Resolver errors
+
+- `ResolverConfigurationError`
+- `ResolverInitializationError`
+- `ResolverRequestFailed`
+- `ResolverResponseDecodeFailed`
+
+## Build plugins
+
+- `@ayronforge/envil/plugins/vite`
+- `@ayronforge/envil/plugins/rollup`
+- `@ayronforge/envil/plugins/rolldown`
+- `@ayronforge/envil/plugins/webpack`
+- `@ayronforge/envil/plugins/rspack`
+- `@ayronforge/envil/plugins/esbuild`

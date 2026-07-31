@@ -24,7 +24,7 @@ import {
   withDefault,
 } from "./schemas.ts";
 
-const decode = <S extends Schema.Schema.Any>(schema: S, value: unknown) =>
+const decode = <S extends Schema.Top>(schema: S, value: unknown) =>
   Schema.decodeUnknownSync(schema)(value);
 
 describe("withDefault", () => {
@@ -204,7 +204,9 @@ describe("commaSeparatedNumbers", () => {
   });
 
   test("rejects non-numeric entries", () => {
-    expect(() => decode(commaSeparatedNumbers, "1,abc,3")).toThrow('"abc" is not a valid number');
+    expect(() => decode(commaSeparatedNumbers, "1,abc,3")).toThrow(
+      'Use a comma-separated list of numbers, such as "1, 2, 3"',
+    );
   });
 });
 
@@ -227,6 +229,12 @@ describe("url", () => {
 
   test("rejects no-protocol strings", () => {
     expect(() => decode(url, "example.com")).toThrow();
+  });
+
+  test("rejects HTTP URLs without an explicit authority delimiter", () => {
+    for (const value of ["http:example.com", "https:/example.com", "http:///example.com"]) {
+      expect(() => decode(url, value)).toThrow();
+    }
   });
 
   test("rejects empty string", () => {
@@ -257,6 +265,11 @@ describe("postgresUrl", () => {
     expect(decode(postgresUrl, pgUrl)).toBe(pgUrl);
   });
 
+  test("accepts a bracketed IPv6 host", () => {
+    const pgUrl = "postgres://user:pass@[::1]:5432/app";
+    expect(decode(postgresUrl, pgUrl)).toBe(pgUrl);
+  });
+
   test("rejects other protocols", () => {
     expect(() => decode(postgresUrl, "mysql://user:pass@host:3306/db")).toThrow();
   });
@@ -265,6 +278,16 @@ describe("postgresUrl", () => {
 describe("redisUrl", () => {
   test("accepts redis:// URL with auth, port, and db", () => {
     const rUrl = "redis://user:pass@host:6379/0";
+    expect(decode(redisUrl, rUrl)).toBe(rUrl);
+  });
+
+  test("accepts redis:// URL with password-only auth", () => {
+    const rUrl = "redis://:secret@host:6379/0";
+    expect(decode(redisUrl, rUrl)).toBe(rUrl);
+  });
+
+  test("accepts redis:// URL with a bracketed IPv6 host", () => {
+    const rUrl = "redis://[::1]:6379/0";
     expect(decode(redisUrl, rUrl)).toBe(rUrl);
   });
 
@@ -550,6 +573,27 @@ describe("mongoUrl", () => {
     expect(decode(mongoUrl, mUrl)).toBe(mUrl);
   });
 
+  test("accepts a MongoDB seed list with a bracketed IPv6 host", () => {
+    const value = "mongodb://host:27017,[::1]:27018/db";
+    expect(decode(mongoUrl, value)).toBe(value);
+  });
+
+  test("rejects mongodb:// URLs without a host", () => {
+    expect(() => decode(mongoUrl, "mongodb://?retryWrites=true")).toThrow();
+  });
+
+  test("rejects non-numeric MongoDB ports", () => {
+    expect(() => decode(mongoUrl, "mongodb://host:notaport")).toThrow();
+  });
+
+  test("rejects ports in mongodb+srv URLs", () => {
+    expect(() => decode(mongoUrl, "mongodb+srv://host:27017/db")).toThrow();
+  });
+
+  test("rejects malformed bracketed MongoDB hosts", () => {
+    expect(() => decode(mongoUrl, "mongodb://[::1/db")).toThrow();
+  });
+
   test("rejects other protocols", () => {
     expect(() => decode(mongoUrl, "postgres://user:pass@host:5432/db")).toThrow();
   });
@@ -568,6 +612,11 @@ describe("mysqlUrl", () => {
   test("accepts mysqls:// URL", () => {
     const mUrl = "mysqls://user:pass@host:3306/db";
     expect(decode(mysqlUrl, mUrl)).toBe(mUrl);
+  });
+
+  test("accepts mysql:// URL with a bracketed IPv6 host", () => {
+    const value = "mysql://user:pass@[::1]:3306/app";
+    expect(decode(mysqlUrl, value)).toBe(value);
   });
 
   test("rejects missing port", () => {

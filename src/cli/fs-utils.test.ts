@@ -152,7 +152,7 @@ describe("readTextFileOrThrow", () => {
   test("throws with label on missing file", async () => {
     const dir = await makeTempDir("read-missing");
     await expect(readTextFileOrThrow(path.join(dir, "nope.txt"), "config")).rejects.toThrow(
-      "Unable to read config",
+      "Could not read config",
     );
   });
 });
@@ -181,5 +181,15 @@ describe("writeFileAtomic", () => {
     await writeFileAtomic(filePath, "new content");
     const content = await readFile(filePath, "utf8");
     expect(content).toBe("new content");
+  });
+
+  test("explains how to recover when the destination cannot be written", async () => {
+    const dir = await makeTempDir("write-failure");
+    const blockingFile = path.join(dir, "not-a-directory");
+    await writeFile(blockingFile, "content");
+
+    await expect(writeFileAtomic(path.join(blockingFile, "output.ts"), "content")).rejects.toThrow(
+      "Check that the destination is writable and try again.",
+    );
   });
 });

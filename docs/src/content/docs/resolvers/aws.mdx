@@ -1,86 +1,38 @@
 ---
 title: AWS Secrets Manager
-description: Resolve environment variables from AWS Secrets Manager with batch fetching and JSON key extraction.
-order: 10
+description: Source server variables from AWS Secrets Manager.
 ---
 
-import TypeTable from "@/components/docs/TypeTable.astro";
-import Callout from "@/components/docs/Callout.astro";
-import Tabs from "@/components/docs/Tabs.astro";
-
-## Installation
-
-Install the AWS SDK peer dependency:
-
-<Tabs items={["npm", "pnpm", "bun", "yarn"]} persist="pkg-manager">
-  <div>
-    ```bash
-    npm install @aws-sdk/client-secrets-manager
-    ```
-  </div>
-  <div>
-    ```bash
-    pnpm add @aws-sdk/client-secrets-manager
-    ```
-  </div>
-  <div>
-    ```bash
-    bun add @aws-sdk/client-secrets-manager
-    ```
-  </div>
-  <div>
-    ```bash
-    yarn add @aws-sdk/client-secrets-manager
-    ```
-  </div>
-</Tabs>
-
-## Basic usage
-
-```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
-import { fromAwsSecrets } from "@ayronforge/envil/aws"
-import { Effect } from "effect"
-
-const envEffect = createEnv({
-  server: {
-    DATABASE_URL: requiredString,
-    API_KEY: requiredString,
-  },
-  resolvers: [
-    fromAwsSecrets({
-      secrets: {
-        DATABASE_URL: "prod/database-url",
-        API_KEY: "prod/api-key",
-      },
-      region: "us-east-1",
-    }),
-  ],
-})
-
-const env = await Effect.runPromise(envEffect)
+```bash
+bun add @aws-sdk/client-secrets-manager
 ```
 
-## Options
-
-<TypeTable rows={[
-  { name: "secrets", type: "Record<string, string>", required: true, description: "Map of env var names to AWS secret IDs. Supports #jsonKey syntax for JSON extraction." },
-  { name: "region", type: "string", description: "AWS region for the Secrets Manager client." },
-  { name: "strict", type: "boolean", default: "false", description: "When true, secret fetch/parsing errors fail with ResolverError instead of returning undefined." },
-]} />
-
-## JSON key extraction
-
-If a secret stores a JSON object, you can extract a specific field using the `#key` syntax:
-
 ```ts
-fromAwsSecrets({
-  secrets: {
-    // Secret "prod/database" contains: {"url": "postgres://...", "pool": "10"}
-    DATABASE_URL: "prod/database#url",
-    DB_POOL_SIZE: "prod/database#pool",
-  },
-})
+import {
+  configureResolver,
+  createEnv,
+  fromResolver,
+  requiredString,
+  server,
+} from "@ayronforge/envil";
+import { awsSecretsAdapter } from "@ayronforge/envil/aws";
+
+const aws = configureResolver(awsSecretsAdapter, {
+  region: "us-east-1",
+});
+
+export const appEnv = createEnv(
+  server({
+    DATABASE_PASSWORD: requiredString.pipe(
+      fromResolver(aws, "production/database#password"),
+    ),
+  }),
+);
 ```
 
-This fetches the `prod/database` secret once and extracts the `url` and `pool` fields separately.
+Append `#field` to read one JSON field from a secret. Variables using the same
+configured `aws` value are resolved together. AWS batch requests are split into
+groups of at most 20 secret IDs.
+
+A reliable not-found response becomes `Option.none()`. Other provider failures
+remain typed resolver errors.

@@ -1,156 +1,45 @@
 ---
-title: Resolvers Overview
-description: Resolve environment variables from cloud secret managers at startup.
-order: 9
+title: Resolver Adapters
+description: Attach authoritative secret providers directly to server variables.
 ---
 
-import Card from "@/components/docs/Card.astro";
-import CardGroup from "@/components/docs/CardGroup.astro";
-import TypeTable from "@/components/docs/TypeTable.astro";
-import Callout from "@/components/docs/Callout.astro";
-
-Resolvers let you pull environment variable values from cloud secret managers instead of (or in addition to) `process.env`. This is useful in production environments where secrets are stored in services like AWS Secrets Manager, GCP Secret Manager, Azure Key Vault, or 1Password.
-
-## How resolvers work
-
-When you pass a `resolvers` array to `createEnv`, the return type changes from a plain object to an `Effect.Effect`:
+Configure provider-wide options once, then attach references to individual
+schemas with `fromResolver`:
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
-import { fromAwsSecrets } from "@ayronforge/envil/aws"
-import { Effect } from "effect"
+import {
+  configureResolver,
+  createEnv,
+  fromResolver,
+  requiredString,
+  server,
+} from "@ayronforge/envil";
+import { awsSecretsAdapter } from "@ayronforge/envil/aws";
 
-// With resolvers → returns Effect
-const envEffect = createEnv({
-  server: {
-    DATABASE_URL: requiredString,
-    API_KEY: requiredString,
-  },
-  resolvers: [
-    fromAwsSecrets({
-      secrets: {
-        DATABASE_URL: "prod/database-url",
-        API_KEY: "prod/api-key",
-      },
-    }),
-  ],
-})
+const aws = configureResolver(awsSecretsAdapter, {
+  region: "us-east-1",
+});
 
-// Run the Effect to get the env object
-const env = await Effect.runPromise(envEffect)
-```
-
-### Resolution flow
-
-1. All resolvers run **concurrently** (unbounded concurrency)
-2. Results are merged: `process.env` is the base, resolver results override
-3. The merged env is passed through schema validation
-4. Resolver initialization/configuration failures surface as `ResolverError` in the Effect error channel
-5. Per-secret fetch misses are returned as `undefined` and then handled by schema validation
-
-### Merge behavior
-
-Resolver results are merged left-to-right on top of `process.env` (or `runtimeEnv`):
-
-```ts
-// Final env = { ...process.env, ...resolver1Results, ...resolver2Results }
-resolvers: [resolver1, resolver2]
-```
-
-Later resolvers override earlier ones for the same key.
-
-## Auto-redaction
-
-By default, all values provided by resolvers are automatically wrapped in Effect's `Redacted` type. This means secrets fetched from cloud providers are safe from accidental leaks through logging, serialization, or spreading.
-
-```ts
-const env = await Effect.runPromise(
-  createEnv({
-    server: {
-      DB_HOST: requiredString,
-      DB_PASS: requiredString,
-    },
-    resolvers: [
-      fromAwsSecrets({
-        secrets: { DB_PASS: "prod/db-password" },
-      }),
-    ],
-    runtimeEnv: { DB_HOST: "localhost" },
+export const appEnv = createEnv(
+  server({
+    DATABASE_PASSWORD: requiredString.pipe(
+      fromResolver(aws, "production/database#password"),
+    ),
+    STRIPE_API_KEY: requiredString.pipe(
+      fromResolver(aws, "production/stripe#api-key"),
+    ),
   }),
-)
-
-// DB_PASS from resolver → Redacted<string> (type-safe)
-console.log(env.DB_PASS)         // <redacted>
-JSON.stringify(env)               // {"DB_HOST":"localhost","DB_PASS":"<redacted>"}
-Redacted.value(env.DB_PASS)      // "actual-password"
-
-// DB_HOST from runtimeEnv → string (not redacted)
-console.log(env.DB_HOST)         // "localhost"
+);
 ```
 
-Types are inferred automatically: resolver-provided keys are typed as `Redacted<T>`, while non-resolver keys remain `T`.
+Resolver-backed values:
 
-### Disabling auto-redaction
+- are allowed only in server fragments;
+- are authoritative and never fall back to the runtime environment;
+- are automatically wrapped in Effect `Redacted`;
+- preserve schema optionality;
+- contribute their precise errors and Effect requirements to `appEnv.server`;
+- are grouped by configured resolver so adapters can batch requests.
 
-Set `autoRedactResolver: false` to disable automatic wrapping:
-
-```ts
-const env = await Effect.runPromise(
-  createEnv({
-    server: { DB_PASS: requiredString },
-    resolvers: [fromAwsSecrets({ secrets: { DB_PASS: "prod/db-pass" } })],
-    autoRedactResolver: false,
-  }),
-)
-
-env.DB_PASS // string (not Redacted)
-```
-
-<Callout type="tip">
-  Even with `autoRedactResolver: false`, you can still use `redacted()` in your schema to explicitly mark individual keys as `Redacted`.
-</Callout>
-
-## Resolver failure modes
-
-Built-in resolvers default to **lenient** per-secret fetching: if an individual fetch fails, the resolver returns `undefined` for that key and schema validation decides whether that is acceptable.
-
-Set `strict: true` on a resolver to fail immediately with `ResolverError` on fetch/parsing errors:
-
-```ts
-fromAwsSecrets({
-  secrets: { DB_PASS: "prod/db-pass" },
-  strict: true,
-})
-```
-
-## Available resolvers
-
-<TypeTable rows={[
-  { name: "fromAwsSecrets", type: "@ayronforge/envil/aws", description: "AWS Secrets Manager. Peer dep: @aws-sdk/client-secrets-manager" },
-  { name: "fromGcpSecrets", type: "@ayronforge/envil/gcp", description: "GCP Secret Manager. Peer dep: @google-cloud/secret-manager" },
-  { name: "fromAzureKeyVault", type: "@ayronforge/envil/azure", description: "Azure Key Vault. Peer deps: @azure/keyvault-secrets, @azure/identity" },
-  { name: "fromOnePassword", type: "@ayronforge/envil/1password", description: "1Password. Peer dep: @1password/sdk" },
-  { name: "fromRemoteSecrets", type: "@ayronforge/envil", description: "Custom / remote secrets. No peer dep — bring your own client." },
-]} />
-
-<Callout type="note">
-  Each built-in resolver dynamically imports its cloud SDK only when needed. You must install the peer dependency for the resolver you use. `fromRemoteSecrets` requires no peer dependencies — you provide the client directly.
-</Callout>
-
-<CardGroup>
-  <Card title="AWS Secrets Manager" href="/envil/docs/resolvers/aws">
-    Batch-fetch secrets with JSON key extraction and automatic SDK initialization.
-  </Card>
-  <Card title="GCP Secret Manager" href="/envil/docs/resolvers/gcp">
-    Access secrets with full resource name support and automatic Uint8Array decoding.
-  </Card>
-  <Card title="Azure Key Vault" href="/envil/docs/resolvers/azure">
-    Fetch secrets with DefaultAzureCredential and managed identity support.
-  </Card>
-  <Card title="1Password" href="/envil/docs/resolvers/onepassword">
-    Resolve secrets from 1Password vaults using the SDK's batch resolution.
-  </Card>
-  <Card title="Custom / Remote Secrets" href="/envil/docs/resolvers/remote">
-    Generic resolver for custom integrations, testing, and unsupported providers.
-  </Card>
-</CardGroup>
+The provider reference is never included in validation errors, resolver errors,
+CLI output, or type-only CLI metadata.

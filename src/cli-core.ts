@@ -1,39 +1,36 @@
-import { pathToFileURL } from "node:url";
+import path from "node:path";
 
-import { ensureWritableTarget, readTextFileOrThrow, writeFileAtomic } from "./cli/fs-utils.ts";
+import { inspectEnvContract, renderEnvExample } from "./cli/contract-inspector.ts";
 import {
-  decodeDotenvText,
-  generateEnvTs,
+  ensureWritableTarget,
   getDefaultEnvOutputPath,
   getDefaultExampleInputPath,
-  inferModel,
+  readTextFileOrThrow,
   resolveFromCwd,
-} from "./cli/index.ts";
-import { FRAMEWORKS, type Framework, type PrefixConfig } from "./cli/types.ts";
-import { buildEnvExample } from "./introspect.ts";
+  writeFileAtomic,
+} from "./cli/fs-utils.ts";
+import { generateDefaultEnvSource, generateEnvSourceFromDotenv } from "./cli/init.ts";
 
 interface CliIO {
-  cwd: () => string;
-  stdout: (message: string) => void;
-  stderr: (message: string) => void;
+  readonly cwd: () => string;
+  readonly stdout: (message: string) => void;
+  readonly stderr: (message: string) => void;
 }
 
-interface AddEnvOptions {
-  input?: string;
-  output?: string;
-  framework?: Framework;
-  clientPrefix?: string;
-  serverPrefix?: string;
-  sharedPrefix?: string;
-  force: boolean;
-  help: boolean;
+interface InitOptions {
+  readonly from?: string;
+  readonly output?: string;
+  readonly clientPrefix?: string;
+  readonly force: boolean;
+  readonly help: boolean;
 }
 
-interface AddExampleOptions {
-  input?: string;
-  output?: string;
-  force: boolean;
-  help: boolean;
+interface ExampleOptions {
+  readonly input?: string;
+  readonly output?: string;
+  readonly exportName?: string;
+  readonly force: boolean;
+  readonly help: boolean;
 }
 
 const DEFAULT_IO: CliIO = {
@@ -42,15 +39,125 @@ const DEFAULT_IO: CliIO = {
   stderr: (message) => process.stderr.write(message),
 };
 
-const FRAMEWORK_PREFIXES: Record<Framework, PrefixConfig> = {
-  nextjs: { server: "", client: "NEXT_PUBLIC_", shared: "" },
-  vite: { server: "", client: "VITE_", shared: "" },
-  expo: { server: "", client: "EXPO_PUBLIC_", shared: "" },
-  nuxt: { server: "", client: "NUXT_PUBLIC_", shared: "" },
-  sveltekit: { server: "", client: "PUBLIC_", shared: "" },
-  astro: { server: "", client: "PUBLIC_", shared: "" },
-};
+type FlagSpec = Readonly<Record<string, "string" | "boolean">>;
 
+function parseFlags(
+  args: ReadonlyArray<string>,
+  specification: FlagSpec,
+): Readonly<Record<string, string | boolean>> {
+  const parsed: Record<string, string | boolean> = {};
+
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (token === undefined || !token.startsWith("--")) {
+      throw new Error(
+        `Unexpected argument${token === undefined ? "" : ` "${token}"`}. Run "envil --help" to see the available commands and options.`,
+      );
+    }
+    const equalsIndex = token.indexOf("=");
+    const name = token.slice(2, equalsIndex < 0 ? undefined : equalsIndex);
+    const expected = specification[name];
+    if (expected === undefined) {
+      throw new Error(
+        `Unknown option "--${name}". Run the command with --help to see its available options.`,
+      );
+    }
+    const inlineValue = equalsIndex < 0 ? undefined : token.slice(equalsIndex + 1);
+    if (expected === "boolean") {
+      if (inlineValue !== undefined) {
+        throw new Error(`Use "--${name}" without a value.`);
+      }
+      parsed[name] = true;
+      continue;
+    }
+    const value = inlineValue ?? args[index + 1];
+    if (value === undefined || value.startsWith("--")) {
+      throw new Error(`Option "--${name}" needs a value. Pass it immediately after the option.`);
+    }
+    parsed[name] = value;
+    if (inlineValue === undefined) {
+      index += 1;
+    }
+  }
+
+  return parsed;
+}
+
+function optionalString(value: string | boolean | undefined): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function parseInitOptions(args: ReadonlyArray<string>): InitOptions {
+  const flags = parseFlags(args, {
+    from: "string",
+    output: "string",
+    "client-prefix": "string",
+    force: "boolean",
+    help: "boolean",
+  });
+  return {
+    ...(optionalString(flags.from) === undefined ? {} : { from: String(flags.from) }),
+    ...(optionalString(flags.output) === undefined ? {} : { output: String(flags.output) }),
+    ...(optionalString(flags["client-prefix"]) === undefined
+      ? {}
+      : { clientPrefix: String(flags["client-prefix"]) }),
+    force: flags.force === true,
+    help: flags.help === true,
+  };
+}
+
+function parseExampleOptions(args: ReadonlyArray<string>): ExampleOptions {
+  const flags = parseFlags(args, {
+    input: "string",
+    output: "string",
+    export: "string",
+    force: "boolean",
+    help: "boolean",
+  });
+  return {
+    ...(optionalString(flags.input) === undefined ? {} : { input: String(flags.input) }),
+    ...(optionalString(flags.output) === undefined ? {} : { output: String(flags.output) }),
+    ...(optionalString(flags.export) === undefined ? {} : { exportName: String(flags.export) }),
+    force: flags.force === true,
+    help: flags.help === true,
+  };
+}
+
+async function runInit(options: InitOptions, io: CliIO): Promise<void> {
+  const cwd = io.cwd();
+  const outputPath = resolveFromCwd(cwd, options.output ?? (await getDefaultEnvOutputPath(cwd)));
+  let source = generateDefaultEnvSource();
+
+  if (options.from !== undefined) {
+    const inputPath = resolveFromCwd(cwd, options.from);
+    const basename = path.basename(inputPath);
+    if (basename !== ".env" && basename !== ".env.example") {
+      throw new Error(
+        `--from must point to a file named ".env" or ".env.example". Received "${basename}".`,
+      );
+    }
+    const dotenv = await readTextFileOrThrow(inputPath, "dotenv input");
+    source = generateEnvSourceFromDotenv(dotenv, options.clientPrefix);
+  }
+
+  await ensureWritableTarget(outputPath, options.force);
+  await writeFileAtomic(outputPath, source);
+  io.stdout(`Generated ${outputPath}\n`);
+}
+
+async function runExample(options: ExampleOptions, io: CliIO): Promise<void> {
+  const cwd = io.cwd();
+  const inputPath = resolveFromCwd(cwd, options.input ?? (await getDefaultExampleInputPath(cwd)));
+  const outputPath = resolveFromCwd(cwd, options.output ?? ".env.example");
+  const contract = inspectEnvContract(inputPath, options.exportName);
+  const source = renderEnvExample(contract);
+
+  await ensureWritableTarget(outputPath, options.force);
+  await writeFileAtomic(outputPath, source);
+  io.stdout(`Generated ${outputPath}\n`);
+}
+
+/** Runs the Envil CLI without importing application modules. */
 export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<number> {
   const runtimeIO: CliIO = {
     cwd: io.cwd ?? DEFAULT_IO.cwd,
@@ -59,280 +166,76 @@ export async function runCli(argv: string[], io: Partial<CliIO> = {}): Promise<n
   };
 
   try {
-    if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
-      runtimeIO.stdout(getRootHelpText());
+    const command = argv[0];
+    if (command === undefined || command === "--help" || command === "-h") {
+      runtimeIO.stdout(rootHelp());
       return 0;
     }
-
-    if (argv[0] !== "add") {
-      throw new Error(`Unknown command "${argv[0]}".\n${getRootHelpText()}`);
-    }
-
-    const subcommand = argv[1];
-    if (!subcommand || subcommand === "--help") {
-      runtimeIO.stdout(getAddHelpText());
-      return 0;
-    }
-
-    if (subcommand === "env") {
-      const options = parseAddEnvOptions(argv.slice(2));
+    if (command === "init") {
+      const options = parseInitOptions(argv.slice(1));
       if (options.help) {
-        runtimeIO.stdout(getAddEnvHelpText());
+        runtimeIO.stdout(initHelp());
         return 0;
       }
-
-      await runAddEnv(options, runtimeIO);
+      await runInit(options, runtimeIO);
       return 0;
     }
-
-    if (subcommand === "example") {
-      const options = parseAddExampleOptions(argv.slice(2));
+    if (command === "example") {
+      const options = parseExampleOptions(argv.slice(1));
       if (options.help) {
-        runtimeIO.stdout(getAddExampleHelpText());
+        runtimeIO.stdout(exampleHelp());
         return 0;
       }
-
-      await runAddExample(options, runtimeIO);
+      await runExample(options, runtimeIO);
       return 0;
     }
 
-    throw new Error(`Unknown subcommand "add ${subcommand}".\n${getAddHelpText()}`);
-  } catch (error) {
-    runtimeIO.stderr(`${formatErrorMessage(error)}\n`);
+    throw new Error(
+      `Unknown command "${command}". Run "envil --help" to see the available commands.`,
+    );
+  } catch (failure: unknown) {
+    runtimeIO.stderr(
+      `${
+        failure instanceof Error
+          ? failure.message
+          : 'Envil could not complete the command. Run "envil --help" and try again.'
+      }\n`,
+    );
     return 1;
   }
 }
 
-async function runAddEnv(options: AddEnvOptions, io: CliIO): Promise<void> {
-  const cwd = io.cwd();
-  const inputPath = resolveFromCwd(cwd, options.input ?? ".env.example");
-  const outputPath = resolveFromCwd(cwd, options.output ?? (await getDefaultEnvOutputPath(cwd)));
-
-  const source = await readTextFileOrThrow(inputPath, "input file");
-  const dotenv = decodeDotenvText(source);
-  const prefix = resolvePrefix(options, dotenv.prefix);
-
-  const inferred = inferModel(dotenv, { prefix });
-  const generated = generateEnvTs(inferred);
-
-  await ensureWritableTarget(outputPath, options.force);
-  await writeFileAtomic(outputPath, generated);
-
-  io.stdout(`Generated ${outputPath}\n`);
-}
-
-async function runAddExample(options: AddExampleOptions, io: CliIO): Promise<void> {
-  const cwd = io.cwd();
-  const defaultInput = await getDefaultExampleInputPath(cwd);
-  const inputPath = resolveFromCwd(cwd, options.input ?? defaultInput);
-  const outputPath = resolveFromCwd(cwd, options.output ?? ".env.example");
-
-  const mod = await importForAddExample(inputPath);
-
-  if (!mod.envDefinition || typeof mod.envDefinition !== "object") {
-    throw new Error(
-      `Expected "envDefinition" export in ${inputPath}. Make sure the file exports an envDefinition object.`,
-    );
-  }
-
-  const generated = buildEnvExample(mod.envDefinition as Parameters<typeof buildEnvExample>[0]);
-
-  await ensureWritableTarget(outputPath, options.force);
-  await writeFileAtomic(outputPath, generated);
-
-  io.stdout(`Generated ${outputPath}\n`);
-}
-
-function resolvePrefix(options: AddEnvOptions, fromDocument?: Partial<PrefixConfig>): PrefixConfig {
-  const fromFramework = options.framework ? FRAMEWORK_PREFIXES[options.framework] : undefined;
-
-  return {
-    server: options.serverPrefix ?? fromFramework?.server ?? fromDocument?.server ?? "",
-    client: options.clientPrefix ?? fromFramework?.client ?? fromDocument?.client ?? "",
-    shared: options.sharedPrefix ?? fromFramework?.shared ?? fromDocument?.shared ?? "",
-  };
-}
-
-type FlagSpec = Record<string, "string" | "boolean">;
-
-function parseFlags(args: ReadonlyArray<string>, spec: FlagSpec): Record<string, string | boolean> {
-  const parsed: Record<string, string | boolean> = {};
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index];
-    if (!token.startsWith("--")) {
-      throw new Error(`Unexpected argument "${token}"`);
-    }
-
-    const [nameWithPrefix, inlineValue] = token.split("=", 2);
-    const name = nameWithPrefix.slice(2);
-    const expected = spec[name];
-    if (!expected) {
-      throw new Error(`Unknown option "--${name}"`);
-    }
-
-    if (expected === "boolean") {
-      if (inlineValue !== undefined) {
-        parsed[name] = parseBooleanFlag(name, inlineValue);
-      } else {
-        parsed[name] = true;
-      }
-      continue;
-    }
-
-    if (inlineValue !== undefined) {
-      parsed[name] = inlineValue;
-      continue;
-    }
-
-    const next = args[index + 1];
-    if (!next || next.startsWith("--")) {
-      throw new Error(`Option "--${name}" requires a value`);
-    }
-
-    parsed[name] = next;
-    index += 1;
-  }
-
-  return parsed;
-}
-
-function parseBooleanFlag(name: string, value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "true" || normalized === "1") return true;
-  if (normalized === "false" || normalized === "0") return false;
-  throw new Error(`Invalid value for --${name}: "${value}". Expected true|false.`);
-}
-
-function parseAddEnvOptions(args: ReadonlyArray<string>): AddEnvOptions {
-  const parsed = parseFlags(args, {
-    input: "string",
-    output: "string",
-    framework: "string",
-    "client-prefix": "string",
-    "server-prefix": "string",
-    "shared-prefix": "string",
-    force: "boolean",
-    help: "boolean",
-  });
-
-  const frameworkValue = parsed.framework;
-  if (frameworkValue !== undefined) {
-    if (typeof frameworkValue !== "string" || !FRAMEWORKS.includes(frameworkValue as Framework)) {
-      throw new Error(`Invalid value for --framework. Expected one of: ${FRAMEWORKS.join(", ")}.`);
-    }
-  }
-
-  return {
-    input: asOptionalString(parsed.input),
-    output: asOptionalString(parsed.output),
-    framework: frameworkValue as Framework | undefined,
-    clientPrefix: asOptionalString(parsed["client-prefix"]),
-    serverPrefix: asOptionalString(parsed["server-prefix"]),
-    sharedPrefix: asOptionalString(parsed["shared-prefix"]),
-    force: Boolean(parsed.force),
-    help: Boolean(parsed.help),
-  };
-}
-
-function parseAddExampleOptions(args: ReadonlyArray<string>): AddExampleOptions {
-  const parsed = parseFlags(args, {
-    input: "string",
-    output: "string",
-    force: "boolean",
-    help: "boolean",
-  });
-
-  return {
-    input: asOptionalString(parsed.input),
-    output: asOptionalString(parsed.output),
-    force: Boolean(parsed.force),
-    help: Boolean(parsed.help),
-  };
-}
-
-function asOptionalString(value: string | boolean | undefined): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function getRootHelpText(): string {
+function rootHelp(): string {
   return [
     "Usage:",
-    "  envil add env [options]",
-    "  envil add example [options]",
-    "",
-    getAddHelpText().trimEnd(),
+    "  envil init [--from .env|.env.example]",
+    "  envil example --input src/env.ts",
     "",
   ].join("\n");
 }
 
-function getAddHelpText(): string {
-  return [
-    "Subcommands:",
-    "  envil add env      Infer env.ts from .env.example",
-    "  envil add example  Recreate .env.example from env.ts",
-    "",
-    "Use --help on each subcommand for details.",
-    "",
-  ].join("\n");
-}
-
-function getAddEnvHelpText(): string {
+function initHelp(): string {
   return [
     "Usage:",
-    "  envil add env [options]",
+    "  envil init [--from .env|.env.example] [options]",
     "",
     "Options:",
-    "  --input <path>           Input .env.example path (default: .env.example)",
-    "  --output <path>          Output env.ts path (default: src/env.ts or env.ts)",
-    "  --framework <name>       Prefix preset: nextjs|vite|expo|nuxt|sveltekit|astro",
-    "  --client-prefix <value>  Client runtime prefix override",
-    "  --server-prefix <value>  Server runtime prefix override",
-    "  --shared-prefix <value>  Shared runtime prefix override",
-    "  --force                  Overwrite output file if it exists",
-    "  --help                   Show this help text",
+    "  --client-prefix <prefix>  Explicit public client prefix",
+    "  --output <path>           Generated env.ts path",
+    "  --force                   Overwrite an existing output",
     "",
   ].join("\n");
 }
 
-function getAddExampleHelpText(): string {
+function exampleHelp(): string {
   return [
     "Usage:",
-    "  envil add example [options]",
+    "  envil example --input src/env.ts [options]",
     "",
     "Options:",
-    "  --input <path>   Input env.ts path (default: env.ts, then src/env.ts fallback)",
-    "  --output <path>  Output .env.example path (default: .env.example)",
-    "  --force          Overwrite output file if it exists",
-    "  --help           Show this help text",
-    "",
-    "Note:",
-    "  --input must be importable by your current runtime.",
-    '  If TypeScript import is unsupported, pass compiled JavaScript via "--input".',
+    "  --export <name>  Select one export when the module has several contracts",
+    "  --output <path>  Generated .env.example path",
+    "  --force          Overwrite an existing output",
     "",
   ].join("\n");
-}
-
-function formatErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
-}
-
-async function importForAddExample(inputPath: string): Promise<Record<string, unknown>> {
-  process.env.ENVIL_INTROSPECT_ONLY = "1";
-  try {
-    return (await import(pathToFileURL(inputPath).href)) as Record<string, unknown>;
-  } catch (error) {
-    throw new Error(
-      [
-        `Unable to import "${inputPath}".`,
-        "The input must be an ESM module importable by your current runtime.",
-        'If your runtime cannot import TypeScript directly, compile to JavaScript and pass it with "--input".',
-        `Original error: ${formatErrorMessage(error)}`,
-      ].join(" "),
-    );
-  } finally {
-    delete process.env.ENVIL_INTROSPECT_ONLY;
-  }
 }

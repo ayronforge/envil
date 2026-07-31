@@ -1,170 +1,69 @@
 ---
 title: Error Handling
-description: Understand the error classes thrown by envil and how to handle them.
-order: 8
+description: Typed, actionable, and secret-safe environment and resolver failures.
 ---
 
-import TypeTable from "@/components/docs/TypeTable.astro";
-import Callout from "@/components/docs/Callout.astro";
+## Validation failures
 
-envil uses three distinct error types to signal different failure modes. All error classes are exported from the main package.
-
-```ts
-import { EnvValidationError, ClientAccessError } from "@ayronforge/envil"
-```
-
-## EnvValidationError
-
-Thrown when one or more environment variables fail schema validation.
-
-<TypeTable rows={[
-  { name: "_tag", type: '"EnvValidationError"', description: "Discriminant tag for pattern matching." },
-  { name: "errors", type: "ReadonlyArray<string>", description: "Array of human-readable validation error messages." },
-  { name: "message", type: "string", description: "Formatted error message with all failures." },
-]} />
-
-### Example
+`EnvValidationError.issues` is a frozen discriminated union:
 
 ```ts
-import { createEnv, requiredString, port, EnvValidationError } from "@ayronforge/envil"
-
-try {
-  const env = createEnv({
-    server: {
-      DATABASE_URL: requiredString,
-      PORT: port,
-    },
-  })
-} catch (e) {
-  if (e instanceof EnvValidationError) {
-    console.error("Validation failed:")
-    for (const error of e.errors) {
-      console.error(`  - ${error}`)
+type EnvValidationIssue =
+  | {
+      readonly _tag: "MissingVariable";
+      readonly key: string;
+      readonly schemaIdentifier?: string;
+      readonly sensitive: boolean;
     }
-    // Output:
-    //   - DATABASE_URL: Expected a string with a length of at least 1, but got undefined
-    //   - PORT: Expected Port (1-65535), but got "abc"
-  }
-}
+  | {
+      readonly _tag: "InvalidVariable";
+      readonly key: string;
+      readonly schemaIdentifier?: string;
+      readonly sensitive: boolean;
+    };
 ```
 
-<Callout type="note">
-  `EnvValidationError` collects **all** validation failures, not just the first one. This lets you fix all issues in a single pass rather than playing whack-a-mole.
-</Callout>
+Rejected values are never retained. Messages name the affected variable,
+describe the expected format, and provide the next action.
 
-### onValidationError callback
+## Configuration failures
 
-You can hook into validation errors before the exception is thrown:
+`EnvConfigurationError` covers invalid definitions that JavaScript callers can
+still construct despite TypeScript checks, including:
 
-```ts
-createEnv({
-  onValidationError: (errors) => {
-    // errors is string[] — same as EnvValidationError.errors
-    logger.error("Environment validation failed", { errors })
-  },
-  server: {
-    DATABASE_URL: requiredString,
-  },
-})
+- a missing client `runtimeEnv`;
+- `fromResolver` or redaction in a client fragment;
+- duplicate winning definitions that map to the same runtime name;
+- shared values shadowing runtime properties;
+- malformed resolver results.
+
+## Resolver failures
+
+Provider adapters use tagged failures in the Effect error channel:
+
+- `ResolverConfigurationError`
+- `ResolverInitializationError`
+- `ResolverRequestFailed`
+- `ResolverResponseDecodeFailed`
+
+Messages never include runtime values, secret references, provider responses,
+credentials, or arbitrary thrown causes.
+
+## Runtime access failures
+
+`ServerEnvironmentAccessError` is returned through the server Effect's typed
+error channel when Envil cannot prove that the caller is running server-side.
+No server runtime value or resolver is read before this check.
+
+`EnvironmentAccessError` is raised by the output Proxy when code bypasses
+TypeScript and reads a value outside the materialized target:
+
+```text
+"DATABASE_URL" is not available in the client environment.
+Declare it in a client fragment if it is public, or read it through
+appEnv.server from server code.
 ```
 
-The callback fires **before** the error is thrown. The `EnvValidationError` is still thrown after the callback completes.
-
-## ClientAccessError
-
-Thrown when client-side code attempts to access a server-only environment variable.
-
-<TypeTable rows={[
-  { name: "_tag", type: '"ClientAccessError"', description: "Discriminant tag for pattern matching." },
-  { name: "variableName", type: "string", description: "The name of the server variable that was accessed." },
-  { name: "message", type: "string", description: "Descriptive error message." },
-]} />
-
-### Example
-
-```ts
-import { createEnv, requiredString, ClientAccessError } from "@ayronforge/envil"
-
-const env = createEnv({
-  server: {
-    DATABASE_URL: requiredString,
-  },
-  client: {
-    NEXT_PUBLIC_API_URL: requiredString,
-  },
-  isServer: false, // simulate client-side
-})
-
-try {
-  env.DATABASE_URL // throws on client
-} catch (e) {
-  if (e instanceof ClientAccessError) {
-    console.error(e.variableName) // "DATABASE_URL"
-    // "Attempted to access server-side env var "DATABASE_URL" on client"
-  }
-}
-```
-
-## ResolverError
-
-Thrown when a [resolver](/envil/docs/resolvers) fails to initialize or fetch secrets. This is an Effect tagged error, used in the Effect error channel.
-
-<TypeTable rows={[
-  { name: "_tag", type: '"ResolverError"', description: "Discriminant tag for Effect error handling." },
-  { name: "resolver", type: "string", description: "Name of the resolver that failed (e.g., \"aws\", \"gcp\")." },
-  { name: "message", type: "string", description: "Human-readable error message." },
-  { name: "cause", type: "unknown", description: "The underlying error, if any." },
-]} />
-
-`ResolverError` is a `Data.TaggedError` from Effect, meaning you can use it with Effect's error handling:
-
-```ts
-import { Effect } from "effect"
-import { createEnv, requiredString } from "@ayronforge/envil"
-import { fromAwsSecrets, ResolverError } from "@ayronforge/envil/aws"
-
-const envEffect = createEnv({
-  server: {
-    DATABASE_URL: requiredString,
-  },
-  resolvers: [
-    fromAwsSecrets({
-      secrets: { DATABASE_URL: "prod/db-url" },
-    }),
-  ],
-})
-
-// Handle resolver errors specifically
-const program = envEffect.pipe(
-  Effect.catchTag("ResolverError", (err) => {
-    console.error(`Resolver "${err.resolver}" failed: ${err.message}`)
-    return Effect.fail(err)
-  }),
-)
-```
-
-<Callout type="warning">
-  When using resolvers, `createEnv` returns an `Effect.Effect` instead of a plain object. You must run it with `Effect.runPromise` or `Effect.runSync` (or use it within an Effect pipeline).
-</Callout>
-
-## Safe alternative
-
-If you prefer handling errors without `try`/`catch` or Effect error channels, use [`safeCreateEnv`](/envil/docs/safe-parsing). It captures errors in a discriminated result object instead of raising exceptions:
-
-```ts
-import { safeCreateEnv, requiredString } from "@ayronforge/envil"
-
-const result = safeCreateEnv({
-  server: { DATABASE_URL: requiredString },
-  isServer: true,
-})
-
-if (!result.success) {
-  // result.error is EnvValidationError
-  console.error(result.error.errors)
-}
-```
-
-<Callout type="tip">
-  With resolvers, `safeCreateEnv` returns an Effect that **never fails** — both `ResolverError` and `EnvValidationError` are captured in the result object. See [Safe Parsing](/envil/docs/safe-parsing) for details.
-</Callout>
+The message deliberately does not confirm whether the requested name exists in
+the server definition. This keeps the client Proxy independent from server-key
+metadata.

@@ -1,5 +1,8 @@
-export { decodeDotenvText, encodeDotenvText } from "./dotenv-codec.ts";
+export {
+  inspectEnvContract,
+  renderEnvExample,
+  type InspectedContractVariable,
+  type InspectedEnvContract,
+} from "./contract-inspector.ts";
 export { getDefaultEnvOutputPath, getDefaultExampleInputPath, resolveFromCwd } from "./fs-utils.ts";
-export { generateEnvTs } from "./generate-env-ts.ts";
-export { inferModel } from "./infer.ts";
-export * from "./types.ts";
+export { generateDefaultEnvSource, generateEnvSourceFromDotenv } from "./init.ts";

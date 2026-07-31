@@ -1,196 +1,145 @@
 ---
 title: Core Concepts
-description: Understand how envil validates variables, separates client/server access, and uses a proxy for runtime safety.
-order: 3
+description: Target-aware fragments, arbitrary Effect Schemas, runtime sources, and type inference.
 ---
 
-import Callout from "@/components/docs/Callout.astro";
+## Target-aware fragments
 
-## Validation flow
-
-When you call `createEnv()`, the following happens:
-
-1. **Environment source** — reads from `process.env` (or your `runtimeEnv` override)
-2. **Empty string handling** — if `emptyStringAsUndefined` is enabled, empty strings become `undefined`
-3. **Prefix resolution** — prepends the configured prefix to each key when reading the env
-4. **Schema parsing** — each variable is decoded through its Effect Schema
-5. **Error collection** — all validation errors are collected (not fail-fast) and thrown together
-6. **Proxy creation** — the validated result is wrapped in a Proxy that enforces client/server access rules
-
-If any variable fails validation, `createEnv` throws an `EnvValidationError` containing all failures at once, so you can fix them all in one pass.
-
-## Client/server separation
-
-The `server`, `client`, and `shared` buckets control where variables can be accessed:
-
-| Bucket   | Validated on server? | Validated on client? | Accessible on client?           |
-| -------- | -------------------- | -------------------- | ------------------------------- |
-| `server` | Yes                  | No                   | No — throws `ClientAccessError` |
-| `client` | Yes                  | Yes                  | Yes                             |
-| `shared` | Yes                  | Yes                  | Yes                             |
-
-**How it works:** The returned object is a `Proxy`. When running on the client (detected via `typeof window !== "undefined"`), accessing a key defined only in `server` throws a `ClientAccessError`.
+`server`, `client`, and `shared` create immutable definitions. They do not read
+configuration when declared:
 
 ```ts
-const env = createEnv({
-  server: {
-    DATABASE_URL: requiredString,  // Only accessible on server
-  },
-  client: {
-    NEXT_PUBLIC_API_URL: requiredString,  // Accessible everywhere
-  },
-})
-
-// On the client:
-env.NEXT_PUBLIC_API_URL // ✅ works
-env.DATABASE_URL        // ❌ throws ClientAccessError
+const appEnv = createEnv(
+  shared({ APP_NAME: "My App" }),
+  server(serverValues),
+  client(clientValues, {
+    runtimeEnv: import.meta.env,
+    prefix: "VITE_",
+  }),
+);
 ```
 
-<Callout type="warning">
-  Server-only variables are **not validated** on the client to avoid requiring their values to be bundled. They are simply blocked from access.
-</Callout>
+`appEnv.client` resolves client and shared fragments. `appEnv.server` resolves
+server, client, and shared fragments so the server has the complete application
+configuration.
 
-### Overriding server detection
+Fragments are the unit of composition and compilation. Their contents remain
+ordinary TypeScript expressions, so values may come from object spreads,
+factories, imported schemas, and custom resolver adapters.
 
-By default, `isServer` is `typeof window === "undefined"`. You can override this:
+## Effect Schema
+
+Variable definitions may use Effect Schemas with transforms, refinements,
+asynchronous decoding, and context requirements. Schema outputs must not be
+functions. Schema errors and requirements are preserved in the resulting Effect
+type:
 
 ```ts
-const env = createEnv({
-  isServer: process.env.NEXT_RUNTIME !== "edge",
-  // ...
-})
+const serverConfig = server({
+  DATABASE_URL: postgresUrl,
+  PORT: port,
+});
 ```
 
-## Prefix handling
+Static values are also accepted in server and client fragments. `shared` is
+reserved for public static values available in both outputs; schemas and
+redacted values are rejected there.
 
-Prefixes map your schema keys to actual environment variable names. There are two formats:
+## Runtime names and sources
 
-### String prefix
-
-Applies the same prefix to all buckets:
-
-```ts
-createEnv({
-  prefix: "MYAPP_",
-  server: { DB_URL: requiredString },  // reads MYAPP_DB_URL from env
-})
-```
-
-### Prefix map
-
-Different prefixes per bucket:
+By default, a schema reads its property name with the fragment prefix:
 
 ```ts
-createEnv({
-  prefix: {
-    client: "NEXT_PUBLIC_",
-    server: "",  // no prefix
+client(
+  {
+    API_URL: url, // reads VITE_API_URL
   },
-  server: { DB_URL: requiredString },           // reads DB_URL
-  client: { APP_URL: requiredString },           // reads NEXT_PUBLIC_APP_URL
-})
+  {
+    runtimeEnv: import.meta.env,
+    prefix: "VITE_",
+  },
+);
 ```
 
-This is what [framework presets](/envil/docs/framework-presets) configure for you.
-
-## Redacted values
-
-When you use `Schema.Redacted(Schema.String)` (or the `redacted` helper), the value is wrapped in Effect's `Redacted` type during validation. This means the value is safe to log, serialize, and spread — secrets never leak accidentally.
+`fromEnv` maps one property to an exact external name:
 
 ```ts
-import { Redacted } from "effect"
-
-const env = createEnv({
-  server: {
-    API_SECRET: redacted(Schema.String),
-  },
-})
-
-// env.API_SECRET is Redacted<string> — safe to log, serialize, spread
-console.log(env.API_SECRET)     // <redacted>
-JSON.stringify(env)              // {"API_SECRET":"<redacted>"}
-
-// Explicitly unwrap when you need the plain value
-const secret: string = Redacted.value(env.API_SECRET)
+ANALYTICS_KEY: requiredString.pipe(
+  fromEnv("PUBLIC_ANALYTICS_KEY"),
+)
 ```
 
-## Empty string handling
+Each fragment owns its `runtimeEnv`, `prefix`, and
+`emptyStringAsUndefined` options. Independently authored fragments therefore
+keep their original runtime source when composed.
 
-Some hosting providers set environment variables to empty strings instead of leaving them undefined. Enable `emptyStringAsUndefined` to treat them as missing:
-
-```ts
-createEnv({
-  emptyStringAsUndefined: true,
-  server: {
-    OPTIONAL_VAR: Schema.optional(Schema.String),
-  },
-})
-```
-
-## Runtime env override
-
-By default, `createEnv` reads from `process.env`. You can provide a custom source:
+Runtime values may come from an ordinary object, a `ReadonlyMap`, or parsed
+JSON. Dot-separated `fromEnv` names navigate nested objects:
 
 ```ts
-createEnv({
-  runtimeEnv: {
-    DATABASE_URL: "postgresql://...",
-    PORT: "3000",
+server(
+  {
+    DATABASE_URL: postgresUrl.pipe(fromEnv("database.url")),
   },
-  server: {
-    DATABASE_URL: requiredString,
-    PORT: port,
-  },
-})
-```
-
-This is useful for testing or for frameworks like Vite where `import.meta.env` is the source.
-
-## Testing
-
-Combine `runtimeEnv` with `isServer` to write deterministic tests without touching real environment variables:
-
-```ts
-import { createEnv, requiredString, postgresUrl, port, withDefault } from "@ayronforge/envil"
-import { expect, test } from "vitest"
-
-test("env parses correctly", () => {
-  const env = createEnv({
-    server: {
-      DATABASE_URL: postgresUrl,
-      PORT: withDefault(port, 3000),
-    },
+  {
     runtimeEnv: {
-      DATABASE_URL: "postgresql://user:pass@localhost:5432/testdb",
+      database: {
+        url: "postgres://user:pass@localhost:5432/app",
+      },
     },
-    isServer: true, // Force server mode so server vars are validated
-  })
-
-  expect(env.DATABASE_URL).toBe("postgresql://user:pass@localhost:5432/testdb")
-  expect(env.PORT).toBe(3000)
-})
+  },
+);
 ```
 
-<Callout type="tip">
-  Setting `isServer: true` ensures server-only variables are validated and accessible, even if your test runner runs in an environment where `typeof window !== "undefined"` (e.g. jsdom).
-</Callout>
+For objects, an exact key such as `"database.url"` takes precedence over the
+equivalent nested path. Map keys are always exact.
 
-## Validation error callback
+## Resolver sources
 
-You can hook into validation errors before the exception is thrown:
+`fromResolver` makes a configured resolver authoritative for one server
+variable. A resolver adapter is ordinary runtime code: Envil batches references
+that use the same configured resolver, validates the returned values with their
+original schemas, and redacts resolver-backed outputs automatically.
+
+## Composition and precedence
+
+Compose an existing environment with `pipe(extendEnv(...))`:
 
 ```ts
-createEnv({
-  onValidationError: (errors) => {
-    // Log to your error tracking service
-    Sentry.captureMessage("Env validation failed", { extra: { errors } })
-  },
-  server: {
-    DATABASE_URL: requiredString,
-  },
-})
+const appEnv = baseEnv.pipe(
+  extendEnv(featureEnv),
+  extendEnv(server({ PORT: port })),
+);
 ```
 
-<Callout type="note">
-  The `onValidationError` callback fires **before** the `EnvValidationError` is thrown. The error is still thrown after the callback runs.
-</Callout>
+Inputs are applied from left to right. If the same key appears more than once in
+one runtime context, the last complete definition wins, including its value,
+schema, source, runtime options, errors, and Effect requirements. A shadowed
+resolver is not executed.
+
+## Type inference
+
+```ts
+import type {
+  InferClientEnv,
+  InferEnv,
+  InferServerEnv,
+} from "@ayronforge/envil";
+
+type ServerEnvironment = InferServerEnv<typeof appEnv>;
+type ClientEnvironment = InferClientEnv<typeof appEnv>;
+type ServerEffectValue = InferEnv<typeof appEnv.server>;
+```
+
+## Runtime access guards
+
+Materialized environments are immutable Proxies. An unknown property does not
+silently return `undefined`; Envil reports whether the property is unavailable
+in the current target.
+
+`appEnv.server` also verifies the runtime when its Effect executes. Browser and
+plugin-marked client builds receive a `ServerEnvironmentAccessError` before
+server fragments or resolvers are evaluated.
+
+Use the [build plugins](/envil/docs/build-security) to make the runtime target
+exact and physically remove server fragment expressions from client bundles.

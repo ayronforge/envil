@@ -1,167 +1,129 @@
 ---
 title: Framework Presets
-description: Pre-configured prefix settings for Next.js, Vite, Expo, Nuxt, SvelteKit, and Astro.
+description: Client fragment prefix settings for Vite, Expo, SvelteKit, and Astro.
 order: 6
 ---
 
 import TypeTable from "@/components/docs/TypeTable.astro";
 import Callout from "@/components/docs/Callout.astro";
 
-Framework presets provide pre-configured `prefix` settings for popular frameworks. They handle the client-side prefix convention so you don't have to configure it manually.
+Presets provide framework-specific client options. Expo also provides its
+compiler-backed runtime source.
 
 ```ts
-import { nextjs, vite, expo, nuxt, sveltekit, astro } from "@ayronforge/envil/presets"
+import {
+  astro,
+  expo,
+  sveltekit,
+  vite,
+} from "@ayronforge/envil/presets";
 ```
-
-## Available presets
 
 <TypeTable showDefault={false} rows={[
-  { name: "nextjs", type: "{ prefix: { client: \"NEXT_PUBLIC_\" } }", description: "Next.js — client variables must start with NEXT_PUBLIC_" },
-  { name: "vite", type: "{ prefix: { client: \"VITE_\" } }", description: "Vite — client variables must start with VITE_" },
-  { name: "expo", type: "{ prefix: { client: \"EXPO_PUBLIC_\" } }", description: "Expo — client variables must start with EXPO_PUBLIC_" },
-  { name: "nuxt", type: "{ prefix: { client: \"NUXT_PUBLIC_\" } }", description: "Nuxt — client variables must start with NUXT_PUBLIC_" },
-  { name: "sveltekit", type: "{ prefix: { client: \"PUBLIC_\" } }", description: "SvelteKit — client variables must start with PUBLIC_" },
-  { name: "astro", type: "{ prefix: { client: \"PUBLIC_\" } }", description: "Astro — client variables must start with PUBLIC_" },
+  { name: "vite", type: "{ prefix: \"VITE_\" }", description: "Vite public client prefix" },
+  { name: "expo", type: "{ prefix: \"EXPO_PUBLIC_\", runtimeEnv: compiled }", description: "Expo public prefix and compiler-backed runtime source" },
+  { name: "sveltekit", type: "{ prefix: \"PUBLIC_\" }", description: "SvelteKit public client prefix" },
+  { name: "astro", type: "{ prefix: \"PUBLIC_\" }", description: "Astro public client prefix" },
 ]} />
 
-## Usage
-
-Spread the preset into your `createEnv` call:
-
-### Next.js
+## Vite
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
-import { nextjs } from "@ayronforge/envil/presets"
-import { Schema } from "effect"
+import {
+  client,
+  createEnv,
+  requiredString,
+} from "@ayronforge/envil";
+import { vite } from "@ayronforge/envil/presets";
 
-export const env = createEnv({
-  ...nextjs,
-  server: {
-    DATABASE_URL: requiredString,
-  },
-  client: {
-    NEXT_PUBLIC_API_URL: requiredString,
-    // Reads NEXT_PUBLIC_API_URL from env (prefix auto-applied)
-  },
-})
+export const appEnv = createEnv(
+  client(
+    {
+      API_URL: requiredString,
+    },
+    {
+      ...vite,
+      runtimeEnv: import.meta.env,
+    },
+  ),
+);
 ```
 
-### Vite
+This reads `VITE_API_URL`.
 
-```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
-import { vite } from "@ayronforge/envil/presets"
-
-export const env = createEnv({
-  ...vite,
-  server: {
-    SECRET_KEY: requiredString,
-  },
-  client: {
-    APP_URL: requiredString,
-    // Reads VITE_APP_URL from env
-  },
-  runtimeEnv: import.meta.env,  // Vite uses import.meta.env
-})
-```
-
-<Callout type="tip" title="Vite runtime env">
-  Vite doesn't expose environment variables on `process.env` by default. Pass `runtimeEnv: import.meta.env` to read from Vite's env source.
+<Callout type="note" title="Runtime source">
+  Except for Expo, presets configure only naming. Pass the runtime object
+  exposed by your framework explicitly to the client fragment.
 </Callout>
 
-### Expo
+## Expo
+
+Add the Envil compiler to the Expo Babel configuration:
+
+```js title="babel.config.js"
+module.exports = function (api) {
+  api.cache(true);
+
+  return {
+    presets: ["babel-preset-expo"],
+    plugins: ["@ayronforge/envil/plugins/expo"],
+  };
+};
+```
+
+The preset can then be passed directly:
 
 ```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
-import { expo } from "@ayronforge/envil/presets"
+import {
+  client,
+  createEnv,
+  requiredString,
+} from "@ayronforge/envil";
+import { expo } from "@ayronforge/envil/presets";
 
-export const env = createEnv({
-  ...expo,
-  client: {
+export const appEnv = createEnv(
+  client(
+    {
+      APP_URL: requiredString,
+    },
+    expo,
+  ),
+);
+```
+
+The compiler turns `APP_URL` into a literal
+`process.env.EXPO_PUBLIC_APP_URL` reference before Expo performs its own
+environment-variable inlining. Client keys must therefore be declared in an
+inline object literal.
+
+Additional client options can be composed normally:
+
+```ts
+client(
+  {
+    APP_URL: requiredString,
+  },
+  {
+    ...expo,
+    emptyStringAsUndefined: true,
+  },
+)
+```
+
+## Custom prefix
+
+No preset is required:
+
+```ts
+client(
+  {
     API_URL: requiredString,
-    // Reads EXPO_PUBLIC_API_URL from env
   },
-})
-```
-
-### Nuxt
-
-```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
-import { nuxt } from "@ayronforge/envil/presets"
-
-export const env = createEnv({
-  ...nuxt,
-  client: {
-    API_URL: requiredString,
-    // Reads NUXT_PUBLIC_API_URL from env
+  {
+    runtimeEnv: browserRuntime,
+    prefix: "PUBLIC_",
   },
-})
+)
 ```
 
-### SvelteKit
-
-```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
-import { sveltekit } from "@ayronforge/envil/presets"
-
-export const env = createEnv({
-  ...sveltekit,
-  client: {
-    API_URL: requiredString,
-    // Reads PUBLIC_API_URL from env
-  },
-})
-```
-
-### Astro
-
-```ts
-import { createEnv, requiredString } from "@ayronforge/envil"
-import { astro } from "@ayronforge/envil/presets"
-
-export const env = createEnv({
-  ...astro,
-  client: {
-    API_URL: requiredString,
-    // Reads PUBLIC_API_URL from env
-  },
-  runtimeEnv: import.meta.env, // Astro exposes env via import.meta.env
-})
-```
-
-## How presets work
-
-Presets are plain objects with a `prefix` property. For example, the Next.js preset is:
-
-```ts
-export const nextjs = { prefix: { client: "NEXT_PUBLIC_" } } as const
-```
-
-When you spread `...nextjs` into `createEnv`, it sets the `prefix` option to `{ client: "NEXT_PUBLIC_" }`. This means:
-
-- **Server variables** have no prefix (read as-is)
-- **Client variables** are prefixed with `NEXT_PUBLIC_`
-- **Shared variables** have no prefix
-
-## Creating custom presets
-
-You can create your own preset for any prefix convention:
-
-```ts
-const myPreset = {
-  prefix: {
-    client: "PUBLIC_",
-    server: "SERVER_",
-    shared: "SHARED_",
-  },
-} as const
-
-createEnv({
-  ...myPreset,
-  server: { DB_URL: requiredString },    // reads SERVER_DB_URL
-  client: { API_URL: requiredString },   // reads PUBLIC_API_URL
-  shared: { NODE_ENV: requiredString },  // reads SHARED_NODE_ENV
-})
-```
+Use `fromEnv` when only one property needs a different external name.

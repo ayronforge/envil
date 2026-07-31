@@ -1,146 +1,186 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 
-import { Effect, Exit } from "effect";
+import type {
+  BatchGetSecretValueResponse,
+  GetSecretValueResponse,
+} from "@aws-sdk/client-secrets-manager";
+import { Effect, Option, Redacted } from "effect";
 
-const secretStore = new Map<string, string>();
+import { awsSecretsAdapter } from "./aws.ts";
+
+let sendAwsCommand: (command: unknown) => Promise<unknown>;
 
 mock.module("@aws-sdk/client-secrets-manager", () => ({
   SecretsManagerClient: class {
-    send(command: any) {
-      if (command._isBatch) {
-        const ids: string[] = command.input.SecretIdList;
-        const values = ids
-          .filter((id) => secretStore.has(id))
-          .map((id) => ({ Name: id, SecretString: secretStore.get(id) }));
-        return Promise.resolve({ SecretValues: values });
-      }
-      const id: string = command.input.SecretId;
-      if (!secretStore.has(id)) {
-        return Promise.reject(new Error("Secret not found"));
-      }
-      return Promise.resolve({ SecretString: secretStore.get(id) });
+    send(command: unknown) {
+      return sendAwsCommand(command);
     }
   },
   GetSecretValueCommand: class {
-    _isBatch = false;
-    input: any;
-    constructor(input: any) {
-      this.input = input;
-    }
+    constructor(readonly input: { readonly SecretId: string }) {}
   },
   BatchGetSecretValueCommand: class {
-    _isBatch = true;
-    input: any;
-    constructor(input: any) {
-      this.input = input;
-    }
+    constructor(readonly input: { readonly SecretIdList: readonly string[] }) {}
   },
 }));
 
-const { fromAwsSecrets, ResolverError } = await import("./aws.ts");
-
-describe("fromAwsSecrets", () => {
-  beforeEach(() => {
-    secretStore.clear();
-  });
-
-  test("resolves a single secret", async () => {
-    secretStore.set("my-secret", "secret-value");
+describe("awsSecretsAdapter", () => {
+  test("maps the SDK not-found signal to Option.none", async () => {
+    sendAwsCommand = () => Promise.reject({ name: "ResourceNotFoundException" });
 
     const result = await Effect.runPromise(
-      fromAwsSecrets({ secrets: { DB_PASSWORD: "my-secret" } }),
+      awsSecretsAdapter.resolve({ referencesByKey: { TOKEN: "missing-secret" } }),
     );
 
-    expect(result.DB_PASSWORD).toBe("secret-value");
+    expect(Option.isNone(result.TOKEN)).toBe(true);
   });
 
-  test("resolves multiple secrets via batch", async () => {
-    secretStore.set("secret-a", "value-a");
-    secretStore.set("secret-b", "value-b");
+  test("keeps operational failures in the typed error channel", async () => {
+    sendAwsCommand = () => Promise.reject(new Error("private provider response"));
 
-    const result = await Effect.runPromise(
-      fromAwsSecrets({ secrets: { A: "secret-a", B: "secret-b" } }),
+    const exit = await Effect.runPromiseExit(
+      awsSecretsAdapter.resolve({ referencesByKey: { TOKEN: "private-reference" } }),
     );
 
-    expect(result.A).toBe("value-a");
-    expect(result.B).toBe("value-b");
+    expect(String(exit)).toContain("ResolverRequestFailed");
+    expect(String(exit)).toContain("Check provider access and try again");
+    expect(String(exit)).not.toContain("private provider response");
+    expect(String(exit)).not.toContain("private-reference");
   });
 
-  test("extracts JSON key with # syntax", async () => {
-    secretStore.set("my-json-secret", JSON.stringify({ username: "admin", password: "s3cret" }));
+  test("decodes a JSON fragment without retaining the provider response", async () => {
+    sendAwsCommand = () =>
+      Promise.resolve({
+        SecretString: JSON.stringify({ password: "resolved-value" }),
+      } satisfies GetSecretValueResponse);
 
     const result = await Effect.runPromise(
-      fromAwsSecrets({
-        secrets: { DB_USER: "my-json-secret#username", DB_PASS: "my-json-secret#password" },
+      awsSecretsAdapter.resolve({
+        referencesByKey: { TOKEN: "database#password" },
       }),
     );
 
-    expect(result.DB_USER).toBe("admin");
-    expect(result.DB_PASS).toBe("s3cret");
-  });
-
-  test("returns undefined for missing secrets (single)", async () => {
-    const result = await Effect.runPromise(fromAwsSecrets({ secrets: { MISSING: "nonexistent" } }));
-
-    expect(result.MISSING).toBeUndefined();
-  });
-
-  test("strict mode fails when a single secret fetch errors", async () => {
-    const exit = await Effect.runPromiseExit(
-      fromAwsSecrets({ secrets: { MISSING: "nonexistent" }, strict: true }),
-    );
-
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = (exit.cause as { _tag: string; error: unknown }).error;
-      expect(error).toBeInstanceOf(ResolverError);
-      expect((error as ResolverError).message).toContain('Failed to resolve secret "nonexistent"');
+    expect(Option.isSome(result.TOKEN)).toBe(true);
+    if (Option.isSome(result.TOKEN)) {
+      expect(Redacted.value(result.TOKEN.value)).toBe("resolved-value");
     }
   });
 
-  test("returns undefined for missing secrets (batch)", async () => {
-    secretStore.set("secret-a", "value-a");
-
-    const result = await Effect.runPromise(
-      fromAwsSecrets({ secrets: { A: "secret-a", B: "secret-b" } }),
-    );
-
-    expect(result.A).toBe("value-a");
-    expect(result.B).toBeUndefined();
-  });
-
-  test("returns undefined for missing JSON key", async () => {
-    secretStore.set("my-secret", JSON.stringify({ username: "admin" }));
-
-    const result = await Effect.runPromise(
-      fromAwsSecrets({ secrets: { MISSING_KEY: "my-secret#nonexistent" } }),
-    );
-
-    expect(result.MISSING_KEY).toBeUndefined();
-  });
-
-  test("returns undefined for invalid JSON when using # syntax", async () => {
-    secretStore.set("my-secret", "not-json");
-
-    const result = await Effect.runPromise(
-      fromAwsSecrets({ secrets: { BAD_JSON: "my-secret#key" } }),
-    );
-
-    expect(result.BAD_JSON).toBeUndefined();
-  });
-
-  test("strict mode fails on invalid JSON when using # syntax", async () => {
-    secretStore.set("my-secret", "not-json");
+  test("does not treat a binary secret as absent", async () => {
+    sendAwsCommand = () =>
+      Promise.resolve({
+        SecretBinary: new Uint8Array([1, 2, 3]),
+      } satisfies GetSecretValueResponse);
 
     const exit = await Effect.runPromiseExit(
-      fromAwsSecrets({ secrets: { BAD_JSON: "my-secret#key" }, strict: true }),
+      awsSecretsAdapter.resolve({ referencesByKey: { TOKEN: "binary-secret" } }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = (exit.cause as { _tag: string; error: unknown }).error;
-      expect(error).toBeInstanceOf(ResolverError);
-      expect((error as ResolverError).message).toContain('Failed to parse secret "my-secret"');
+    expect(String(exit)).toContain("ResolverResponseDecodeFailed");
+    expect(String(exit)).toContain("AWS binary secrets are not supported");
+    expect(String(exit)).not.toContain("binary-secret");
+  });
+
+  test("does not treat a binary secret in a batch as absent", async () => {
+    sendAwsCommand = () =>
+      Promise.resolve({
+        SecretValues: [
+          { Name: "binary-secret", SecretBinary: new Uint8Array([1, 2, 3]) },
+          { Name: "string-secret", SecretString: "resolved" },
+        ],
+      } satisfies BatchGetSecretValueResponse);
+
+    const exit = await Effect.runPromiseExit(
+      awsSecretsAdapter.resolve({
+        referencesByKey: {
+          BINARY: "binary-secret",
+          STRING: "string-secret",
+        },
+      }),
+    );
+
+    expect(String(exit)).toContain("ResolverResponseDecodeFailed");
+    expect(String(exit)).toContain("AWS binary secrets are not supported");
+    expect(String(exit)).not.toContain("binary-secret");
+  });
+
+  test("requires JSON fragments to be own properties", async () => {
+    sendAwsCommand = () =>
+      Promise.resolve({
+        SecretString: JSON.stringify({ password: "resolved-value" }),
+      } satisfies GetSecretValueResponse);
+
+    const result = await Effect.runPromise(
+      awsSecretsAdapter.resolve({
+        referencesByKey: { TOKEN: "database#toString" },
+      }),
+    );
+
+    expect(Option.isNone(result.TOKEN)).toBe(true);
+  });
+
+  test("sanitizes malformed JSON fragments", async () => {
+    sendAwsCommand = () =>
+      Promise.resolve({
+        SecretString: "{private-invalid-json",
+      } satisfies GetSecretValueResponse);
+
+    const exit = await Effect.runPromiseExit(
+      awsSecretsAdapter.resolve({
+        referencesByKey: { TOKEN: "private-reference#password" },
+      }),
+    );
+
+    expect(String(exit)).toContain("ResolverResponseDecodeFailed");
+    expect(String(exit)).not.toContain("{private-invalid-json");
+    expect(String(exit)).not.toContain("private-reference");
+  });
+
+  test("fails closed when a batch response is incomplete", async () => {
+    sendAwsCommand = () =>
+      Promise.resolve({
+        SecretValues: [{ Name: "first", SecretString: "resolved" }],
+      } satisfies BatchGetSecretValueResponse);
+
+    const exit = await Effect.runPromiseExit(
+      awsSecretsAdapter.resolve({
+        referencesByKey: {
+          FIRST: "first",
+          SECOND: "second",
+        },
+      }),
+    );
+
+    expect(String(exit)).toContain("ResolverRequestFailed");
+    expect(String(exit)).not.toContain("first");
+    expect(String(exit)).not.toContain("second");
+  });
+
+  test("correlates batch responses requested with complete ARNs", async () => {
+    const firstArn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:first-abc";
+    const secondArn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:second-def";
+    sendAwsCommand = () =>
+      Promise.resolve({
+        SecretValues: [
+          { ARN: firstArn, Name: "first", SecretString: "first-value" },
+          { ARN: secondArn, Name: "second", SecretString: "second-value" },
+        ],
+      } satisfies BatchGetSecretValueResponse);
+
+    const result = await Effect.runPromise(
+      awsSecretsAdapter.resolve({
+        referencesByKey: {
+          FIRST: firstArn,
+          SECOND: secondArn,
+        },
+      }),
+    );
+
+    expect(Option.isSome(result.FIRST)).toBe(true);
+    expect(Option.isSome(result.SECOND)).toBe(true);
+    if (Option.isSome(result.FIRST) && Option.isSome(result.SECOND)) {
+      expect(Redacted.value(result.FIRST.value)).toBe("first-value");
+      expect(Redacted.value(result.SECOND.value)).toBe("second-value");
     }
   });
 });

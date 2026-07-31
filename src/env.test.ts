@@ -1,1196 +1,925 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 
-import { Effect, Redacted, Schema } from "effect";
+import { Context, Effect, Option, Redacted, Result, Schema, SchemaGetter } from "effect";
 
-import { createEnv } from "./env.ts";
-import { ClientAccessError, EnvValidationError } from "./errors.ts";
-import { ResolverError, type ResolverResult } from "./resolvers/types.ts";
 import {
-  boolean,
-  commaSeparated,
+  EnvironmentAccessError,
+  EnvConfigurationError,
+  EnvValidationError,
+  ServerEnvironmentAccessError,
+} from "./errors.ts";
+import type { ResolverAdapter, ResolverResult, ResolvedSecret } from "./resolvers/types.ts";
+import { asResult } from "./result.ts";
+
+import {
+  SecretSource,
+  client,
+  configureResolver,
+  createEnv,
+  customSecretsAdapter,
+  extendEnv,
+  fromEnv,
+  fromResolver,
+  json,
   optional,
-  port,
-  positiveNumber,
   redacted,
   requiredString,
-  withDefault,
-} from "./schemas.ts";
+  server,
+  shared,
+} from "./index.ts";
 
-describe("createEnv", () => {
-  describe("validation (happy path)", () => {
-    test("validates and returns server vars", () => {
-      const env = createEnv({
-        server: { DB_URL: requiredString },
-        runtimeEnv: { DB_URL: "postgres://localhost" },
-        isServer: true,
-      });
-      expect(env.DB_URL).toBe("postgres://localhost");
-    });
+interface RecordingResolverOptions {
+  readonly calls: Array<Readonly<Record<string, string>>>;
+}
 
-    test("validates and returns client vars", () => {
-      const env = createEnv({
-        client: { API_URL: requiredString },
-        runtimeEnv: { API_URL: "http://api.test" },
-        isServer: true,
-      });
-      expect(env.API_URL).toBe("http://api.test");
-    });
+function resolveRecordingSecrets<const Keys extends string>(
+  options: RecordingResolverOptions & {
+    readonly referencesByKey: Readonly<Record<Keys, string>>;
+  },
+): Effect.Effect<ResolverResult<Keys>> {
+  return Effect.sync(() => {
+    options.calls.push(options.referencesByKey);
+    const result: Partial<Record<Keys, ResolvedSecret>> = {};
 
-    test("validates and returns shared vars", () => {
-      const env = createEnv({
-        shared: { APP_NAME: requiredString },
-        runtimeEnv: { APP_NAME: "myapp" },
-        isServer: true,
+    // SAFETY: Object.keys returns exactly the own string keys from the typed
+    // reference record; the standard library only widens their finite union.
+    for (const key of Object.keys(options.referencesByKey) as Keys[]) {
+      Object.defineProperty(result, key, {
+        value: Option.some(Redacted.make(`resolved:${options.referencesByKey[key]}`)),
+        enumerable: true,
+        configurable: true,
+        writable: true,
       });
-      expect(env.APP_NAME).toBe("myapp");
-    });
+    }
 
-    test("works with all three dictionaries together", () => {
-      const env = createEnv({
-        server: { SECRET: requiredString },
-        client: { API_URL: requiredString },
-        shared: { APP_NAME: requiredString },
-        runtimeEnv: { SECRET: "s", API_URL: "http://api", APP_NAME: "app" },
-        isServer: true,
-      });
-      expect(env.SECRET).toBe("s");
-      expect(env.API_URL).toBe("http://api");
-      expect(env.APP_NAME).toBe("app");
-    });
+    // SAFETY: Every key from the input record is populated exactly once above.
+    return Object.freeze(result) as ResolverResult<Keys>;
+  });
+}
 
-    test("works with empty schemas", () => {
-      const env = createEnv({
-        runtimeEnv: {},
-        isServer: true,
-      });
-      expect(env).toBeDefined();
-    });
+const recordingResolverAdapter: ResolverAdapter<
+  "recording",
+  string,
+  RecordingResolverOptions,
+  never,
+  never
+> = {
+  name: "recording",
+  resolve: resolveRecordingSecrets,
+};
+
+function verifyStaticValueTypes(): void {
+  const symbolKey = Symbol("fragment-key");
+  server({ LABEL: "server" });
+  client({ LABEL: "client" });
+  shared({
+    CONFIG: {
+      enabled: true,
+      paths: ["/", "/health"],
+    },
   });
 
-  describe("validation errors", () => {
-    test("throws on missing required server var", () => {
-      expect(() =>
-        createEnv({
-          server: { DB_URL: requiredString },
-          runtimeEnv: {},
-          isServer: true,
-        }),
-      ).toThrow("Invalid environment variables");
-    });
+  // @ts-expect-error Raw structured server values require an Effect Schema.
+  server({ CONFIG: { enabled: true } });
+  // @ts-expect-error Raw structured client values require an Effect Schema.
+  client({ CONFIG: ["public"] });
+  // @ts-expect-error Client schemas cannot produce nested redacted values.
+  client(
+    { CONFIG: Schema.Struct({ token: redacted(requiredString) }) },
+    { runtimeEnv: { CONFIG: { token: "secret" } } },
+  );
+  // @ts-expect-error Shared values cannot contain Effect values recursively.
+  shared({ CONFIG: { token: Redacted.make("secret") } });
+  // @ts-expect-error Shared values cannot contain Effect Schemas recursively.
+  shared({ CONFIG: { parser: requiredString } });
+  // @ts-expect-error Environment fragment keys must be strings.
+  server({ [symbolKey]: requiredString });
+  // @ts-expect-error Environment fragment keys must be strings.
+  client({ [symbolKey]: "public" });
+  // @ts-expect-error Environment fragment keys must be strings.
+  shared({ [symbolKey]: "public" });
 
-    test("throws on missing required client var", () => {
-      expect(() =>
-        createEnv({
-          client: { API_URL: requiredString },
-          runtimeEnv: {},
-          isServer: true,
-        }),
-      ).toThrow("Invalid environment variables");
-    });
+  const mutableConfig = { nested: { enabled: true } };
+  const sharedEnvironment = createEnv(shared({ CONFIG: mutableConfig }));
+  const materializedShared = Effect.runSync(sharedEnvironment.client);
+  // @ts-expect-error Shared environment values are recursively readonly.
+  materializedShared.CONFIG.nested.enabled = false;
+}
 
-    test("throws on schema validation failure", () => {
-      expect(() =>
-        createEnv({
-          server: { PORT: positiveNumber },
-          runtimeEnv: { PORT: "not-a-number" },
-          isServer: true,
-        }),
-      ).toThrow("Invalid environment variables");
-    });
+void verifyStaticValueTypes;
 
-    test("collects multiple errors into single Error", () => {
-      try {
-        createEnv({
-          server: { A: requiredString, B: requiredString },
-          runtimeEnv: {},
-          isServer: true,
-        });
-        expect.unreachable("should have thrown");
-      } catch (e) {
-        const msg = (e as Error).message;
-        expect(msg).toContain("A:");
-        expect(msg).toContain("B:");
-      }
-    });
+describe("environment composition", () => {
+  test("rejects legacy object definitions and forged fragment shapes", () => {
+    const legacyDefinition: unknown = {
+      server: {
+        TOKEN: requiredString,
+      },
+    };
+    const forgedFragment: unknown = {
+      target: "server",
+      values: {
+        TOKEN: requiredString,
+      },
+    };
 
-    test("empty string fails requiredString", () => {
-      expect(() =>
-        createEnv({
-          server: { NAME: requiredString },
-          runtimeEnv: { NAME: "" },
-          isServer: true,
-        }),
-      ).toThrow("Invalid environment variables");
-    });
-
-    test("throws EnvValidationError with structured errors and _tag", () => {
-      try {
-        createEnv({
-          server: { A: requiredString, B: requiredString },
-          runtimeEnv: {},
-          isServer: true,
-        });
-        expect.unreachable("should have thrown");
-      } catch (e) {
-        expect(e).toBeInstanceOf(EnvValidationError);
-        const err = e as EnvValidationError;
-        expect(err._tag).toBe("EnvValidationError");
-        expect(err.errors.length).toBe(2);
-        expect(err.errors[0]).toContain("A:");
-        expect(err.errors[1]).toContain("B:");
-      }
-    });
+    expect(() => Reflect.apply(createEnv, undefined, [legacyDefinition])).toThrow(
+      "createEnv accepts fragments created by server, client, and shared.",
+    );
+    expect(() => Reflect.apply(createEnv, undefined, [forgedFragment])).toThrow(
+      "createEnv accepts fragments created by server, client, and shared.",
+    );
   });
 
-  describe("client/server separation", () => {
-    test("server vars are NOT validated when isServer is false", () => {
-      // Should not throw even though DB_URL is missing
-      const env = createEnv({
-        server: { DB_URL: requiredString },
-        client: { API_URL: requiredString },
-        runtimeEnv: { API_URL: "http://api" },
-        isServer: false,
-      });
-      expect(env.API_URL).toBe("http://api");
-    });
-
-    test("client + shared vars ARE validated on client", () => {
-      expect(() =>
-        createEnv({
-          client: { API_URL: requiredString },
-          shared: { APP: requiredString },
-          runtimeEnv: {},
-          isServer: false,
-        }),
-      ).toThrow("Invalid environment variables");
-    });
-
-    test("accessing server var from client proxy throws", () => {
-      const env = createEnv({
-        server: { SECRET: requiredString },
-        client: { API_URL: requiredString },
-        runtimeEnv: { API_URL: "http://api" },
-        isServer: false,
-      });
-      expect(() => env.SECRET).toThrow(
-        'Attempted to access server-side env var "SECRET" on client',
-      );
-    });
-
-    test("throws ClientAccessError with variableName and _tag", () => {
-      const env = createEnv({
-        server: { SECRET: requiredString },
-        client: { API_URL: requiredString },
-        runtimeEnv: { API_URL: "http://api" },
-        isServer: false,
-      });
-      try {
-        Reflect.get(env, "SECRET");
-        expect.unreachable("should have thrown");
-      } catch (e) {
-        expect(e).toBeInstanceOf(ClientAccessError);
-        const err = e as ClientAccessError;
-        expect(err._tag).toBe("ClientAccessError");
-        expect(err.variableName).toBe("SECRET");
-      }
-    });
-
-    test("server vars from extended envs are blocked on client", () => {
-      const baseEnv = createEnv({
-        server: { SECRET: requiredString },
-        runtimeEnv: { SECRET: "base-secret" },
-        isServer: true,
-      });
-
-      const env = createEnv({
-        extends: [baseEnv],
-        client: { API_URL: requiredString },
-        runtimeEnv: { API_URL: "http://api" },
-        isServer: false,
-      });
-
-      expect(() => env.SECRET).toThrow(ClientAccessError);
-    });
-
-    test("shared vars from extended envs remain accessible on client", () => {
-      const baseEnv = createEnv({
-        shared: { APP_NAME: requiredString },
-        runtimeEnv: { APP_NAME: "envil" },
-        isServer: true,
-      });
-
-      const env = createEnv({
-        extends: [baseEnv],
-        client: { API_URL: requiredString },
-        runtimeEnv: { API_URL: "http://api" },
-        isServer: false,
-      });
-
-      expect(env.APP_NAME).toBe("envil");
-    });
-
-    test("accessing client vars from client works fine", () => {
-      const env = createEnv({
-        server: { SECRET: requiredString },
-        client: { API_URL: requiredString },
-        runtimeEnv: { API_URL: "http://api" },
-        isServer: false,
-      });
-      expect(env.API_URL).toBe("http://api");
-    });
-
-    test("accessing shared vars from client works fine", () => {
-      const env = createEnv({
-        server: { SECRET: requiredString },
-        shared: { APP: requiredString },
-        runtimeEnv: { APP: "myapp" },
-        isServer: false,
-      });
-      expect(env.APP).toBe("myapp");
-    });
-
-    test("key in both server and client is accessible on client", () => {
-      const env = createEnv({
-        server: { DUAL: requiredString },
-        client: { DUAL: requiredString },
-        runtimeEnv: { DUAL: "value" },
-        isServer: false,
-      });
-      expect(env.DUAL).toBe("value");
-    });
-
-    test("key in both server and shared is accessible on client", () => {
-      const env = createEnv({
-        server: { DUAL: requiredString },
-        shared: { DUAL: requiredString },
-        runtimeEnv: { DUAL: "value" },
-        isServer: false,
-      });
-      expect(env.DUAL).toBe("value");
-    });
-  });
-
-  describe("prefix", () => {
-    test("prepends prefix to env key lookups", () => {
-      const env = createEnv({
-        server: { DB: requiredString },
-        prefix: "MY_",
-        runtimeEnv: { MY_DB: "value" },
-        isServer: true,
-      });
-      expect(env.DB).toBe("value");
-    });
-
-    test("error messages include prefixed key name", () => {
-      try {
-        createEnv({
-          server: { DB: requiredString },
-          prefix: "MY_",
-          runtimeEnv: {},
-          isServer: true,
-        });
-        expect.unreachable("should have thrown");
-      } catch (e) {
-        expect((e as Error).message).toContain("MY_DB:");
-      }
-    });
-
-    test("empty prefix behaves like no prefix", () => {
-      const env = createEnv({
-        server: { DB: requiredString },
-        prefix: "",
-        runtimeEnv: { DB: "value" },
-        isServer: true,
-      });
-      expect(env.DB).toBe("value");
-    });
-  });
-
-  describe("redacted values", () => {
-    test("redacted values return Redacted objects (not auto-unwrapped)", () => {
-      const env = createEnv({
-        server: { SECRET: redacted(Schema.String) },
-        runtimeEnv: { SECRET: "my-secret" },
-        isServer: true,
-      });
-      expect(Redacted.isRedacted(env.SECRET)).toBe(true);
-      expect(Redacted.value(env.SECRET)).toBe("my-secret");
-    });
-
-    test("non-redacted values pass through unchanged", () => {
-      const env = createEnv({
-        server: { NAME: requiredString },
-        runtimeEnv: { NAME: "plain" },
-        isServer: true,
-      });
-      expect(env.NAME).toBe("plain");
-    });
-
-    test("JSON.stringify does not leak redacted values", () => {
-      const env = createEnv({
-        server: { SECRET: redacted(Schema.String), NAME: requiredString },
-        runtimeEnv: { SECRET: "my-secret", NAME: "plain" },
-        isServer: true,
-      });
-      const json = JSON.stringify(env);
-      expect(json).not.toContain("my-secret");
-      expect(json).toContain("plain");
-    });
-
-    test("spread preserves Redacted wrappers", () => {
-      const env = createEnv({
-        server: { SECRET: redacted(Schema.String), NAME: requiredString },
-        runtimeEnv: { SECRET: "my-secret", NAME: "plain" },
-        isServer: true,
-      });
-      const spread = { ...env };
-      expect(Redacted.isRedacted(spread.SECRET)).toBe(true);
-      expect(spread.NAME).toBe("plain");
-    });
-
-    test("Object.entries preserves Redacted wrappers", () => {
-      const env = createEnv({
-        server: { SECRET: redacted(Schema.String) },
-        runtimeEnv: { SECRET: "my-secret" },
-        isServer: true,
-      });
-      const entries = Object.entries(env);
-      const secretEntry = entries.find(([k]) => k === "SECRET");
-      expect(secretEntry).toBeDefined();
-      expect(Redacted.isRedacted(secretEntry![1])).toBe(true);
-    });
-  });
-
-  describe("proxy edge cases", () => {
-    test("returns undefined for Symbol properties", () => {
-      const env = createEnv({
-        server: { A: requiredString },
-        runtimeEnv: { A: "val" },
-        isServer: true,
-      });
-      expect((env as Record<symbol, unknown>)[Symbol("test")]).toBeUndefined();
-    });
-
-    test("returns undefined for non-existent keys", () => {
-      const env = createEnv({
-        server: { A: requiredString },
-        runtimeEnv: { A: "val" },
-        isServer: true,
-      });
-      expect((env as Record<string, unknown>).NONEXISTENT).toBeUndefined();
-    });
-
-    test("prevents assigning to validated keys", () => {
-      const env = createEnv({
-        server: { A: requiredString },
-        runtimeEnv: { A: "val" },
-        isServer: true,
-      });
-      expect(() => {
-        (env as Record<string, unknown>).A = "mutated";
-      }).toThrow(TypeError);
-      expect(env.A).toBe("val");
-    });
-
-    test("prevents deleting validated keys", () => {
-      const env = createEnv({
-        server: { A: requiredString },
-        runtimeEnv: { A: "val" },
-        isServer: true,
-      });
-      expect(() => {
-        delete (env as Record<string, unknown>).A;
-      }).toThrow(TypeError);
-      expect(env.A).toBe("val");
-    });
-  });
-
-  describe("schema integration", () => {
-    test("works with positiveNumber (string → number conversion)", () => {
-      const env = createEnv({
-        server: { PORT: positiveNumber },
-        runtimeEnv: { PORT: "3000" },
-        isServer: true,
-      });
-      expect(env.PORT).toBe(3000);
-    });
-
-    test("works with commaSeparated (string → array)", () => {
-      const env = createEnv({
-        server: { HOSTS: commaSeparated },
-        runtimeEnv: { HOSTS: "a, b, c" },
-        isServer: true,
-      });
-      expect(env.HOSTS).toEqual(["a", "b", "c"]);
-    });
-
-    test("works with withDefault (undefined → default value)", () => {
-      const env = createEnv({
-        server: { MODE: withDefault(Schema.String, "production") },
-        runtimeEnv: {},
-        isServer: true,
-      });
-      expect(env.MODE).toBe("production");
-    });
-
-    test("works with withDefault(Schema.String) when env var IS set", () => {
-      const env = createEnv({
-        server: { MODE: withDefault(Schema.String, "default") },
-        runtimeEnv: { MODE: "dev" },
-        isServer: true,
-      });
-      expect(env.MODE).toBe("dev");
-    });
-
-    test("works with withDefault(requiredString) when env var IS set", () => {
-      const env = createEnv({
-        server: { MODE: requiredString.pipe(withDefault("fallback")) },
-        runtimeEnv: { MODE: "dev" },
-        isServer: true,
-      });
-      expect(env.MODE).toBe("dev");
-    });
-
-    test("withDefault(requiredString, '') fails when env var is missing (default validated)", () => {
-      expect(() =>
-        createEnv({
-          server: { MODE: withDefault(requiredString, "") },
-          runtimeEnv: {},
-          isServer: true,
-        }),
-      ).toThrow("Invalid environment variables");
-    });
-
-    test("works with port.pipe(withDefault) when env var IS set", () => {
-      const env = createEnv({
-        server: { PORT: port.pipe(withDefault(3000)) },
-        runtimeEnv: { PORT: "8080" },
-        isServer: true,
-      });
-      expect(env.PORT).toBe(8080);
-    });
-
-    test("works with boolean.pipe(withDefault) when env var IS set", () => {
-      const env = createEnv({
-        server: { DEBUG: boolean.pipe(withDefault(false)) },
-        runtimeEnv: { DEBUG: "true" },
-        isServer: true,
-      });
-      expect(env.DEBUG).toBe(true);
-    });
-
-    test("works with optional(Schema.String) (undefined passes through)", () => {
-      const env = createEnv({
-        server: { OPT: optional(Schema.String) },
-        runtimeEnv: {},
-        isServer: true,
-      });
-      expect(env.OPT).toBeUndefined();
-    });
-  });
-
-  describe("defaults (process.env / isServer)", () => {
-    const originalProcessEnv = process.env;
-
-    afterEach(() => {
-      process.env = originalProcessEnv;
-    });
-
-    test("falls back to process.env when runtimeEnv not provided", () => {
-      process.env = { ...originalProcessEnv, TEST_VAR: "from-process" };
-      const env = createEnv({
-        server: { TEST_VAR: requiredString },
-        isServer: true,
-      });
-      expect(env.TEST_VAR).toBe("from-process");
-    });
-
-    test("defaults isServer to true in Bun (no window global)", () => {
-      // In Bun, typeof window === "undefined" → isServer defaults to true
-      // So server vars should be validated
-      const env = createEnv({
-        server: { DB: requiredString },
-        runtimeEnv: { DB: "value" },
-      });
-      expect(env.DB).toBe("value");
-    });
-  });
-
-  describe("better error messages", () => {
-    test("error contains specific validation details", () => {
-      try {
-        createEnv({
-          server: { PORT: positiveNumber },
-          runtimeEnv: { PORT: "not-a-number" },
-          isServer: true,
-        });
-        expect.unreachable("should have thrown");
-      } catch (e) {
-        const msg = (e as Error).message;
-        expect(msg).toContain("PORT:");
-        expect(msg).not.toContain("invalid or missing");
-      }
-    });
-
-    test("error for missing var includes schema details", () => {
-      try {
-        createEnv({
-          server: { DB: requiredString },
-          runtimeEnv: {},
-          isServer: true,
-        });
-        expect.unreachable("should have thrown");
-      } catch (e) {
-        const msg = (e as Error).message;
-        expect(msg).toContain("DB:");
-        expect(msg).not.toContain("invalid or missing");
-      }
-    });
-  });
-
-  describe("onValidationError", () => {
-    test("callback is called with error array", () => {
-      const captured: string[][] = [];
-      expect(() =>
-        createEnv({
-          server: { A: requiredString },
-          runtimeEnv: {},
-          isServer: true,
-          onValidationError: (errors) => {
-            captured.push(errors);
-          },
-        }),
-      ).toThrow("Invalid environment variables");
-      expect(captured).toHaveLength(1);
-      expect(captured[0]!.length).toBe(1);
-      expect(captured[0]![0]).toContain("A:");
-    });
-
-    test("default throw still happens if callback returns", () => {
-      expect(() =>
-        createEnv({
-          server: { A: requiredString },
-          runtimeEnv: {},
-          isServer: true,
-          onValidationError: () => {},
-        }),
-      ).toThrow("Invalid environment variables");
-    });
-
-    test("callback-thrown errors are normalized to EnvValidationError", () => {
-      try {
-        createEnv({
-          server: { A: requiredString },
-          runtimeEnv: {},
-          isServer: true,
-          onValidationError: (errors) => {
-            throw new Error(`Custom: ${errors.join(", ")}`);
-          },
-        });
-        expect.unreachable("should have thrown");
-      } catch (e) {
-        expect(e).toBeInstanceOf(EnvValidationError);
-        expect((e as EnvValidationError).errors[0]).toContain("Custom:");
-      }
-    });
-  });
-
-  describe("emptyStringAsUndefined", () => {
-    test("empty string is treated as undefined when flag is true", () => {
-      expect(() =>
-        createEnv({
-          server: { NAME: requiredString },
-          runtimeEnv: { NAME: "" },
-          isServer: true,
-          emptyStringAsUndefined: true,
-        }),
-      ).toThrow("Invalid environment variables");
-    });
-
-    test("empty string is kept as empty string when flag is false", () => {
-      const env = createEnv({
-        server: { NAME: Schema.String },
-        runtimeEnv: { NAME: "" },
-        isServer: true,
-        emptyStringAsUndefined: false,
-      });
-      expect(env.NAME).toBe("");
-    });
-
-    test("empty string is kept as empty string when flag is omitted", () => {
-      const env = createEnv({
-        server: { NAME: Schema.String },
-        runtimeEnv: { NAME: "" },
-        isServer: true,
-      });
-      expect(env.NAME).toBe("");
-    });
-
-    test("works with withDefault (empty string triggers default)", () => {
-      const env = createEnv({
-        server: { MODE: withDefault(Schema.String, "production") },
-        runtimeEnv: { MODE: "" },
-        isServer: true,
-        emptyStringAsUndefined: true,
-      });
-      expect(env.MODE).toBe("production");
-    });
-
-    test("non-empty strings are unaffected", () => {
-      const env = createEnv({
-        server: { NAME: requiredString },
-        runtimeEnv: { NAME: "hello" },
-        isServer: true,
-        emptyStringAsUndefined: true,
-      });
-      expect(env.NAME).toBe("hello");
-    });
-
-    test("undefined values are unaffected", () => {
-      const env = createEnv({
-        server: { OPT: optional(Schema.String) },
-        runtimeEnv: {},
-        isServer: true,
-        emptyStringAsUndefined: true,
-      });
-      expect(env.OPT).toBeUndefined();
-    });
-  });
-
-  describe("extends", () => {
-    test("merges values from a single extended env", () => {
-      const baseEnv = createEnv({
-        server: { DB_URL: requiredString },
-        runtimeEnv: { DB_URL: "postgres://localhost" },
-        isServer: true,
-      });
-      const env = createEnv({
-        extends: [baseEnv],
-        server: { API_KEY: requiredString },
-        runtimeEnv: { API_KEY: "key123" },
-        isServer: true,
-      });
-      expect(env.DB_URL).toBe("postgres://localhost");
-      expect(env.API_KEY).toBe("key123");
-    });
-
-    test("new schemas override extended values for same key", () => {
-      const baseEnv = createEnv({
-        server: { MODE: requiredString },
-        runtimeEnv: { MODE: "development" },
-        isServer: true,
-      });
-      const env = createEnv({
-        extends: [baseEnv],
-        server: { MODE: requiredString },
-        runtimeEnv: { MODE: "production" },
-        isServer: true,
-      });
-      expect(env.MODE).toBe("production");
-    });
-
-    test("multiple extends merge left-to-right (later overrides earlier)", () => {
-      const env1 = createEnv({
-        server: { A: requiredString },
-        runtimeEnv: { A: "from-env1" },
-        isServer: true,
-      });
-      const env2 = createEnv({
-        server: { A: requiredString, B: requiredString },
-        runtimeEnv: { A: "from-env2", B: "b-value" },
-        isServer: true,
-      });
-      const env = createEnv({
-        extends: [env1, env2],
-        server: { C: requiredString },
-        runtimeEnv: { C: "c-value" },
-        isServer: true,
-      });
-      expect(env.A).toBe("from-env2");
-      expect(env.B).toBe("b-value");
-      expect(env.C).toBe("c-value");
-    });
-
-    test("extended values are not re-validated", () => {
-      const baseEnv = createEnv({
-        server: { DB_URL: requiredString },
-        runtimeEnv: { DB_URL: "postgres://localhost" },
-        isServer: true,
-      });
-      // No runtimeEnv entry for DB_URL, but it comes from extends
-      const env = createEnv({
-        extends: [baseEnv],
-        runtimeEnv: {},
-        isServer: true,
-      });
-      expect(env.DB_URL).toBe("postgres://localhost");
-    });
-
-    test("empty extends array works", () => {
-      const env = createEnv({
-        extends: [],
-        server: { A: requiredString },
-        runtimeEnv: { A: "val" },
-        isServer: true,
-      });
-      expect(env.A).toBe("val");
-    });
-
-    test("works with only extends, no new schemas", () => {
-      const baseEnv = createEnv({
-        server: { DB_URL: requiredString },
-        runtimeEnv: { DB_URL: "postgres://localhost" },
-        isServer: true,
-      });
-      const env = createEnv({
-        extends: [baseEnv],
-        runtimeEnv: {},
-        isServer: true,
-      });
-      expect(env.DB_URL).toBe("postgres://localhost");
-    });
-  });
-
-  describe("prefix as object", () => {
-    test("client keys use client prefix", () => {
-      const env = createEnv({
-        client: { API_URL: requiredString },
-        prefix: { client: "NEXT_PUBLIC_" },
-        runtimeEnv: { NEXT_PUBLIC_API_URL: "http://api" },
-        isServer: true,
-      });
-      expect(env.API_URL).toBe("http://api");
-    });
-
-    test("each category uses its own prefix", () => {
-      const env = createEnv({
-        server: { DB: requiredString },
-        client: { API_URL: requiredString },
-        shared: { APP_NAME: requiredString },
-        prefix: { server: "SRV_", client: "NEXT_PUBLIC_", shared: "SHARED_" },
-        runtimeEnv: {
-          SRV_DB: "value",
-          NEXT_PUBLIC_API_URL: "http://api",
-          SHARED_APP_NAME: "app",
+  test("exposes independent lazy Effect properties", async () => {
+    const appEnv = createEnv(
+      shared({ APP_NAME: "Envil" }),
+      server({ URL: requiredString }, { runtimeEnv: { URL: "https://server.example.com" } }),
+      client(
+        { URL: requiredString },
+        {
+          runtimeEnv: { VITE_URL: "https://client.example.com" },
+          prefix: "VITE_",
         },
-        isServer: true,
-      });
-      expect(env.DB).toBe("value");
-      expect(env.API_URL).toBe("http://api");
-      expect(env.APP_NAME).toBe("app");
-    });
+      ),
+    );
 
-    test("omitted categories in prefix object default to no prefix", () => {
-      const env = createEnv({
-        server: { DB: requiredString },
-        client: { API_URL: requiredString },
-        prefix: { client: "NEXT_PUBLIC_" },
-        runtimeEnv: { DB: "value", NEXT_PUBLIC_API_URL: "http://api" },
-        isServer: true,
-      });
-      expect(env.DB).toBe("value");
-      expect(env.API_URL).toBe("http://api");
+    expect(Effect.isEffect(appEnv.server)).toBe(true);
+    expect(Effect.isEffect(appEnv.client)).toBe(true);
+    expect(Effect.runSync(appEnv.server)).toEqual({
+      APP_NAME: "Envil",
+      URL: "https://client.example.com",
     });
-
-    test("works with preset spread", () => {
-      const mockedPreset = { prefix: { client: "NEXT_PUBLIC_" } };
-      const env = createEnv({
-        ...mockedPreset,
-        server: { DB: requiredString },
-        client: { API_URL: requiredString },
-        runtimeEnv: { DB: "value", NEXT_PUBLIC_API_URL: "http://api" },
-        isServer: true,
-      });
-      expect(env.DB).toBe("value");
-      expect(env.API_URL).toBe("http://api");
+    expect(await Effect.runPromise(appEnv.client)).toEqual({
+      APP_NAME: "Envil",
+      URL: "https://client.example.com",
     });
   });
 
-  describe("resolvers", () => {
-    function fakeResolver<T extends Record<string, string | undefined>>(
-      result: T,
-    ): Effect.Effect<ResolverResult<Extract<keyof T, string>>, ResolverError> {
-      return Effect.succeed(result);
-    }
+  test("composes AppEnv values canonically through extendEnv", () => {
+    const baseEnv = createEnv(
+      shared({ APP_NAME: "Base" }),
+      server({ BASE_URL: "https://base.example.com" }),
+    );
+    const authenticationEnv = createEnv(
+      server({ AUTH_SECRET: "secret" }),
+      client({ SIGN_IN_PATH: "/sign-in" }),
+    );
+    const appEnv = baseEnv.pipe(
+      extendEnv(authenticationEnv),
+      extendEnv(
+        shared({ APP_NAME: "Application" }),
+        server({ API_URL: "https://api.example.com" }),
+      ),
+    );
 
-    function failingResolver(message: string): Effect.Effect<ResolverResult, ResolverError> {
-      return Effect.fail(new ResolverError({ resolver: "test", message }));
-    }
-
-    test("resolver result flows into env validation", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { DB_PASS: requiredString },
-          resolvers: [fakeResolver({ DB_PASS: "secret123" })],
-          isServer: true,
-        }),
-      );
-      // Auto-redacted: DB_PASS should be Redacted
-      expect(Redacted.isRedacted(env.DB_PASS)).toBe(true);
-      expect(Redacted.value(env.DB_PASS)).toBe("secret123");
+    expect(Effect.runSync(appEnv.server)).toEqual({
+      APP_NAME: "Application",
+      BASE_URL: "https://base.example.com",
+      AUTH_SECRET: "secret",
+      SIGN_IN_PATH: "/sign-in",
+      API_URL: "https://api.example.com",
     });
-
-    test("multiple resolvers merge (later overrides earlier)", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { A: requiredString, B: requiredString },
-          resolvers: [fakeResolver({ A: "first", B: "first-b" }), fakeResolver({ A: "second" })],
-          isServer: true,
-        }),
-      );
-      expect(Redacted.value(env.A)).toBe("second");
-      expect(Redacted.value(env.B)).toBe("first-b");
+    expect(Effect.runSync(appEnv.client)).toEqual({
+      APP_NAME: "Application",
+      SIGN_IN_PATH: "/sign-in",
     });
+  });
 
-    test("resolver + runtimeEnv base merge", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { DB_HOST: requiredString, DB_PASS: requiredString },
-          resolvers: [fakeResolver({ DB_PASS: "secret" })],
-          runtimeEnv: { DB_HOST: "localhost" },
-          isServer: true,
-        }),
-      );
-      // DB_HOST from runtimeEnv is NOT auto-redacted
-      expect(env.DB_HOST).toBe("localhost");
-      // DB_PASS from resolver IS auto-redacted
-      expect(Redacted.isRedacted(env.DB_PASS)).toBe(true);
-      expect(Redacted.value(env.DB_PASS)).toBe("secret");
-    });
-
-    test("resolver result overlays on top of runtimeEnv", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { KEY: requiredString },
-          resolvers: [fakeResolver({ KEY: "from-resolver" })],
-          runtimeEnv: { KEY: "from-runtime" },
-          isServer: true,
-        }),
-      );
-      expect(Redacted.value(env.KEY)).toBe("from-resolver");
-    });
-
-    test("resolver failure → ResolverError in error channel", async () => {
-      const result = await Effect.runPromiseExit(
-        createEnv({
-          server: { A: requiredString },
-          resolvers: [failingResolver("boom")],
-          isServer: true,
-        }),
-      );
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        const error = (result.cause as { _tag: string; error: unknown }).error;
-        expect(error).toBeInstanceOf(ResolverError);
-        expect((error as ResolverError).message).toBe("boom");
-      }
-    });
-
-    test("resolver OK but validation fails → EnvValidationError in error channel", async () => {
-      const result = await Effect.runPromiseExit(
-        createEnv({
-          server: { A: requiredString, B: requiredString },
-          resolvers: [fakeResolver({ A: "value" })],
-          isServer: true,
-        }),
-      );
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        const error = (result.cause as { _tag: string; error: unknown }).error;
-        expect(error).toBeInstanceOf(EnvValidationError);
-      }
-    });
-
-    test("onValidationError callback throws normalize to EnvValidationError with resolvers", async () => {
-      const result = await Effect.runPromiseExit(
-        createEnv({
-          server: { A: requiredString },
-          resolvers: [fakeResolver({})],
-          isServer: true,
-          onValidationError: () => {
-            throw new Error("Custom resolver callback failure");
+  test("last definition replaces schema, source, runtime, and resolver requirements", () => {
+    const calls: Array<Readonly<Record<string, string>>> = [];
+    const resolver = configureResolver(recordingResolverAdapter, { calls });
+    const baseEnv = createEnv(
+      server({
+        TOKEN: requiredString.pipe(fromResolver(resolver, "shadowed-reference")),
+      }),
+    );
+    const appEnv = baseEnv.pipe(
+      extendEnv(
+        server(
+          {
+            TOKEN: Schema.NumberFromString,
           },
-        }),
-      );
-      expect(result._tag).toBe("Failure");
-      if (result._tag === "Failure") {
-        const error = (result.cause as { _tag: string; error: unknown }).error;
-        expect(error).toBeInstanceOf(EnvValidationError);
-        expect((error as EnvValidationError).errors[0]).toContain(
-          "Custom resolver callback failure",
-        );
+          {
+            runtimeEnv: { APP_TOKEN: "42" },
+            prefix: "APP_",
+          },
+        ),
+      ),
+    );
+
+    expect(Effect.runSync(appEnv.server).TOKEN).toBe(42);
+    expect(calls).toEqual([]);
+
+    const crossTargetAppEnv = baseEnv.pipe(extendEnv(client({ TOKEN: "public-override" })));
+    expect(Effect.runSync(crossTargetAppEnv.server).TOKEN).toBe("public-override");
+    expect(calls).toEqual([]);
+  });
+
+  test("multiple fragments retain independent runtime sources and prefixes", () => {
+    const appEnv = createEnv(
+      server(
+        { URL: requiredString },
+        { runtimeEnv: { BASE_URL: "https://base.example.com" }, prefix: "BASE_" },
+      ),
+      server(
+        { TOKEN: requiredString },
+        { runtimeEnv: new Map([["AUTH_TOKEN", "token"]]), prefix: "AUTH_" },
+      ),
+    );
+
+    expect(Effect.runSync(appEnv.server)).toEqual({
+      URL: "https://base.example.com",
+      TOKEN: "token",
+    });
+  });
+
+  test("accepts arbitrary Effect Schemas and preserves their requirements", () => {
+    class SchemaPolicy extends Context.Service<
+      SchemaPolicy,
+      { readonly accepts: (value: string) => boolean }
+    >()("test/SchemaPolicy") {}
+    const minimum = 3;
+    const arbitrarySchema = Schema.String.check(Schema.isMinLength(minimum)).pipe(
+      Schema.decode({
+        decode: SchemaGetter.checkEffect((value) =>
+          SchemaPolicy.useSync((policy) => policy.accepts(value)),
+        ),
+        encode: SchemaGetter.passthrough(),
+      }),
+      Schema.decodeTo(Schema.Number, {
+        decode: SchemaGetter.transform((value: string) => Number(value)),
+        encode: SchemaGetter.transform((value: number) => String(value)),
+      }),
+    );
+    const appEnv = createEnv(server({ PORT: arbitrarySchema }, { runtimeEnv: { PORT: "3000" } }));
+
+    expect(
+      Effect.runSync(
+        appEnv.server.pipe(
+          Effect.provideService(SchemaPolicy, {
+            accepts: (value) => value !== "forbidden",
+          }),
+        ),
+      ).PORT,
+    ).toBe(3000);
+  });
+
+  test("accepts recursively static shared data", () => {
+    const config = {
+      enabled: true,
+      routes: ["/", "/health"],
+      nested: { retries: 3 },
+    } as const;
+    const appEnv = createEnv(shared({ CONFIG: config }));
+
+    expect(Effect.runSync(appEnv.client).CONFIG).toEqual(config);
+    expect(Effect.runSync(appEnv.server).CONFIG).toEqual(config);
+  });
+
+  test("snapshots and recursively freezes shared data", () => {
+    const config = {
+      routes: ["/"],
+      nested: { retries: 3 },
+    };
+    const appEnv = createEnv(shared({ CONFIG: config }));
+
+    config.routes.push("/health");
+    config.nested.retries = 4;
+
+    const clientEnv = Effect.runSync(appEnv.client);
+    expect(clientEnv.CONFIG).toEqual({
+      routes: ["/"],
+      nested: { retries: 3 },
+    });
+    expect(Object.isFrozen(clientEnv.CONFIG)).toBe(true);
+    expect(Object.isFrozen(clientEnv.CONFIG.routes)).toBe(true);
+    expect(Object.isFrozen(clientEnv.CONFIG.nested)).toBe(true);
+    expect(Reflect.set(clientEnv.CONFIG.nested, "retries", 5)).toBe(false);
+    expect(Effect.runSync(appEnv.client).CONFIG.nested.retries).toBe(3);
+  });
+
+  test("rejects symbol fragment keys when JavaScript bypasses the types", () => {
+    const symbolKey = Symbol("fragment-key");
+
+    expect(() => Reflect.apply(server, undefined, [{ [symbolKey]: "server" }])).toThrow(
+      "Environment fragment keys must be strings",
+    );
+    expect(() => Reflect.apply(client, undefined, [{ [symbolKey]: "client" }])).toThrow(
+      "Environment fragment keys must be strings",
+    );
+    expect(() => Reflect.apply(shared, undefined, [{ [symbolKey]: "shared" }])).toThrow(
+      "Environment fragment keys must be strings",
+    );
+  });
+
+  test("rejects non-enumerable fragment entries", () => {
+    const values = { HIDDEN: requiredString };
+    Object.defineProperty(values, "HIDDEN", {
+      enumerable: false,
+      value: requiredString,
+    });
+
+    expect(() => server(values)).toThrow("Environment fragment entries must be enumerable");
+  });
+
+  test("requires Effect Schemas for structured server and client values", () => {
+    const structured = Schema.fromJsonString(
+      Schema.Struct({
+        enabled: Schema.Boolean,
+      }),
+    );
+    const appEnv = createEnv(
+      server({ SERVER_CONFIG: structured }, { runtimeEnv: { SERVER_CONFIG: '{"enabled":true}' } }),
+      client({ CLIENT_CONFIG: structured }, { runtimeEnv: { CLIENT_CONFIG: '{"enabled":false}' } }),
+    );
+
+    expect(Effect.runSync(appEnv.server)).toMatchObject({
+      SERVER_CONFIG: { enabled: true },
+      CLIENT_CONFIG: { enabled: false },
+    });
+    expect(Effect.runSync(appEnv.client).CLIENT_CONFIG).toEqual({ enabled: false });
+  });
+
+  test("rejects client schemas that produce nested redacted values", () => {
+    const nestedSecret = json(
+      Schema.Struct({
+        token: redacted(requiredString),
+      }),
+    );
+    const fragment: unknown = Reflect.apply(client, undefined, [
+      { CONFIG: nestedSecret },
+      { runtimeEnv: { CONFIG: '{"token":"secret"}' } },
+    ]);
+    const appEnv: unknown = Reflect.apply(createEnv, undefined, [fragment]);
+    if (typeof appEnv !== "object" || appEnv === null) {
+      throw new Error("Expected an AppEnv");
+    }
+    const clientEffect = Reflect.get(appEnv, "client");
+    if (!Effect.isEffect(clientEffect)) {
+      throw new Error("Expected a client Effect");
+    }
+
+    const result = Effect.runSync(Effect.result(clientEffect));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(EnvConfigurationError);
+      expect(String(result.failure)).toContain("redacted in a client fragment");
+      expect(String(result.failure)).not.toContain("secret");
+    }
+  });
+
+  test("rejects widened native redacted schemas in client fragments", () => {
+    const nativeRedacted: Schema.Top = Schema.RedactedFromValue(Schema.String);
+    const appEnv = createEnv(
+      client({ TOKEN: nativeRedacted }, { runtimeEnv: { TOKEN: "secret" } }),
+    );
+
+    const result = Effect.runSync(Effect.result(appEnv.client));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(EnvConfigurationError);
+      expect(String(result.failure)).toContain("redacted in a client fragment");
+      expect(String(result.failure)).not.toContain("secret");
+    }
+  });
+
+  test("rejects nested Effect values from shared when JavaScript bypasses the types", () => {
+    let failure: unknown;
+    try {
+      Reflect.apply(shared, undefined, [
+        {
+          CONFIG: {
+            token: Redacted.make("secret"),
+          },
+        },
+      ]);
+    } catch (cause: unknown) {
+      failure = cause;
+    }
+    expect(failure).toBeInstanceOf(TypeError);
+    expect(String(failure)).toContain(
+      "shared() accepts only scalar, array, and plain-object values",
+    );
+    expect(String(failure)).not.toContain("secret");
+  });
+
+  test("rejects raw structured runtime values when JavaScript bypasses the types", () => {
+    const fragment: unknown = Reflect.apply(server, undefined, [{ CONFIG: { enabled: true } }]);
+    const appEnv: unknown = Reflect.apply(createEnv, undefined, [fragment]);
+    if (typeof appEnv !== "object" || appEnv === null) {
+      throw new Error("Expected an AppEnv");
+    }
+    const serverEffect = Reflect.get(appEnv, "server");
+    if (!Effect.isEffect(serverEffect)) {
+      throw new Error("Expected a server Effect");
+    }
+
+    const result = Effect.runSync(Effect.result(serverEffect));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(EnvConfigurationError);
+      expect(String(result.failure)).toContain("Describe objects and arrays with an Effect Schema");
+    }
+  });
+});
+
+describe("lazy runtime boundaries", () => {
+  test("does not read runtime values until the Effect runs", () => {
+    let reads = 0;
+    const runtimeEnv = Object.defineProperty({}, "TOKEN", {
+      enumerable: true,
+      get: () => {
+        reads += 1;
+        return "value";
+      },
+    });
+    const appEnv = createEnv(server({ TOKEN: requiredString }, { runtimeEnv }));
+
+    expect(reads).toBe(0);
+    expect(Effect.runSync(appEnv.server).TOKEN).toBe("value");
+    expect(reads).toBe(1);
+  });
+
+  test("treats object sources with get and has methods as records", () => {
+    const appEnv = createEnv(
+      server(
+        { TOKEN: requiredString },
+        {
+          runtimeEnv: {
+            TOKEN: "record-value",
+            get: () => "map-value",
+            has: () => true,
+          },
+        },
+      ),
+    );
+
+    expect(Effect.runSync(appEnv.server).TOKEN).toBe("record-value");
+  });
+
+  test("reads structurally valid ReadonlyMap sources", () => {
+    const values = new Map<string, unknown>([["TOKEN", "map-value"]]);
+    const runtimeEnv = {
+      get size() {
+        return values.size;
+      },
+      get: values.get.bind(values),
+      has: values.has.bind(values),
+      entries: values.entries.bind(values),
+      keys: values.keys.bind(values),
+      values: values.values.bind(values),
+      forEach: values.forEach.bind(values),
+      [Symbol.iterator]: values[Symbol.iterator].bind(values),
+    } satisfies ReadonlyMap<string, unknown>;
+    const appEnv = createEnv(server({ TOKEN: requiredString }, { runtimeEnv }));
+
+    expect(Effect.runSync(appEnv.server).TOKEN).toBe("map-value");
+  });
+
+  test("fromEnv overrides a fragment prefix", () => {
+    const appEnv = createEnv(
+      client(
+        {
+          URL: requiredString,
+          ANALYTICS_KEY: requiredString.pipe(fromEnv("PUBLIC_ANALYTICS_KEY")),
+        },
+        {
+          runtimeEnv: {
+            VITE_URL: "https://default.example.com",
+            PUBLIC_ANALYTICS_KEY: "analytics",
+          },
+          prefix: "VITE_",
+        },
+      ),
+    );
+
+    expect(Effect.runSync(appEnv.client)).toEqual({
+      URL: "https://default.example.com",
+      ANALYTICS_KEY: "analytics",
+    });
+  });
+
+  test("reads dot paths but prefers an exact JSON key", () => {
+    const nested = createEnv(
+      server(
+        { DATABASE_URL: requiredString.pipe(fromEnv("application.database.url")) },
+        {
+          runtimeEnv: {
+            application: { database: { url: "postgres://nested.example.com" } },
+          },
+        },
+      ),
+    );
+    const exact = createEnv(
+      server(
+        { URL: requiredString.pipe(fromEnv("application.url")) },
+        {
+          runtimeEnv: {
+            "application.url": "https://exact.example.com",
+            application: { url: "https://nested.example.com" },
+          },
+        },
+      ),
+    );
+
+    expect(Effect.runSync(nested.server).DATABASE_URL).toBe("postgres://nested.example.com");
+    expect(Effect.runSync(exact.server).URL).toBe("https://exact.example.com");
+  });
+
+  test("returns immutable values and rejects unknown reads", () => {
+    const appEnv = createEnv(
+      shared({ APP_NAME: "Envil" }),
+      server({ DATABASE_URL: "postgres://localhost" }),
+      client({ PUBLIC_URL: "https://example.com" }),
+    );
+
+    const clientEnv: Readonly<Record<string, unknown>> = Effect.runSync(appEnv.client);
+    expect(() => Reflect.get(clientEnv, "DATABASE_URL")).toThrow(EnvironmentAccessError);
+    expect(() => Reflect.get(clientEnv, "TYPO")).toThrow(
+      '"TYPO" is not available in the client environment.',
+    );
+    expect(() => Reflect.set(clientEnv, "APP_NAME", "Changed")).toThrow(TypeError);
+    expect({ ...clientEnv }).toEqual({
+      APP_NAME: "Envil",
+      PUBLIC_URL: "https://example.com",
+    });
+  });
+
+  test("blocks server materialization in a browser runtime", () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {},
+    });
+
+    try {
+      const appEnv = createEnv(server({ TOKEN: "secret" }));
+      const result = Effect.runSync(Effect.result(appEnv.server));
+
+      expect(Result.isFailure(result)).toBe(true);
+      if (Result.isFailure(result)) {
+        expect(result.failure).toBeInstanceOf(ServerEnvironmentAccessError);
       }
-    });
+    } finally {
+      if (previousWindow === undefined) {
+        Reflect.deleteProperty(globalThis, "window");
+      } else {
+        Object.defineProperty(globalThis, "window", previousWindow);
+      }
+    }
+  });
+});
 
-    test("works with prefix", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { DB: requiredString },
-          prefix: "MY_",
-          resolvers: [fakeResolver({ MY_DB: "value" })],
-          isServer: true,
-        }),
-      );
-      expect(Redacted.isRedacted(env.DB)).toBe(true);
-      expect(Redacted.value(env.DB)).toBe("value");
-    });
+describe("variable sources", () => {
+  test("groups variables from the same configured resolver into one request", () => {
+    const calls: Array<Readonly<Record<string, string>>> = [];
+    const resolver = configureResolver(recordingResolverAdapter, { calls });
+    const appEnv = createEnv(
+      server({
+        FIRST: requiredString.pipe(fromResolver(resolver, "first-reference")),
+        SECOND: requiredString.pipe(fromResolver(resolver, "second-reference")),
+      }),
+    );
 
-    test("works with extends", async () => {
-      const baseEnv = createEnv({
-        server: { BASE_KEY: requiredString },
-        runtimeEnv: { BASE_KEY: "base-value" },
-        isServer: true,
-      });
-      const env = await Effect.runPromise(
-        createEnv({
-          extends: [baseEnv],
-          server: { RESOLVED_KEY: requiredString },
-          resolvers: [fakeResolver({ RESOLVED_KEY: "resolved-value" })],
-          isServer: true,
-        }),
-      );
-      expect(env.BASE_KEY).toBe("base-value");
-      expect(Redacted.isRedacted(env.RESOLVED_KEY)).toBe(true);
-      expect(Redacted.value(env.RESOLVED_KEY)).toBe("resolved-value");
-    });
+    expect(calls).toEqual([]);
+    const env = Effect.runSync(appEnv.server);
+    expect(calls).toEqual([
+      {
+        FIRST: "first-reference",
+        SECOND: "second-reference",
+      },
+    ]);
+    expect(Redacted.value(env.FIRST)).toBe("resolved:first-reference");
+    expect(Redacted.value(env.SECOND)).toBe("resolved:second-reference");
+  });
 
-    test("works with redacted", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { SECRET: redacted(Schema.String) },
-          resolvers: [fakeResolver({ SECRET: "my-secret" })],
-          isServer: true,
-        }),
-      );
-      // Already Redacted from schema, should not double-wrap
-      expect(Redacted.isRedacted(env.SECRET)).toBe(true);
-      expect(Redacted.value(env.SECRET)).toBe("my-secret");
-    });
+  test('preserves a resolver key named "__proto__"', () => {
+    const calls: Array<Readonly<Record<string, string>>> = [];
+    const resolver = configureResolver(recordingResolverAdapter, { calls });
+    const appEnv = createEnv(
+      server({
+        FIRST: requiredString.pipe(fromResolver(resolver, "first-reference")),
+        ["__proto__"]: requiredString.pipe(fromResolver(resolver, "proto-reference")),
+      }),
+    );
 
-    test("works with withDefault", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { MODE: withDefault(Schema.String, "production") },
-          resolvers: [fakeResolver({})],
-          isServer: true,
-        }),
-      );
-      expect(env.MODE).toBe("production");
-    });
+    const env = Effect.runSync(appEnv.server);
 
-    test("resolver values are auto-redacted internally", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { DB_PASS: requiredString },
-          resolvers: [fakeResolver({ DB_PASS: "secret123" })],
-          isServer: true,
-        }),
-      );
-      // Value is Redacted — no auto-unwrap
-      expect(Redacted.isRedacted(env.DB_PASS)).toBe(true);
-      expect(Redacted.value(env.DB_PASS)).toBe("secret123");
-      // Internally the value is stored as Redacted
-      const raw = Object.getOwnPropertyDescriptor(env, "DB_PASS")?.value;
-      expect(Redacted.isRedacted(raw)).toBe(true);
-      expect(Redacted.value(raw as Redacted.Redacted<string>)).toBe("secret123");
-    });
+    expect(calls.map((call) => Object.entries(call))).toEqual([
+      [
+        ["FIRST", "first-reference"],
+        ["__proto__", "proto-reference"],
+      ],
+    ]);
+    expect(Redacted.value(env.__proto__)).toBe("resolved:proto-reference");
+  });
 
-    test("explicit redacted() + resolver doesn't double-wrap", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { SECRET: redacted(Schema.String) },
-          resolvers: [fakeResolver({ SECRET: "my-secret" })],
-          isServer: true,
+  test("snapshots custom resolver options before runtime", () => {
+    const calls: string[] = [];
+    const adapter: ResolverAdapter<
+      "custom-test",
+      string,
+      { readonly prefix: string },
+      never,
+      never
+    > = {
+      name: "custom-test",
+      resolve: ({ prefix, referencesByKey }) =>
+        Effect.sync(() => {
+          const result: Record<string, ResolvedSecret> = {};
+          for (const [key, reference] of Object.entries(referencesByKey)) {
+            calls.push(reference);
+            result[key] = Option.some(Redacted.make(`${prefix}:${reference}`));
+          }
+          return result;
         }),
-      );
-      expect(Redacted.isRedacted(env.SECRET)).toBe(true);
-      const raw = Object.getOwnPropertyDescriptor(env, "SECRET")?.value;
-      expect(Redacted.isRedacted(raw)).toBe(true);
-      // Unwrap once — should be the plain string, not another Redacted
-      const inner = Redacted.value(raw as Redacted.Redacted<string>);
-      expect(typeof inner).toBe("string");
-      expect(inner).toBe("my-secret");
-    });
+    };
+    const options = { prefix: "resolved" };
+    const resolver = configureResolver(adapter, options);
+    options.prefix = "mutated";
+    const appEnv = createEnv(
+      server({
+        TOKEN: requiredString.pipe(fromResolver(resolver, "token-reference")),
+      }),
+    );
 
-    test("non-resolver runtimeEnv values are NOT auto-redacted", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { DB_HOST: requiredString, DB_PASS: requiredString },
-          resolvers: [fakeResolver({ DB_PASS: "secret" })],
-          runtimeEnv: { DB_HOST: "localhost" },
-          isServer: true,
-        }),
-      );
-      expect(env.DB_HOST).toBe("localhost");
-      const raw = Object.getOwnPropertyDescriptor(env, "DB_HOST")?.value;
-      expect(Redacted.isRedacted(raw)).toBe(false);
-      expect(raw).toBe("localhost");
-    });
+    const env = Effect.runSync(appEnv.server);
+    expect(Redacted.value(env.TOKEN)).toBe("resolved:token-reference");
+    expect(calls).toEqual(["token-reference"]);
+  });
 
-    test("undefined resolver values don't trigger auto-redaction", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { A: requiredString, B: optional(Schema.String) },
-          resolvers: [fakeResolver({ A: "value", B: undefined })],
-          runtimeEnv: {},
-          isServer: true,
-        }),
-      );
-      // B should not be auto-redacted since the resolver returned undefined for it
-      const rawB = Object.getOwnPropertyDescriptor(env, "B")?.value;
-      expect(Redacted.isRedacted(rawB)).toBe(false);
+  test("resolver values are authoritative and automatically redacted", async () => {
+    const source = configureResolver(customSecretsAdapter, {});
+    const layer = SecretSource.fromPromise({
+      get: async () => Option.some("resolved-value"),
     });
+    const appEnv = createEnv(
+      server(
+        { TOKEN: requiredString.pipe(fromResolver(source, "remote-reference")) },
+        { runtimeEnv: { TOKEN: "runtime-value" } },
+      ),
+    );
 
-    test("auto-redact works with prefix", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { DB: requiredString },
-          prefix: "MY_",
-          resolvers: [fakeResolver({ MY_DB: "value" })],
-          isServer: true,
-        }),
-      );
-      expect(Redacted.isRedacted(env.DB)).toBe(true);
-      expect(Redacted.value(env.DB)).toBe("value");
-      const raw = Object.getOwnPropertyDescriptor(env, "DB")?.value;
-      expect(Redacted.isRedacted(raw)).toBe(true);
-    });
+    const env = await Effect.runPromise(appEnv.server.pipe(Effect.provide(layer)));
+    expect(Redacted.isRedacted(env.TOKEN)).toBe(true);
+    expect(Redacted.value(env.TOKEN)).toBe("resolved-value");
+  });
 
-    test("auto-redact works with schema transforms (positiveNumber)", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { PORT: positiveNumber },
-          resolvers: [fakeResolver({ PORT: "3000" })],
-          isServer: true,
-        }),
-      );
-      expect(Redacted.isRedacted(env.PORT)).toBe(true);
-      expect(Redacted.value(env.PORT)).toBe(3000);
-      const raw = Object.getOwnPropertyDescriptor(env, "PORT")?.value;
-      expect(Redacted.isRedacted(raw)).toBe(true);
-      expect(Redacted.value(raw as Redacted.Redacted<number>)).toBe(3000);
+  test("optional resolver absence remains undefined", async () => {
+    const source = configureResolver(customSecretsAdapter, {});
+    const layer = SecretSource.fromPromise({
+      get: async () => Option.none(),
     });
+    const appEnv = createEnv(
+      server({
+        TOKEN: optional(requiredString).pipe(fromResolver(source, "remote-reference")),
+      }),
+    );
 
-    test("autoRedactResolver: false disables auto-redaction", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { DB_PASS: requiredString },
-          resolvers: [fakeResolver({ DB_PASS: "secret123" })],
-          autoRedactResolver: false,
-          isServer: true,
-        }),
-      );
-      // With autoRedactResolver: false, value is plain string
-      expect(Redacted.isRedacted(env.DB_PASS)).toBe(false);
-      expect(env.DB_PASS).toBe("secret123");
-    });
+    const env = await Effect.runPromise(appEnv.server.pipe(Effect.provide(layer)));
+    expect(env.TOKEN).toBeUndefined();
+  });
 
-    test("autoRedactResolver: false with explicit redacted() still wraps", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { SECRET: redacted(Schema.String) },
-          resolvers: [fakeResolver({ SECRET: "my-secret" })],
-          autoRedactResolver: false,
-          isServer: true,
+  test("rejects incomplete resolver responses after attempted request mutation", () => {
+    const mutatingAdapter: ResolverAdapter<"mutating", string, {}, never, never> = {
+      name: "mutating",
+      resolve: ({ referencesByKey }) =>
+        Effect.sync(() => {
+          for (const key of Object.keys(referencesByKey)) {
+            Reflect.deleteProperty(referencesByKey, key);
+          }
+          const result: Record<string, ResolvedSecret> = {};
+          return result;
         }),
-      );
-      // Explicit redacted() in schema still wraps
-      expect(Redacted.isRedacted(env.SECRET)).toBe(true);
-      expect(Redacted.value(env.SECRET)).toBe("my-secret");
-    });
+    };
+    const source = configureResolver(mutatingAdapter, {});
+    const appEnv = createEnv(
+      server({
+        TOKEN: optional(requiredString).pipe(fromResolver(source, "remote-reference")),
+      }),
+    );
 
-    test("JSON.stringify does not leak auto-redacted resolver values", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { DB_HOST: requiredString, DB_PASS: requiredString },
-          resolvers: [fakeResolver({ DB_PASS: "secret" })],
-          runtimeEnv: { DB_HOST: "localhost" },
-          isServer: true,
-        }),
-      );
-      const json = JSON.stringify(env);
-      expect(json).not.toContain("secret");
-      expect(json).toContain("localhost");
-    });
+    expect(() => Effect.runSync(appEnv.server)).toThrow('did not return "TOKEN"');
+  });
 
-    test("spread preserves Redacted wrappers for auto-redacted resolver values", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { DB_HOST: requiredString, DB_PASS: requiredString },
-          resolvers: [fakeResolver({ DB_PASS: "secret" })],
-          runtimeEnv: { DB_HOST: "localhost" },
-          isServer: true,
+  test("rejects resolver values inherited from the result prototype", () => {
+    const inheritedAdapter: ResolverAdapter<"inherited", string, {}, never, never> = {
+      name: "inherited",
+      resolve: () =>
+        Effect.sync(() => {
+          const result: Record<string, ResolvedSecret> = {};
+          Object.setPrototypeOf(result, {
+            TOKEN: Option.some(Redacted.make("inherited-value")),
+          });
+          return result;
         }),
-      );
-      const spread = { ...env };
-      expect(Redacted.isRedacted(spread.DB_PASS)).toBe(true);
-      expect(spread.DB_HOST).toBe("localhost");
-    });
+    };
+    const source = configureResolver(inheritedAdapter, {});
+    const appEnv = createEnv(
+      server({
+        TOKEN: optional(requiredString).pipe(fromResolver(source, "remote-reference")),
+      }),
+    );
 
-    test("prefix-aware: resolver keys are Redacted, non-resolver keys are plain", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { DB_HOST: requiredString, DB_PASS: requiredString },
-          prefix: "MY_",
-          resolvers: [fakeResolver({ MY_DB_PASS: "secret" })],
-          runtimeEnv: { MY_DB_HOST: "localhost" },
-          isServer: true,
-        }),
-      );
-      // DB_HOST comes from runtimeEnv → plain string
-      expect(env.DB_HOST).toBe("localhost");
-      expect(Redacted.isRedacted(env.DB_HOST)).toBe(false);
-      // DB_PASS comes from resolver → auto-redacted
-      expect(Redacted.isRedacted(env.DB_PASS)).toBe(true);
-      expect(Redacted.value(env.DB_PASS)).toBe("secret");
-    });
+    expect(() => Effect.runSync(appEnv.server)).toThrow('did not return "TOKEN"');
+  });
 
-    test("prefix-aware: multiple resolver keys with prefix", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { PORT: positiveNumber, API_KEY: requiredString, SECRET: requiredString },
-          prefix: "APP_",
-          resolvers: [fakeResolver({ APP_API_KEY: "key123", APP_SECRET: "s3cret" })],
-          runtimeEnv: { APP_PORT: "3000" },
-          isServer: true,
-        }),
-      );
-      // PORT from runtimeEnv → plain number
-      expect(env.PORT).toBe(3000);
-      expect(Redacted.isRedacted(env.PORT)).toBe(false);
-      // API_KEY and SECRET from resolver → auto-redacted
-      expect(Redacted.isRedacted(env.API_KEY)).toBe(true);
-      expect(Redacted.value(env.API_KEY)).toBe("key123");
-      expect(Redacted.isRedacted(env.SECRET)).toBe(true);
-      expect(Redacted.value(env.SECRET)).toBe("s3cret");
+  test("client materialization never executes server resolvers", async () => {
+    let calls = 0;
+    const source = configureResolver(customSecretsAdapter, {});
+    const layer = SecretSource.fromPromise({
+      get: async () => {
+        calls += 1;
+        return Option.some("secret");
+      },
     });
+    const appEnv = createEnv(
+      server({
+        SECRET: requiredString.pipe(fromResolver(source, "remote-reference")),
+      }),
+      client({ PUBLIC: "public" }),
+    );
 
-    test("prefix-aware: no prefix means resolver keys match directly", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { DB_HOST: requiredString, DB_PASS: requiredString },
-          resolvers: [fakeResolver({ DB_PASS: "secret" })],
-          runtimeEnv: { DB_HOST: "localhost" },
-          isServer: true,
-        }),
-      );
-      expect(env.DB_HOST).toBe("localhost");
-      expect(Redacted.isRedacted(env.DB_HOST)).toBe(false);
-      expect(Redacted.isRedacted(env.DB_PASS)).toBe(true);
-      expect(Redacted.value(env.DB_PASS)).toBe("secret");
+    expect(await Effect.runPromise(appEnv.client.pipe(Effect.provide(layer)))).toEqual({
+      PUBLIC: "public",
     });
+    expect(calls).toBe(0);
+  });
 
-    test("Object.values preserves Redacted wrappers for auto-redacted values", async () => {
-      const env = await Effect.runPromise(
-        createEnv({
-          server: { DB_PASS: requiredString },
-          resolvers: [fakeResolver({ DB_PASS: "secret" })],
-          isServer: true,
-        }),
-      );
-      const values = Object.values(env);
-      expect(values.some((v) => Redacted.isRedacted(v))).toBe(true);
-      expect(values.every((v) => typeof v !== "string" || v !== "secret")).toBe(true);
+  test("synchronous resolver construction failures stay typed and sanitized", async () => {
+    const privateReference = "provider/private-reference";
+    const throwingAdapter: ResolverAdapter<"throwing", string, {}, never, never> = {
+      name: "throwing",
+      resolve: () => {
+        throw new Error(privateReference);
+      },
+    };
+    const resolver = configureResolver(throwingAdapter, {});
+    const appEnv = createEnv(
+      server({
+        TOKEN: requiredString.pipe(fromResolver(resolver, privateReference)),
+      }),
+    );
+
+    const result = await Effect.runPromise(appEnv.server.pipe(asResult()));
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBeInstanceOf(EnvConfigurationError);
+      expect(String(result.error)).not.toContain(privateReference);
+    }
+  });
+});
+
+describe("validation and runtime backstops", () => {
+  test("rejects functions produced by broad schemas", () => {
+    const appEnv = createEnv(
+      server({ CALLBACK: Schema.Any }, { runtimeEnv: { CALLBACK: () => "value" } }),
+    );
+
+    const result = Effect.runSync(Effect.result(appEnv.server));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(EnvValidationError);
+      expect(result.failure.issues).toEqual([
+        {
+          _tag: "InvalidVariable",
+          key: "CALLBACK",
+          sensitive: false,
+        },
+      ]);
+    }
+  });
+
+  test("redacted runtime schemas remain redacted", () => {
+    const appEnv = createEnv(
+      server({ TOKEN: redacted(requiredString) }, { runtimeEnv: { TOKEN: "secret-value" } }),
+    );
+
+    const env = Effect.runSync(appEnv.server);
+    expect(Redacted.isRedacted(env.TOKEN)).toBe(true);
+    expect(String(env.TOKEN)).not.toContain("secret-value");
+  });
+
+  test("validation issues never retain rejected values", () => {
+    const secret = "invalid-secret-value";
+    const appEnv = createEnv(
+      server({ TOKEN: redacted(Schema.Literal("expected")) }, { runtimeEnv: { TOKEN: secret } }),
+    );
+
+    const result = Effect.runSync(Effect.result(appEnv.server));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(EnvValidationError);
+      expect(String(result.failure)).not.toContain(secret);
+      expect(JSON.stringify(result.failure)).not.toContain(secret);
+    }
+  });
+
+  test("malformed resolver JSON exposes neither values nor references", async () => {
+    const secret = "{not-json-secret";
+    const reference = "tenant/private-json";
+    const source = configureResolver(customSecretsAdapter, {});
+    const layer = SecretSource.fromPromise({
+      get: async () => Option.some(secret),
     });
+    const appEnv = createEnv(
+      server({
+        JSON_SECRET: Schema.fromJsonString(Schema.Struct({ id: Schema.String })).pipe(
+          fromResolver(source, reference),
+        ),
+      }),
+    );
+
+    const exit = await Effect.runPromiseExit(appEnv.server.pipe(Effect.provide(layer)));
+    expect(String(exit)).not.toContain(secret);
+    expect(String(exit)).not.toContain(reference);
+  });
+
+  test("asResult captures typed validation failures", () => {
+    const appEnv = createEnv(server({ REQUIRED: requiredString }, { runtimeEnv: {} }));
+    const result = Effect.runSync(appEnv.server.pipe(asResult()));
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error).toBeInstanceOf(EnvValidationError);
+    }
+  });
+
+  test("reports a missing client runtime source when JavaScript bypasses the types", () => {
+    const fragment: unknown = Reflect.apply(client, undefined, [{ PUBLIC: requiredString }]);
+    const appEnv: unknown = Reflect.apply(createEnv, undefined, [fragment]);
+    if (typeof appEnv !== "object" || appEnv === null) {
+      throw new Error("Expected an AppEnv with a client Effect");
+    }
+    const clientEffect = Reflect.get(appEnv, "client");
+    if (!Effect.isEffect(clientEffect)) {
+      throw new Error("Expected an AppEnv with a client Effect");
+    }
+
+    const result = Effect.runSync(Effect.result(clientEffect));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(EnvConfigurationError);
+      expect(String(result.failure)).toContain('client variable "PUBLIC" needs runtimeEnv');
+    }
+  });
+
+  test("applies cross-target last-wins precedence to the complete server context", () => {
+    const appEnv = createEnv(
+      server({ URL: requiredString }, { runtimeEnv: { URL: "server" } }),
+      client({ URL: requiredString }, { runtimeEnv: { URL: "client" } }),
+    );
+
+    expect(Effect.runSync(appEnv.server).URL).toBe("client");
+    expect(Effect.runSync(appEnv.client).URL).toBe("client");
+  });
+
+  test("explains duplicate runtime mappings after last-wins resolution", () => {
+    const appEnv = createEnv(
+      server(
+        {
+          FIRST: requiredString.pipe(fromEnv("TOKEN")),
+          SECOND: requiredString.pipe(fromEnv("TOKEN")),
+        },
+        { runtimeEnv: { TOKEN: "value" } },
+      ),
+    );
+
+    const result = Effect.runSync(Effect.result(appEnv.server));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(String(result.failure)).toContain(
+        '"FIRST" and "SECOND" both read "TOKEN" in the server environment.',
+      );
+    }
+  });
+
+  test("detects inherited runtime mapping collisions after composition", () => {
+    const baseEnv = createEnv(
+      server(
+        {
+          PUBLIC_URL: requiredString,
+        },
+        { runtimeEnv: { PUBLIC_URL: "server" } },
+      ),
+    );
+    const appEnv = baseEnv.pipe(
+      extendEnv(
+        client(
+          {
+            URL: requiredString,
+          },
+          { runtimeEnv: { PUBLIC_URL: "client" }, prefix: "PUBLIC_" },
+        ),
+      ),
+    );
+
+    const result = Effect.runSync(Effect.result(appEnv.server));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(String(result.failure)).toContain(
+        '"PUBLIC_URL" and "URL" both read "PUBLIC_URL" in the server environment.',
+      );
+    }
   });
 });

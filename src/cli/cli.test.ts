@@ -1,515 +1,552 @@
-import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import os from "node:os";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { Schema } from "effect";
-
 import { runCli } from "../cli-core.ts";
-import { buildEnvExample } from "../introspect.ts";
-import * as S from "../schemas.ts";
 
-import { decodeDotenvText } from "./dotenv-codec.ts";
-import { generateEnvTs } from "./generate-env-ts.ts";
-import { inferModel } from "./infer.ts";
-import type { InferredVariable, SchemaKind } from "./types.ts";
-import { FRAMEWORKS, type Framework } from "./types.ts";
+import { inspectEnvContract, renderEnvExample } from "./contract-inspector.ts";
+import { generateDefaultEnvSource, generateEnvSourceFromDotenv } from "./init.ts";
 
-function createBufferedIO(cwd: string) {
-  const stdout: string[] = [];
-  const stderr: string[] = [];
+const temporaryDirectories: string[] = [];
 
-  return {
-    stdout,
-    stderr,
-    io: {
-      cwd: () => cwd,
-      stdout: (message: string) => {
-        stdout.push(message);
+async function createFixture(): Promise<string> {
+  const directory = await mkdtemp(path.join(process.cwd(), ".envil-test-"));
+  temporaryDirectories.push(directory);
+  await writeFile(
+    path.join(directory, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        strict: true,
+        module: "ESNext",
+        moduleResolution: "bundler",
+        target: "ES2022",
+        allowImportingTsExtensions: true,
+        noEmit: true,
       },
-      stderr: (message: string) => {
-        stderr.push(message);
-      },
-    },
-  };
+      include: ["./*.ts"],
+    }),
+  );
+  return directory;
 }
 
-describe("envil cli", () => {
-  describe("integration", () => {
-    test("add env creates env.ts from .env.example", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-add-env-"));
-      await mkdir(path.join(tempDir, "src"), { recursive: true });
-      await writeFile(
-        path.join(tempDir, ".env.example"),
-        ["# @server", "PORT=3000", "# @client", "NEXT_PUBLIC_API_URL=https://example.com", ""].join(
-          "\n",
-        ),
-        "utf8",
-      );
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
+  );
+});
 
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(["add", "env"], io.io);
+describe("envil init", () => {
+  test("generates a server starter without choosing a client runtime", () => {
+    const source = generateDefaultEnvSource();
 
-      expect(code).toBe(0);
-      const generated = await readFile(path.join(tempDir, "src", "env.ts"), "utf8");
-      expect(generated).toContain("export const envDefinition = {");
-      expect(generated).toContain("export const env = createEnv(envDefinition);");
-      expect(io.stderr.join("")).toBe("");
-
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("env.ts -> .env.example round-trip preserves content", () => {
-      const input = "# @server\nPORT=3000\n# @client\nNEXT_PUBLIC_API_URL=https://example.com\n";
-      const prefix = { server: "", client: "", shared: "" };
-
-      const dotenv = decodeDotenvText(input);
-      const model = inferModel(dotenv, { prefix });
-      const definition = modelToDefinition(model);
-      const recreated = buildEnvExample(definition);
-
-      expect(recreated).toContain("# @server");
-      expect(recreated).toContain("# @client");
-      expect(recreated).toContain("# @shared");
-      expect(recreated).toContain("PORT=3000");
-      expect(recreated).toContain("NEXT_PUBLIC_API_URL=https://example.com");
-    });
-
-    test("refuses to overwrite output without --force", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-overwrite-"));
-      await writeFile(path.join(tempDir, ".env.example"), "PORT=3000\n", "utf8");
-      await writeFile(path.join(tempDir, "env.ts"), "existing\n", "utf8");
-
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(["add", "env", "--output", "env.ts"], io.io);
-
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain("already exists");
-
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("applies framework and explicit prefix flags", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-prefix-"));
-      await writeFile(
-        path.join(tempDir, ".env.example"),
-        "NEXT_PUBLIC_API_URL=https://example.com\n",
-        "utf8",
-      );
-
-      const io = createBufferedIO(tempDir);
-      expect(
-        await runCli(["add", "env", "--framework", "nextjs", "--output", "env.ts"], io.io),
-      ).toBe(0);
-      let generated = await readFile(path.join(tempDir, "env.ts"), "utf8");
-      expect(generated).toContain('client: "NEXT_PUBLIC_"');
-
-      expect(
-        await runCli(
-          [
-            "add",
-            "env",
-            "--framework",
-            "nextjs",
-            "--client-prefix",
-            "CUSTOM_",
-            "--output",
-            "env.ts",
-            "--force",
-          ],
-          io.io,
-        ),
-      ).toBe(0);
-      generated = await readFile(path.join(tempDir, "env.ts"), "utf8");
-      expect(generated).toContain('client: "CUSTOM_"');
-
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("round-trip is stable: .env.example -> env.ts -> .env.example -> env.ts", () => {
-      const input =
-        "# @server\n# @type port\nPORT=3000\n\n# @client\nNEXT_PUBLIC_API_URL=https://example.com\n";
-      const prefix = { server: "", client: "", shared: "" };
-
-      const dotenv1 = decodeDotenvText(input);
-      const model1 = inferModel(dotenv1, { prefix });
-      const envTs1 = generateEnvTs(model1);
-
-      const definition = modelToDefinition(model1);
-      const exampleText = buildEnvExample(definition);
-
-      const dotenv2 = decodeDotenvText(exampleText);
-      const model2 = inferModel(dotenv2, { prefix });
-      const envTs2 = generateEnvTs(model2);
-
-      expect(envTs2).toBe(envTs1);
-    });
+    expect(source).toContain("export const appEnv = createEnv");
+    expect(source).toContain("server({");
+    expect(source).toContain("DATABASE_URL: redacted(requiredString)");
+    expect(source).not.toContain("client(");
+    expect(source).not.toContain("prefix:");
+    expect(source).not.toContain("runtimeEnv:");
   });
 
-  describe("help output", () => {
-    test("no args shows root help", async () => {
-      const io = createBufferedIO("/tmp");
-      const code = await runCli([], io.io);
-      expect(code).toBe(0);
-      expect(io.stdout.join("")).toContain("envil add env");
-    });
-
-    test("--help shows root help", async () => {
-      const io = createBufferedIO("/tmp");
-      const code = await runCli(["--help"], io.io);
-      expect(code).toBe(0);
-      expect(io.stdout.join("")).toContain("envil add env");
-    });
-
-    test("-h shows root help", async () => {
-      const io = createBufferedIO("/tmp");
-      const code = await runCli(["-h"], io.io);
-      expect(code).toBe(0);
-      expect(io.stdout.join("")).toContain("envil add env");
-    });
-
-    test("add alone shows add help", async () => {
-      const io = createBufferedIO("/tmp");
-      const code = await runCli(["add"], io.io);
-      expect(code).toBe(0);
-      expect(io.stdout.join("")).toContain("Subcommands:");
-    });
-
-    test("add --help shows add help", async () => {
-      const io = createBufferedIO("/tmp");
-      const code = await runCli(["add", "--help"], io.io);
-      expect(code).toBe(0);
-      expect(io.stdout.join("")).toContain("Subcommands:");
-    });
-
-    test("add env --help shows add env help", async () => {
-      const io = createBufferedIO("/tmp");
-      const code = await runCli(["add", "env", "--help"], io.io);
-      expect(code).toBe(0);
-      const output = io.stdout.join("");
-      expect(output).toContain("--input");
-      expect(output).toContain("--output");
-      expect(output).toContain("--framework");
-    });
-
-    test("add example --help shows add example help", async () => {
-      const io = createBufferedIO("/tmp");
-      const code = await runCli(["add", "example", "--help"], io.io);
-      expect(code).toBe(0);
-      const output = io.stdout.join("");
-      expect(output).toContain("--input");
-      expect(output).toContain("--output");
-      expect(output).toContain("--force");
-    });
-  });
-
-  describe("error handling", () => {
-    test("unknown command returns 1", async () => {
-      const io = createBufferedIO("/tmp");
-      const code = await runCli(["bogus"], io.io);
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain('Unknown command "bogus"');
-    });
-
-    test("unknown subcommand returns 1", async () => {
-      const io = createBufferedIO("/tmp");
-      const code = await runCli(["add", "bogus"], io.io);
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain('Unknown subcommand "add bogus"');
-    });
-
-    test("missing input file returns 1", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-missing-"));
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(["add", "env"], io.io);
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain("Unable to read");
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("invalid envDefinition schema entry returns actionable error", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-invalid-definition-"));
-      await writeFile(
-        path.join(tempDir, "env.ts"),
-        [
-          "export const envDefinition = {",
-          '  server: { BAD: "not-a-schema" },',
-          "  client: {},",
-          "  shared: {},",
-          "};",
-          "",
-        ].join("\n"),
-        "utf8",
-      );
-
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(["add", "example", "--input", "env.ts"], io.io);
-
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain("Invalid envDefinition");
-      expect(io.stderr.join("")).toContain("envDefinition.server.BAD must be an Effect Schema");
-      await rm(tempDir, { recursive: true, force: true });
-    });
-  });
-
-  describe("flag parsing", () => {
-    test("unknown option returns 1", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-flag-"));
-      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(["add", "env", "--unknown"], io.io);
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain('Unknown option "--unknown"');
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("missing string value returns 1", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-flag-"));
-      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(["add", "env", "--input"], io.io);
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain('"--input" requires a value');
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("missing value before another flag returns 1", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-flag-"));
-      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(["add", "env", "--input", "--force"], io.io);
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain('"--input" requires a value');
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("inline = syntax works", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-flag-"));
-      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(
-        [
-          "add",
-          "env",
-          `--input=${path.join(tempDir, ".env.example")}`,
-          "--output",
-          path.join(tempDir, "env.ts"),
-        ],
-        io.io,
-      );
-      expect(code).toBe(0);
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("--force=false does not set force", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-flag-"));
-      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-      await writeFile(path.join(tempDir, "env.ts"), "existing\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(["add", "env", "--output", "env.ts", "--force=false"], io.io);
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain("already exists");
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("--force=0 does not set force", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-flag-"));
-      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-      await writeFile(path.join(tempDir, "env.ts"), "existing\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(["add", "env", "--output", "env.ts", "--force=0"], io.io);
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain("already exists");
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("--force=False does not set force", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-flag-"));
-      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-      await writeFile(path.join(tempDir, "env.ts"), "existing\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(["add", "env", "--output", "env.ts", "--force=False"], io.io);
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain("already exists");
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("invalid boolean flag value returns 1", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-flag-"));
-      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(["add", "env", "--force=maybe"], io.io);
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain('Invalid value for --force: "maybe"');
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("unexpected positional argument returns 1", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-flag-"));
-      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(["add", "env", "extra"], io.io);
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain('Unexpected argument "extra"');
-      await rm(tempDir, { recursive: true, force: true });
-    });
-  });
-
-  describe("invalid framework", () => {
-    test("--framework rails returns error", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-framework-"));
-      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      const code = await runCli(["add", "env", "--framework", "rails"], io.io);
-      expect(code).toBe(1);
-      expect(io.stderr.join("")).toContain("Invalid value for --framework");
-      await rm(tempDir, { recursive: true, force: true });
-    });
-  });
-
-  describe("resolvePrefix", () => {
-    test("framework-only sets client prefix", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-resolve-"));
-      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      await runCli(["add", "env", "--framework", "nextjs", "--output", "env.ts"], io.io);
-      const content = await readFile(path.join(tempDir, "env.ts"), "utf8");
-      expect(content).toContain('client: "NEXT_PUBLIC_"');
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("explicit prefix overrides framework", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-resolve-"));
-      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      await runCli(
-        ["add", "env", "--framework", "nextjs", "--client-prefix", "MY_", "--output", "env.ts"],
-        io.io,
-      );
-      const content = await readFile(path.join(tempDir, "env.ts"), "utf8");
-      expect(content).toContain('client: "MY_"');
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("document prefix used as fallback", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-resolve-"));
-      await writeFile(path.join(tempDir, ".env.example"), "# @client DOC_\nKEY=value\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      await runCli(["add", "env", "--output", "env.ts"], io.io);
-      const content = await readFile(path.join(tempDir, "env.ts"), "utf8");
-      expect(content).toContain('client: "DOC_"');
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("explicit prefix overrides document prefix", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-resolve-"));
-      await writeFile(path.join(tempDir, ".env.example"), "# @client DOC_\nKEY=value\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      await runCli(["add", "env", "--client-prefix", "CLI_", "--output", "env.ts"], io.io);
-      const content = await readFile(path.join(tempDir, "env.ts"), "utf8");
-      expect(content).toContain('client: "CLI_"');
-      await rm(tempDir, { recursive: true, force: true });
-    });
-
-    test("all empty when no prefix source", async () => {
-      const tempDir = await mkdtemp(path.join(os.tmpdir(), "envil-resolve-"));
-      await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-      const io = createBufferedIO(tempDir);
-      await runCli(["add", "env", "--output", "env.ts"], io.io);
-      const content = await readFile(path.join(tempDir, "env.ts"), "utf8");
-      expect(content).toContain('server: ""');
-      expect(content).toContain('client: ""');
-      expect(content).toContain('shared: ""');
-      await rm(tempDir, { recursive: true, force: true });
-    });
-  });
-
-  describe("framework presets", () => {
-    const frameworkCases: Array<[Framework, string]> = [
-      ["nextjs", "NEXT_PUBLIC_"],
-      ["vite", "VITE_"],
-      ["expo", "EXPO_PUBLIC_"],
-      ["nuxt", "NUXT_PUBLIC_"],
-      ["sveltekit", "PUBLIC_"],
-      ["astro", "PUBLIC_"],
-    ];
-
-    test.each(frameworkCases)(
-      "framework '%s' sets client prefix to '%s'",
-      async (framework, expectedPrefix) => {
-        const tempDir = await mkdtemp(path.join(os.tmpdir(), `envil-fw-${framework}-`));
-        await writeFile(path.join(tempDir, ".env.example"), "KEY=value\n", "utf8");
-        const io = createBufferedIO(tempDir);
-        await runCli(["add", "env", "--framework", framework, "--output", "env.ts"], io.io);
-        const content = await readFile(path.join(tempDir, "env.ts"), "utf8");
-        expect(content).toContain(`client: "${expectedPrefix}"`);
-        await rm(tempDir, { recursive: true, force: true });
-      },
+  test("uses dotenv values only to infer target schemas", () => {
+    const secret = "postgres://user:password@db.example.com:5432/app";
+    const source = generateEnvSourceFromDotenv(
+      `DATABASE_URL=${secret}\nVITE_APP_URL=https://example.com\nPORT=3000\n`,
     );
 
-    test("FRAMEWORKS constant includes all tested frameworks", () => {
-      expect(FRAMEWORKS).toEqual(["nextjs", "vite", "expo", "nuxt", "sveltekit", "astro"]);
+    expect(source).toContain("DATABASE_URL: redacted(postgresUrl)");
+    expect(source).toContain("APP_URL: url");
+    expect(source).toContain("PORT: port");
+    expect(source).toContain('prefix: "VITE_"');
+    expect(source).not.toContain("runtimeEnv:");
+    expect(source).not.toContain(secret);
+  });
+
+  test("rejects malformed dotenv assignments instead of ignoring them", () => {
+    expect(() => generateEnvSourceFromDotenv("VALID=value\nAPI URL=https://example.com\n")).toThrow(
+      "malformed dotenv syntax",
+    );
+  });
+
+  test("accepts supported dotenv syntax while validating assignments", () => {
+    const source = generateEnvSourceFromDotenv(
+      [
+        "# comment",
+        "export API.URL=https://example.com # inline comment",
+        'MULTILINE="first',
+        'second"',
+        "EMPTY=",
+      ].join("\n"),
+    );
+
+    expect(source).toContain('"API.URL": url');
+    expect(source).toContain("MULTILINE: requiredString");
+    expect(source).toContain("EMPTY: requiredString");
+  });
+
+  test("accepts a UTF-8 BOM before the first dotenv assignment", () => {
+    const source = generateEnvSourceFromDotenv("\uFEFFPORT=3000\n");
+
+    expect(source).toContain("PORT: port");
+  });
+
+  test("redacts sensitive names and inferred server connection URLs", () => {
+    const source = generateEnvSourceFromDotenv(
+      [
+        "AWS_SECRET_ACCESS_KEY=private-value",
+        "CACHE=redis://host:6379/0",
+        "DOCUMENTS=mongodb://host:27017/app",
+        "MYSQL_URL=mysql://user:password@host:3306/app",
+        "SECRETARY_EMAIL=assistant@example.com",
+      ].join("\n"),
+    );
+
+    expect(source).toContain("AWS_SECRET_ACCESS_KEY: redacted(requiredString)");
+    expect(source).toContain("CACHE: redacted(redisUrl)");
+    expect(source).toContain("DOCUMENTS: redacted(mongoUrl)");
+    expect(source).toContain("MYSQL_URL: redacted(mysqlUrl)");
+    expect(source).toContain("SECRETARY_EMAIL: requiredString");
+    expect(source).not.toContain("private-value");
+  });
+
+  test("falls back safely when database URLs do not satisfy their schemas", () => {
+    const source = generateEnvSourceFromDotenv(
+      [
+        "POSTGRES_URL=postgres://localhost/app",
+        "REDIS_URL=redis://",
+        "MONGO_URL=mongodb://",
+        "MYSQL_URL=mysql://localhost/app",
+      ].join("\n"),
+    );
+
+    expect(source.match(/redacted\(requiredString\)/g)).toHaveLength(4);
+    expect(source).not.toContain("postgresUrl");
+    expect(source).not.toContain("redisUrl");
+    expect(source).not.toContain("mongoUrl");
+    expect(source).not.toContain("mysqlUrl");
+  });
+
+  test("infers numeric port values before boolean shorthand", () => {
+    const source = generateEnvSourceFromDotenv("PORT=1\nADMIN_PORT=3000\nENABLED=0\n");
+
+    expect(source).toContain("PORT: port");
+    expect(source).toContain("ADMIN_PORT: port");
+    expect(source).toContain("ENABLED: boolean");
+  });
+
+  test("infers schemas only from values their decoders accept", () => {
+    const source = generateEnvSourceFromDotenv(
+      'ENABLED=" true "\nDATABASE_URL=" postgres://user:password@host:5432/app "\nPORT=" 3000 "\n',
+    );
+
+    expect(source).toContain("ENABLED: requiredString");
+    expect(source).toContain("DATABASE_URL: redacted(requiredString)");
+    expect(source).toContain("PORT: port");
+    expect(source).not.toContain("postgresUrl");
+  });
+
+  test("rejects ambiguous known client prefixes without exposing values", () => {
+    const secret = "private-value";
+    expect(() =>
+      generateEnvSourceFromDotenv(`VITE_URL=${secret}\nEXPO_PUBLIC_URL=${secret}\n`),
+    ).toThrow("--client-prefix");
+
+    try {
+      generateEnvSourceFromDotenv(`VITE_URL=${secret}\nEXPO_PUBLIC_URL=${secret}\n`);
+    } catch (failure: unknown) {
+      expect(String(failure)).not.toContain(secret);
+    }
+  });
+
+  test("allows the same property name in server and client targets", () => {
+    const source = generateEnvSourceFromDotenv(
+      "URL=https://server.example.com\nVITE_URL=https://client.example.com\n",
+    );
+
+    expect(source.match(/URL: url/g)).toHaveLength(2);
+    expect(source.indexOf("  client(")).toBeLessThan(source.indexOf("  server("));
+  });
+
+  test("emits __proto__ as a computed property", () => {
+    const source = generateEnvSourceFromDotenv("VITE___proto__=public\n");
+
+    expect(source).toContain('["__proto__"]: requiredString');
+    expect(source).not.toContain("\n      __proto__:");
+  });
+
+  test("generates Expo-prefixed definitions without choosing a runtime", () => {
+    const source = generateEnvSourceFromDotenv(
+      "DATABASE_URL=postgres://user:password@host:5432/app\nEXPO_PUBLIC_APP_URL=https://example.com\n",
+    );
+
+    expect(source).toContain("APP_URL: url");
+    expect(source).toContain('prefix: "EXPO_PUBLIC_"');
+    expect(source).not.toContain("@ayronforge/envil/presets");
+    expect(source).not.toContain("runtimeEnv:");
+  });
+
+  test("rejects unsupported Nuxt environment sources", () => {
+    expect(() => generateEnvSourceFromDotenv("NUXT_PUBLIC_API_URL=https://example.com")).toThrow(
+      "Nuxt is not supported",
+    );
+    expect(() =>
+      generateEnvSourceFromDotenv("API_URL=https://example.com", "NUXT_PUBLIC_"),
+    ).toThrow("Nuxt is not supported");
+  });
+
+  test("CLI writes one app environment definition", async () => {
+    const directory = await createFixture();
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runCli(["init"], {
+      cwd: () => directory,
+      stdout: (message) => stdout.push(message),
+      stderr: (message) => stderr.push(message),
     });
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toEqual([]);
+    expect(stdout).toHaveLength(1);
+    expect(await readFile(path.join(directory, "env.ts"), "utf8")).toContain(
+      "export const appEnv = createEnv",
+    );
   });
 });
 
-function baseSchema(kind: SchemaKind, enumValues?: readonly string[]): Schema.Schema.Any {
-  switch (kind) {
-    case "boolean":
-      return S.boolean;
-    case "integer":
-      return S.integer;
-    case "number":
-      return S.number;
-    case "port":
-      return S.port;
-    case "url":
-      return S.url;
-    case "postgresUrl":
-      return S.postgresUrl;
-    case "redisUrl":
-      return S.redisUrl;
-    case "mongoUrl":
-      return S.mongoUrl;
-    case "mysqlUrl":
-      return S.mysqlUrl;
-    case "commaSeparated":
-      return S.commaSeparated;
-    case "commaSeparatedNumbers":
-      return S.commaSeparatedNumbers;
-    case "commaSeparatedUrls":
-      return S.commaSeparatedUrls;
-    case "json":
-      return S.json(Schema.Unknown);
-    case "stringEnum":
-      return S.stringEnum(enumValues as [string, ...string[]]);
-    default:
-      return S.requiredString;
-  }
-}
+describe("envil example", () => {
+  test("inspects the app contract without executing the module", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { client, createEnv, redacted, server, shared, url } from "../src/index.ts";',
+        "",
+        "export const appEnv = createEnv(",
+        "  server({ DATABASE_URL: redacted(url) }),",
+        "  client({ APP_URL: url }, { runtimeEnv: {}, prefix: 'VITE_' }),",
+        "  shared({ APP_NAME: 'Envil' }),",
+        ");",
+        "",
+        'throw new Error("THIS_MODULE_MUST_NOT_EXECUTE");',
+      ].join("\n"),
+    );
 
-function variableToSchema(v: InferredVariable): Schema.Schema.Any {
-  let schema = baseSchema(v.kind, v.stringEnumValues);
-  if (v.optional && !v.hasDefault) schema = S.optional(schema);
-  if (v.hasDefault) schema = S.withDefault(schema, v.defaultValue as never);
-  if (v.redacted) schema = S.redacted(schema);
-  return schema;
-}
+    const contract = inspectEnvContract(inputPath);
+    const example = renderEnvExample(contract);
 
-function modelToDefinition(model: {
-  prefix: { server: string; client: string; shared: string };
-  variables: ReadonlyArray<InferredVariable>;
-}) {
-  const definition: Record<string, unknown> = {
-    prefix: model.prefix,
-    server: {} as Record<string, Schema.Schema.Any>,
-    client: {} as Record<string, Schema.Schema.Any>,
-    shared: {} as Record<string, Schema.Schema.Any>,
-  };
+    expect(contract.exportName).toBe("appEnv");
+    expect(example).toBe("DATABASE_URL=\n\nVITE_APP_URL=\n");
+    expect(example).not.toContain("APP_NAME");
+    expect(example).not.toContain("THIS_MODULE_MUST_NOT_EXECUTE");
+  });
 
-  for (const v of model.variables) {
-    (definition[v.bucket] as Record<string, Schema.Schema.Any>)[v.schemaKey] = variableToSchema(v);
-  }
+  test("uses fromEnv names and omits resolver-backed variables", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { configureResolver, createEnv, customSecretsAdapter, fromEnv, fromResolver, requiredString, server } from "../src/index.ts";',
+        "",
+        "const source = configureResolver(customSecretsAdapter, {});",
+        "export const appEnv = createEnv(",
+        "  server({",
+        '      TOKEN: requiredString.pipe(fromResolver(source, "private-reference")),',
+        '      DATABASE_URL: requiredString.pipe(fromEnv("POSTGRES_URL")),',
+        "  }),",
+        ");",
+      ].join("\n"),
+    );
 
-  return definition as Parameters<typeof buildEnvExample>[0];
-}
+    expect(renderEnvExample(inspectEnvContract(inputPath))).toBe("POSTGRES_URL=\n");
+  });
+
+  test("rejects empty runtime names instead of rendering invalid dotenv entries", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { createEnv, fromEnv, requiredString, server } from "../src/index.ts";',
+        "export const appEnv = createEnv(",
+        '  server({ TOKEN: requiredString.pipe(fromEnv("")) }),',
+        ");",
+      ].join("\n"),
+    );
+
+    expect(() => inspectEnvContract(inputPath)).toThrow("empty environment variable name");
+
+    await writeFile(
+      inputPath,
+      [
+        'import { createEnv, requiredString, server } from "../src/index.ts";',
+        'export const appEnv = createEnv(server({ "": requiredString }));',
+      ].join("\n"),
+    );
+
+    expect(() => inspectEnvContract(inputPath)).toThrow("empty environment variable name");
+  });
+
+  test("rejects runtime names that dotenv cannot represent", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+
+    for (const runtimeName of ["A=B", "A\nB"]) {
+      await writeFile(
+        inputPath,
+        [
+          'import { createEnv, fromEnv, requiredString, server } from "../src/index.ts";',
+          "export const appEnv = createEnv(",
+          `  server({ TOKEN: requiredString.pipe(fromEnv(${JSON.stringify(runtimeName)})) }),`,
+          ");",
+        ].join("\n"),
+      );
+
+      expect(() => inspectEnvContract(inputPath)).toThrow(
+        "cannot render this environment variable name in dotenv format",
+      );
+    }
+  });
+
+  test("rejects duplicate runtime names instead of hiding them", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { createEnv, fromEnv, requiredString, server } from "../src/index.ts";',
+        "export const appEnv = createEnv(",
+        "  server({",
+        '    FIRST: requiredString.pipe(fromEnv("TOKEN")),',
+        '    SECOND: requiredString.pipe(fromEnv("TOKEN")),',
+        "  }),",
+        ");",
+      ].join("\n"),
+    );
+
+    expect(() => renderEnvExample(inspectEnvContract(inputPath))).toThrow(
+      '"FIRST" and "SECOND" both read "TOKEN"',
+    );
+  });
+
+  test("renders one key for a valid cross-target override", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { client, createEnv, requiredString, server } from "../src/index.ts";',
+        "export const appEnv = createEnv(",
+        "  client({ TOKEN: requiredString }, { runtimeEnv: {} }),",
+        "  server({ TOKEN: requiredString }),",
+        ");",
+      ].join("\n"),
+    );
+
+    expect(renderEnvExample(inspectEnvContract(inputPath))).toBe("TOKEN=\n");
+  });
+
+  test('treats a resolver named "env" as resolver-backed metadata', async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { configureResolver, createEnv, fromEnv, fromResolver, requiredString, server } from "../src/index.ts";',
+        'import type { ResolverAdapter } from "../src/index.ts";',
+        "",
+        'const adapter = { name: "env", resolve: () => { throw new Error("not executed"); } } satisfies ResolverAdapter<"env", string, {}, never, never>;',
+        "const source = configureResolver(adapter, {});",
+        "export const appEnv = createEnv(",
+        "  server({",
+        '    TOKEN: requiredString.pipe(fromResolver(source, "private-reference")),',
+        '    DATABASE_URL: requiredString.pipe(fromEnv("POSTGRES_URL")),',
+        "  }),",
+        ");",
+      ].join("\n"),
+    );
+
+    expect(renderEnvExample(inspectEnvContract(inputPath))).toBe("POSTGRES_URL=\n");
+  });
+
+  test("omits a server definition shadowed by the winning client definition", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { client, createEnv, requiredString, server } from "../src/index.ts";',
+        "",
+        "export const appEnv = createEnv(",
+        "  server({ URL: requiredString }),",
+        "  client({ URL: requiredString }, { runtimeEnv: {}, prefix: 'VITE_' }),",
+        ");",
+      ].join("\n"),
+    );
+
+    expect(renderEnvExample(inspectEnvContract(inputPath))).toBe("VITE_URL=\n");
+  });
+
+  test("renders the final contract produced by extendEnv composition", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { client, configureResolver, createEnv, customSecretsAdapter, extendEnv, fromEnv, fromResolver, requiredString, server } from "../src/index.ts";',
+        "",
+        "const source = configureResolver(customSecretsAdapter, {});",
+        "const baseEnv = createEnv(",
+        "  server({",
+        '    DATABASE: requiredString.pipe(fromEnv("OLD_DATABASE")),',
+        '    TOKEN: requiredString.pipe(fromResolver(source, "private-reference")),',
+        "  }),",
+        ");",
+        "",
+        "export const appEnv = baseEnv.pipe(",
+        "  extendEnv(",
+        "    createEnv(",
+        "      server({",
+        '        DATABASE: requiredString.pipe(fromEnv("NEW_DATABASE")),',
+        '        PORT: requiredString.pipe(fromEnv("SERVER_PORT")),',
+        "      }),",
+        "    ),",
+        "  ),",
+        "  extendEnv(",
+        "    client(",
+        "      { DATABASE: requiredString, APP_URL: requiredString },",
+        "      { runtimeEnv: {}, prefix: 'PUBLIC_' },",
+        "    ),",
+        "  ),",
+        ");",
+        "",
+        'throw new Error("THIS_COMPOSED_MODULE_MUST_NOT_EXECUTE");',
+      ].join("\n"),
+    );
+
+    expect(renderEnvExample(inspectEnvContract(inputPath))).toBe(
+      "SERVER_PORT=\n\nPUBLIC_APP_URL=\nPUBLIC_DATABASE=\n",
+    );
+  });
+
+  test("requires --export when several app environments are exported", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { createEnv } from "../src/index.ts";',
+        "export const first = createEnv();",
+        "export const second = createEnv();",
+      ].join("\n"),
+    );
+
+    expect(() => inspectEnvContract(inputPath)).toThrow("--export");
+    expect(inspectEnvContract(inputPath, "second").exportName).toBe("second");
+  });
+
+  test("explains fragment prefixes whose type was widened", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { client, createEnv, requiredString } from "../src/index.ts";',
+        'const prefix: string = "APP_";',
+        "export const appEnv = createEnv(",
+        "  client({ TOKEN: requiredString }, { runtimeEnv: {}, prefix }),",
+        ");",
+      ].join("\n"),
+    );
+
+    expect(() => inspectEnvContract(inputPath)).toThrow(
+      "Envil could not determine the generated variable names. Keep prefixes and environment names as string literals instead of typing them as string.",
+    );
+  });
+
+  test("rejects widened fragment records instead of emitting an empty example", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { createEnv, requiredString, server } from "../src/index.ts";',
+        "const values: Record<string, typeof requiredString> = { PORT: requiredString };",
+        "export const appEnv = createEnv(server(values));",
+      ].join("\n"),
+    );
+
+    expect(() => inspectEnvContract(inputPath)).toThrow("index signature");
+  });
+
+  test("rejects widened numeric fragment records instead of emitting an empty example", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { createEnv, requiredString, server } from "../src/index.ts";',
+        "const values: Record<number, typeof requiredString> = { 1: requiredString };",
+        "export const appEnv = createEnv(server(values));",
+      ].join("\n"),
+    );
+
+    expect(() => inspectEnvContract(inputPath)).toThrow("index signature");
+  });
+
+  test("normalizes numeric fragment keys to their runtime string form", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { createEnv, requiredString, server } from "../src/index.ts";',
+        "export const appEnv = createEnv(server({ 1: requiredString }));",
+      ].join("\n"),
+    );
+
+    expect(renderEnvExample(inspectEnvContract(inputPath))).toBe("1=\n");
+  });
+
+  test("CLI stderr omits compiler source details", async () => {
+    const directory = await createFixture();
+    const secret = "SECRET_LITERAL_MUST_NOT_LEAK";
+    await writeFile(
+      path.join(directory, "env.ts"),
+      `const value: never = "${secret}";\nexport { value };\n`,
+    );
+    const stderr: string[] = [];
+    const exitCode = await runCli(["example", "--input", "env.ts", "--output", ".env.example"], {
+      cwd: () => directory,
+      stdout: () => {},
+      stderr: (message) => stderr.push(message),
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr.join("")).not.toContain(secret);
+    expect(stderr.join("")).not.toContain("line");
+  });
+});
+
+test("only init and example are accepted commands", async () => {
+  const stderr: string[] = [];
+  const exitCode = await runCli(["add", "env"], {
+    stderr: (message) => stderr.push(message),
+  });
+
+  expect(exitCode).toBe(1);
+  expect(stderr.join("")).toContain('Unknown command "add"');
+  expect(stderr.join("")).toContain('Run "envil --help"');
+});
+
+test("CLI option errors explain the correct syntax", async () => {
+  const stderr: string[] = [];
+  const exitCode = await runCli(["init", "--force=true"], {
+    stderr: (message) => stderr.push(message),
+  });
+
+  expect(exitCode).toBe(1);
+  expect(stderr.join("")).toContain('Use "--force" without a value.');
+});

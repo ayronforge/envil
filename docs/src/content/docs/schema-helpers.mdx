@@ -1,150 +1,115 @@
 ---
 title: Schema Helpers
-description: Utility functions for adding defaults, marking values as redacted, and parsing JSON environment variables.
+description: Defaults, optionality, redaction, JSON parsing, and variable sources.
 order: 5
 ---
 
 import Callout from "@/components/docs/Callout.astro";
 
-envil provides four helper functions for common patterns when defining environment variable schemas.
+## `withDefault`
+
+Uses a decoded default when the runtime value is absent:
 
 ```ts
-import { withDefault, optional, redacted, json } from "@ayronforge/envil"
+values: {
+  PORT: port.pipe(withDefault(3000)),
+}
 ```
 
-## withDefault
-
-Adds a default value to a schema, making the variable optional. If the env var is missing, the default value is used instead.
-
-`withDefault` supports both data-first and pipe-style usage:
-
-### Data-first style
+The data-first form is also supported:
 
 ```ts
-import { withDefault, port } from "@ayronforge/envil"
-
-createEnv({
-  server: {
-    PORT: withDefault(port, 3000),
-    // If PORT is not set, defaults to 3000
-  },
-})
+values: {
+  PORT: withDefault(port, 3000),
+}
 ```
 
-### Pipe style
+The output type does not include `undefined`.
+
+## `optional`
+
+Allows a missing value and includes `undefined` in the output type:
 
 ```ts
-import { withDefault, port } from "@ayronforge/envil"
-
-createEnv({
-  server: {
-    PORT: port.pipe(withDefault(3000)),
-  },
-})
+values: {
+  TRACE_ENDPOINT: optional(url),
+}
 ```
 
-Both styles produce the same result. Use whichever reads better in your codebase.
+## `redacted`
 
-<Callout type="note">
-  `withDefault` wraps the schema in `Schema.UndefinedOr(...)` and applies a transform that substitutes `undefined` with the default value. The resulting type reflects the schema's output type — e.g., `withDefault(port, 3000)` produces `number`, not `number | undefined`.
-</Callout>
-
-## optional
-
-Makes any schema accept `undefined`, allowing the env var to be missing without causing a validation error. This is a shorthand for `Schema.UndefinedOr(schema)`.
+Wraps decoded values with Effect `Redacted`:
 
 ```ts
-import { optional } from "@ayronforge/envil"
-import { Schema } from "effect"
+import { Effect, Redacted } from "effect";
 
-createEnv({
-  server: {
-    // All of these are optional — missing vars become undefined
-    DEBUG_HOST: optional(Schema.String),
-    TRACE_SAMPLE_RATE: optional(Schema.Number),
-  },
-})
+const appEnv = createEnv(
+  server(
+    {
+      API_SECRET: redacted(requiredString),
+    },
+    {
+      runtimeEnv: { API_SECRET: "secret" },
+    },
+  ),
+);
+
+const env = Effect.runSync(appEnv.server);
+const secret = Redacted.value(env.API_SECRET);
 ```
 
-<Callout type="note">
-  Unlike `withDefault`, `optional` does not substitute a fallback — the resulting type includes `undefined`. Use `withDefault` when you need a guaranteed value.
-</Callout>
+Redacted schemas are server-only. Resolver-backed schemas are redacted
+automatically and do not need this helper.
 
-## redacted
+## `json`
 
-Wraps a schema with Effect's `Redacted` type. This prevents accidental logging, serialization, or spreading of sensitive values.
-
-```ts
-import { redacted } from "@ayronforge/envil"
-import { Redacted, Schema } from "effect"
-
-const env = createEnv({
-  server: {
-    API_SECRET: redacted(Schema.String),
-    // Equivalent to: Schema.Redacted(Schema.String)
-  },
-})
-
-// env.API_SECRET is Redacted<string>
-console.log(env.API_SECRET)  // <redacted>
-JSON.stringify(env)           // {"API_SECRET":"<redacted>"}
-
-// Explicitly unwrap when you need the plain value
-const secret: string = Redacted.value(env.API_SECRET)
-```
-
-The `redacted` helper is a shorthand for `Schema.Redacted(schema)`. Values wrapped in `Redacted` appear as `<redacted>` in logs and serialized output, and remain wrapped when spread or iterated.
-
-## json
-
-Parses a JSON string env var and validates the parsed result against an inner schema:
+Parses a JSON string and validates the parsed value:
 
 ```ts
-import { json } from "@ayronforge/envil"
-import { Schema } from "effect"
+import { Schema } from "effect";
 
-createEnv({
-  server: {
-    // FEATURE_FLAGS='{"darkMode":true,"newUI":false}'
-    FEATURE_FLAGS: json(Schema.Struct({
+values: {
+  FEATURE_FLAGS: json(
+    Schema.Struct({
       darkMode: Schema.Boolean,
       newUI: Schema.Boolean,
-    })),
-  },
-})
+    }),
+  ),
+}
 ```
 
-The `json` helper is equivalent to `Schema.parseJson(schema)`. It first parses the string as JSON, then validates the result against the provided schema.
+## `fromEnv`
 
-### Validation behavior
-
-If the env var is not valid JSON, or if the parsed JSON doesn't match the inner schema, validation fails:
-
-```
-FEATURE_FLAGS: Expected valid JSON, but got '{ invalid json'
-```
-
-## Composing helpers
-
-Helpers can be composed together:
+Maps one property to an exact runtime environment name:
 
 ```ts
-import { withDefault, optional, redacted, json } from "@ayronforge/envil"
-import { Schema } from "effect"
-
-createEnv({
-  server: {
-    // Optional JSON config with a default
-    APP_CONFIG: withDefault(
-      json(Schema.Struct({ debug: Schema.Boolean })),
-      { debug: false },
-    ),
-
-    // Optional with a default
-    LOG_LEVEL: optional(Schema.String).pipe(withDefault("info")),
-
-    // Redacted string with a default
-    API_KEY: redacted(Schema.String).pipe(withDefault("dev-key")),
-  },
-})
+values: {
+  POSTHOG_API_KEY: optional(requiredString).pipe(
+    fromEnv("PUBLIC_POSTHOG_API_KEY"),
+  ),
+}
 ```
+
+Use the fragment's `prefix` when every variable follows the same naming
+convention. Use `fromEnv` for exceptions.
+
+## `fromResolver`
+
+Makes one configured resolver the authoritative source:
+
+```ts
+values: {
+  STRIPE_API_KEY: requiredString.pipe(
+    fromResolver(aws, "production/stripe#api-key"),
+  ),
+}
+```
+
+Source combinators are terminal variable definitions. TypeScript rejects later
+schema combinators and a second `fromEnv` or `fromResolver`, so source metadata
+cannot disappear during composition.
+
+<Callout type="note">
+  `fromEnv` and `fromResolver` do not change schema decoding. They describe
+  where the unknown input comes from when the Effect runs.
+</Callout>

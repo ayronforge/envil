@@ -1,16 +1,16 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 
-import { Effect, Exit } from "effect";
+import type { KeyVaultSecret } from "@azure/keyvault-secrets";
+import { Effect, Option, Redacted } from "effect";
 
-const secretStore = new Map<string, string>();
+import { azureKeyVaultAdapter } from "./azure.ts";
+
+let getAzureSecret: (name: string) => Promise<KeyVaultSecret>;
 
 mock.module("@azure/keyvault-secrets", () => ({
   SecretClient: class {
-    constructor(_vaultUrl: string, _credential: unknown) {}
     getSecret(name: string) {
-      const value = secretStore.get(name);
-      if (value === undefined) return Promise.reject(new Error(`Secret "${name}" not found`));
-      return Promise.resolve({ value });
+      return getAzureSecret(name);
     }
   },
 }));
@@ -19,81 +19,68 @@ mock.module("@azure/identity", () => ({
   DefaultAzureCredential: class {},
 }));
 
-const { fromAzureKeyVault, ResolverError } = await import("./azure.ts");
-
-describe("fromAzureKeyVault", () => {
-  beforeEach(() => {
-    secretStore.clear();
-  });
-
-  test("resolves a single secret", async () => {
-    secretStore.set("my-secret", "secret-value");
-
-    const result = await Effect.runPromise(
-      fromAzureKeyVault({
-        secrets: { DB_PASSWORD: "my-secret" },
-        vaultUrl: "https://test-vault.vault.azure.net",
-      }),
-    );
-
-    expect(result.DB_PASSWORD).toBe("secret-value");
-  });
-
-  test("resolves multiple secrets concurrently", async () => {
-    secretStore.set("secret-a", "value-a");
-    secretStore.set("secret-b", "value-b");
-    secretStore.set("secret-c", "value-c");
-
-    const result = await Effect.runPromise(
-      fromAzureKeyVault({
-        secrets: { A: "secret-a", B: "secret-b", C: "secret-c" },
-        vaultUrl: "https://test-vault.vault.azure.net",
-      }),
-    );
-
-    expect(result.A).toBe("value-a");
-    expect(result.B).toBe("value-b");
-    expect(result.C).toBe("value-c");
-  });
-
-  test("returns undefined for missing secrets", async () => {
-    secretStore.set("existing", "value");
-
-    const result = await Effect.runPromise(
-      fromAzureKeyVault({
-        secrets: { EXISTING: "existing", MISSING: "nonexistent" },
-        vaultUrl: "https://test-vault.vault.azure.net",
-      }),
-    );
-
-    expect(result.EXISTING).toBe("value");
-    expect(result.MISSING).toBeUndefined();
-  });
-
-  test("strict mode fails when a secret fetch errors", async () => {
+describe("azureKeyVaultAdapter", () => {
+  test("fails empty vault configuration before initializing the SDK", async () => {
     const exit = await Effect.runPromiseExit(
-      fromAzureKeyVault({
-        secrets: { MISSING: "nonexistent" },
-        vaultUrl: "https://test-vault.vault.azure.net",
-        strict: true,
+      azureKeyVaultAdapter.resolve({
+        vaultUrl: "",
+        referencesByKey: { TOKEN: "remote-reference" },
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = (exit.cause as { _tag: string; error: unknown }).error;
-      expect(error).toBeInstanceOf(ResolverError);
-      expect((error as ResolverError).message).toContain(
-        'Failed to resolve secret "nonexistent" for env key "MISSING"',
-      );
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("ResolverConfigurationError");
+    expect(String(exit)).toContain('Set "vaultUrl"');
+    expect(String(exit)).not.toContain("remote-reference");
+  });
+
+  test("maps the SDK 404 signal to Option.none", async () => {
+    getAzureSecret = () => Promise.reject({ statusCode: 404 });
+
+    const result = await Effect.runPromise(
+      azureKeyVaultAdapter.resolve({
+        vaultUrl: "https://vault.example.com",
+        referencesByKey: { TOKEN: "missing-secret" },
+      }),
+    );
+
+    expect(Option.isNone(result.TOKEN)).toBe(true);
+  });
+
+  test("reads and redacts the official SDK response", async () => {
+    getAzureSecret = () =>
+      Promise.resolve({
+        name: "token",
+        value: "resolved-value",
+        properties: { name: "token", vaultUrl: "https://vault.example.com" },
+      });
+
+    const result = await Effect.runPromise(
+      azureKeyVaultAdapter.resolve({
+        vaultUrl: "https://vault.example.com",
+        referencesByKey: { TOKEN: "token" },
+      }),
+    );
+
+    expect(Option.isSome(result.TOKEN)).toBe(true);
+    if (Option.isSome(result.TOKEN)) {
+      expect(Redacted.value(result.TOKEN.value)).toBe("resolved-value");
     }
   });
 
-  test("fails with ResolverError if vaultUrl is empty", async () => {
+  test("sanitizes operational SDK failures", async () => {
+    getAzureSecret = () => Promise.reject(new Error("private provider response"));
+
     const exit = await Effect.runPromiseExit(
-      fromAzureKeyVault({ secrets: { A: "secret" }, vaultUrl: "" as any }),
+      azureKeyVaultAdapter.resolve({
+        vaultUrl: "https://private-vault.example.com",
+        referencesByKey: { TOKEN: "private-reference" },
+      }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
+    expect(String(exit)).toContain("ResolverRequestFailed");
+    expect(String(exit)).not.toContain("private provider response");
+    expect(String(exit)).not.toContain("private-vault");
+    expect(String(exit)).not.toContain("private-reference");
   });
 });

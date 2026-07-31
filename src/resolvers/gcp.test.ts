@@ -1,121 +1,93 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 
-import { Effect, Exit } from "effect";
+import type { protos } from "@google-cloud/secret-manager";
+import { Effect, Option, Redacted } from "effect";
 
-const secretStore = new Map<string, string>();
+import { gcpSecretsAdapter } from "./gcp.ts";
+
+let accessGcpSecret: (
+  request: Readonly<{ name: string }>,
+) => Promise<readonly [protos.google.cloud.secretmanager.v1.IAccessSecretVersionResponse]>;
 
 mock.module("@google-cloud/secret-manager", () => ({
   SecretManagerServiceClient: class {
-    accessSecretVersion({ name }: { name: string }) {
-      // Extract secret name from the full resource path
-      const parts = name.split("/");
-      const secretName = parts.length >= 4 ? parts[3] : name;
-      const value = secretStore.get(secretName!);
-      if (value === undefined) return Promise.reject(new Error(`Secret "${name}" not found`));
-      return Promise.resolve([{ payload: { data: new TextEncoder().encode(value) } }]);
+    accessSecretVersion(request: Readonly<{ name: string }>) {
+      return accessGcpSecret(request);
     }
   },
 }));
 
-const { fromGcpSecrets, ResolverError } = await import("./gcp.ts");
+describe("gcpSecretsAdapter", () => {
+  test("fails configuration before initializing the SDK", async () => {
+    const exit = await Effect.runPromiseExit(
+      gcpSecretsAdapter.resolve({
+        referencesByKey: { TOKEN: "short-name" },
+      }),
+    );
 
-describe("fromGcpSecrets", () => {
-  beforeEach(() => {
-    secretStore.clear();
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("ResolverConfigurationError");
+    expect(String(exit)).toContain('Set "projectId"');
+    expect(String(exit)).not.toContain("short-name");
   });
 
-  test("resolves secrets using short names", async () => {
-    secretStore.set("my-secret", "secret-value");
+  test("rejects an empty project ID before initializing the SDK", async () => {
+    const exit = await Effect.runPromiseExit(
+      gcpSecretsAdapter.resolve({
+        projectId: "",
+        referencesByKey: { TOKEN: "short-name" },
+      }),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("ResolverConfigurationError");
+    expect(String(exit)).toContain('Set "projectId"');
+    expect(String(exit)).not.toContain("short-name");
+  });
+
+  test("maps the SDK not-found code to Option.none", async () => {
+    accessGcpSecret = () => Promise.reject({ code: 5 });
 
     const result = await Effect.runPromise(
-      fromGcpSecrets({ secrets: { DB_PASSWORD: "my-secret" }, projectId: "my-project" }),
+      gcpSecretsAdapter.resolve({
+        referencesByKey: { TOKEN: "projects/project/secrets/token/versions/latest" },
+      }),
     );
 
-    expect(result.DB_PASSWORD).toBe("secret-value");
+    expect(Option.isNone(result.TOKEN)).toBe(true);
   });
 
-  test("fails with ResolverError when using short names without projectId", async () => {
-    const exit = await Effect.runPromiseExit(
-      fromGcpSecrets({ secrets: { DB_PASSWORD: "my-secret" } }),
+  test("decodes the SDK payload bytes", async () => {
+    accessGcpSecret = () =>
+      Promise.resolve([
+        {
+          payload: { data: new TextEncoder().encode("resolved-value") },
+        },
+      ]);
+
+    const result = await Effect.runPromise(
+      gcpSecretsAdapter.resolve({
+        referencesByKey: { TOKEN: "projects/project/secrets/token/versions/latest" },
+      }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = (exit.cause as { _tag: string; error: unknown }).error;
-      expect(error).toBeInstanceOf(ResolverError);
-      expect((error as ResolverError).message).toContain(
-        "projectId must be provided when using short secret names",
-      );
+    expect(Option.isSome(result.TOKEN)).toBe(true);
+    if (Option.isSome(result.TOKEN)) {
+      expect(Redacted.value(result.TOKEN.value)).toBe("resolved-value");
     }
   });
 
-  test("resolves secrets using full resource path", async () => {
-    secretStore.set("my-secret", "secret-value");
+  test("sanitizes operational SDK failures", async () => {
+    accessGcpSecret = () => Promise.reject(new Error("private provider response"));
 
-    const result = await Effect.runPromise(
-      fromGcpSecrets({
-        secrets: { DB_PASSWORD: "projects/my-project/secrets/my-secret/versions/latest" },
-      }),
-    );
-
-    expect(result.DB_PASSWORD).toBe("secret-value");
-  });
-
-  test("resolves multiple secrets concurrently", async () => {
-    secretStore.set("secret-a", "value-a");
-    secretStore.set("secret-b", "value-b");
-
-    const result = await Effect.runPromise(
-      fromGcpSecrets({
-        secrets: { A: "secret-a", B: "secret-b" },
-        projectId: "my-project",
-      }),
-    );
-
-    expect(result.A).toBe("value-a");
-    expect(result.B).toBe("value-b");
-  });
-
-  test("returns undefined for missing secrets", async () => {
-    secretStore.set("existing", "value");
-
-    const result = await Effect.runPromise(
-      fromGcpSecrets({
-        secrets: { EXISTING: "existing", MISSING: "nonexistent" },
-        projectId: "my-project",
-      }),
-    );
-
-    expect(result.EXISTING).toBe("value");
-    expect(result.MISSING).toBeUndefined();
-  });
-
-  test("strict mode fails when a secret fetch errors", async () => {
     const exit = await Effect.runPromiseExit(
-      fromGcpSecrets({
-        secrets: { MISSING: "nonexistent" },
-        projectId: "my-project",
-        strict: true,
+      gcpSecretsAdapter.resolve({
+        referencesByKey: { TOKEN: "projects/private/secrets/token/versions/latest" },
       }),
     );
 
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = (exit.cause as { _tag: string; error: unknown }).error;
-      expect(error).toBeInstanceOf(ResolverError);
-      expect((error as ResolverError).message).toContain(
-        'Failed to resolve secret "nonexistent" for env key "MISSING"',
-      );
-    }
-  });
-
-  test("handles string data directly", async () => {
-    secretStore.set("my-secret", "plain-string-value");
-
-    const result = await Effect.runPromise(
-      fromGcpSecrets({ secrets: { SECRET: "my-secret" }, projectId: "my-project" }),
-    );
-
-    expect(result.SECRET).toBe("plain-string-value");
+    expect(String(exit)).toContain("ResolverRequestFailed");
+    expect(String(exit)).not.toContain("private provider response");
+    expect(String(exit)).not.toContain("projects/private");
   });
 });

@@ -1,93 +1,116 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 
-import { Effect, Exit } from "effect";
+import type { ResolveAllResponse } from "@1password/sdk";
+import { Effect, Option, Redacted } from "effect";
 
-const secretStore = new Map<string, string>();
+import { onePasswordSecretsAdapter } from "./onepassword.ts";
+
+const originalToken = process.env.OP_SERVICE_ACCOUNT_TOKEN;
+let resolveOnePasswordReferences: (references: string[]) => Promise<ResolveAllResponse>;
 
 mock.module("@1password/sdk", () => ({
-  createClient: async (_opts: any) => ({
-    secrets: {
-      resolveAll: async (refs: string[]) => {
-        return refs.map((ref) => {
-          const value = secretStore.get(ref);
-          if (value === undefined) throw new Error(`Secret "${ref}" not found`);
-          return value;
-        });
+  createClient: () =>
+    Promise.resolve({
+      secrets: {
+        resolveAll: (references: string[]) => resolveOnePasswordReferences(references),
       },
-    },
-  }),
+    }),
 }));
 
-const { fromOnePassword, ResolverError } = await import("./onepassword.ts");
-
-describe("fromOnePassword", () => {
-  beforeEach(() => {
-    secretStore.clear();
-  });
-
-  test("resolves secrets via batch resolution", async () => {
-    secretStore.set("op://vault/item/password", "s3cret");
-    secretStore.set("op://vault/item/api-key", "key123");
-
-    const result = await Effect.runPromise(
-      fromOnePassword({
-        secrets: {
-          DB_PASSWORD: "op://vault/item/password",
-          API_KEY: "op://vault/item/api-key",
-        },
-        serviceAccountToken: "test-token",
-      }),
-    );
-
-    expect(result.DB_PASSWORD).toBe("s3cret");
-    expect(result.API_KEY).toBe("key123");
-  });
-
-  test("returns all undefined on batch failure", async () => {
-    // secretStore is empty, so resolveAll will throw
-
-    const result = await Effect.runPromise(
-      fromOnePassword({
-        secrets: { A: "op://vault/item/a", B: "op://vault/item/b" },
-        serviceAccountToken: "test-token",
-      }),
-    );
-
-    expect(result.A).toBeUndefined();
-    expect(result.B).toBeUndefined();
-  });
-
-  test("strict mode fails on batch resolution error", async () => {
-    const exit = await Effect.runPromiseExit(
-      fromOnePassword({
-        secrets: { A: "op://vault/item/a", B: "op://vault/item/b" },
-        serviceAccountToken: "test-token",
-        strict: true,
-      }),
-    );
-
-    expect(Exit.isFailure(exit)).toBe(true);
-    if (Exit.isFailure(exit)) {
-      const error = (exit.cause as { _tag: string; error: unknown }).error;
-      expect(error).toBeInstanceOf(ResolverError);
-      expect((error as ResolverError).message).toBe("Failed to resolve 1Password secrets");
-    }
-  });
-
-  test("fails with ResolverError if neither token nor env var is provided", async () => {
-    const originalEnv = process.env.OP_SERVICE_ACCOUNT_TOKEN;
+afterEach(() => {
+  if (originalToken === undefined) {
     delete process.env.OP_SERVICE_ACCOUNT_TOKEN;
+  } else {
+    process.env.OP_SERVICE_ACCOUNT_TOKEN = originalToken;
+  }
+});
 
-    try {
-      const exit = await Effect.runPromiseExit(
-        fromOnePassword({ secrets: { A: "op://vault/item/a" } }),
-      );
+describe("onePasswordSecretsAdapter", () => {
+  test("fails missing credentials without exposing references", async () => {
+    delete process.env.OP_SERVICE_ACCOUNT_TOKEN;
+    const exit = await Effect.runPromiseExit(
+      onePasswordSecretsAdapter.resolve({
+        referencesByKey: { TOKEN: "op://private/item/field" },
+      }),
+    );
 
-      expect(Exit.isFailure(exit)).toBe(true);
-    } finally {
-      if (originalEnv !== undefined) {
-        process.env.OP_SERVICE_ACCOUNT_TOKEN = originalEnv;
-      }
+    expect(exit._tag).toBe("Failure");
+    expect(String(exit)).toContain("ResolverConfigurationError");
+    expect(String(exit)).toContain('Set "serviceAccountToken"');
+    expect(String(exit)).not.toContain("op://private/item/field");
+  });
+
+  test("respects the SDK resolveAll response shape", async () => {
+    const reference = "op://vault/item/field";
+    resolveOnePasswordReferences = () =>
+      Promise.resolve({
+        individualResponses: {
+          [reference]: {
+            content: {
+              secret: "resolved-value",
+              itemId: "item",
+              vaultId: "vault",
+            },
+          },
+        },
+      });
+
+    const result = await Effect.runPromise(
+      onePasswordSecretsAdapter.resolve({
+        serviceAccountToken: "token",
+        referencesByKey: { TOKEN: reference },
+      }),
+    );
+
+    expect(Option.isSome(result.TOKEN)).toBe(true);
+    if (Option.isSome(result.TOKEN)) {
+      expect(Redacted.value(result.TOKEN.value)).toBe("resolved-value");
     }
+  });
+
+  test("fails closed on a partial resolveAll response", async () => {
+    const firstReference = "op://vault/item/first";
+    const secondReference = "op://vault/item/second";
+    resolveOnePasswordReferences = () =>
+      Promise.resolve({
+        individualResponses: {
+          [firstReference]: {
+            content: {
+              secret: "resolved-value",
+              itemId: "item",
+              vaultId: "vault",
+            },
+          },
+        },
+      });
+
+    const exit = await Effect.runPromiseExit(
+      onePasswordSecretsAdapter.resolve({
+        serviceAccountToken: "token",
+        referencesByKey: {
+          FIRST: firstReference,
+          SECOND: secondReference,
+        },
+      }),
+    );
+
+    expect(String(exit)).toContain("ResolverRequestFailed");
+    expect(String(exit)).not.toContain(firstReference);
+    expect(String(exit)).not.toContain(secondReference);
+  });
+
+  test("sanitizes provider rejection", async () => {
+    resolveOnePasswordReferences = () => Promise.reject(new Error("private provider response"));
+
+    const exit = await Effect.runPromiseExit(
+      onePasswordSecretsAdapter.resolve({
+        serviceAccountToken: "token",
+        referencesByKey: { TOKEN: "op://private/item/field" },
+      }),
+    );
+
+    expect(String(exit)).toContain("ResolverRequestFailed");
+    expect(String(exit)).not.toContain("private provider response");
+    expect(String(exit)).not.toContain("op://private/item/field");
   });
 });
