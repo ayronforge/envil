@@ -324,4 +324,52 @@ export const revealRedacted = (value) => Redacted.value(value);
       ).toBe("resolved:custom-reference");
     }
   }, 30_000);
+
+  test("invalidates resolved barrel origins during development updates", async () => {
+    const root = await mkdtemp(join(tmpdir(), "envil-vite-watch-"));
+    temporaryDirectories.push(root);
+    const barrel = join(root, "envil-barrel.ts");
+    const entry = join(root, "entry.ts");
+    await writeFile(barrel, 'export { server as fragment } from "@ayronforge/envil";\n');
+    const source =
+      'import { fragment } from "./envil-barrel.ts"; export const value = fragment({ SECRET: "x" });\n';
+    await writeFile(entry, source);
+    const plugin = envil();
+    if (typeof plugin.buildStart !== "function" || typeof plugin.transform !== "function") {
+      throw new Error("Expected Vite buildStart and transform hooks.");
+    }
+    const context = {
+      addWatchFile() {},
+      async resolve(specifier: string, importer: string) {
+        return specifier === "./envil-barrel.ts" && importer === entry
+          ? { id: barrel, external: false }
+          : null;
+      },
+    };
+
+    await Reflect.apply(plugin.buildStart, context, []);
+    const initial: unknown = await Reflect.apply(plugin.transform, context, [
+      source,
+      entry,
+      undefined,
+    ]);
+    if (typeof initial !== "object" || initial === null) {
+      throw new Error("Expected the initial client transform.");
+    }
+    expect(Reflect.get(initial, "code")).not.toContain("fragment({ SECRET");
+
+    await writeFile(barrel, "export const fragment = (value) => value;\n");
+    if (typeof plugin.watchChange !== "function") {
+      throw new Error("Expected a Vite watchChange hook.");
+    }
+    await Reflect.apply(plugin.watchChange, context, [barrel, { event: "update" }]);
+    const updated: unknown = await Reflect.apply(plugin.transform, context, [
+      source,
+      entry,
+      undefined,
+    ]);
+    const updatedCode =
+      typeof updated === "object" && updated !== null ? Reflect.get(updated, "code") : source;
+    expect(updatedCode).toContain("fragment({ SECRET");
+  });
 });

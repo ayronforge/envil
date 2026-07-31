@@ -261,6 +261,48 @@ describe("envil example", () => {
     expect(() => inspectEnvContract(inputPath)).toThrow("empty environment variable name");
   });
 
+  test("rejects runtime names that dotenv cannot represent", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+
+    for (const runtimeName of ["A=B", "A\nB"]) {
+      await writeFile(
+        inputPath,
+        [
+          'import { createEnv, fromEnv, requiredString, server } from "../src/index.ts";',
+          "export const appEnv = createEnv(",
+          `  server({ TOKEN: requiredString.pipe(fromEnv(${JSON.stringify(runtimeName)})) }),`,
+          ");",
+        ].join("\n"),
+      );
+
+      expect(() => inspectEnvContract(inputPath)).toThrow(
+        "cannot render this environment variable name in dotenv format",
+      );
+    }
+  });
+
+  test("rejects duplicate runtime names instead of hiding them", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { createEnv, fromEnv, requiredString, server } from "../src/index.ts";',
+        "export const appEnv = createEnv(",
+        "  server({",
+        '    FIRST: requiredString.pipe(fromEnv("TOKEN")),',
+        '    SECOND: requiredString.pipe(fromEnv("TOKEN")),',
+        "  }),",
+        ");",
+      ].join("\n"),
+    );
+
+    expect(() => renderEnvExample(inspectEnvContract(inputPath))).toThrow(
+      '"FIRST" and "SECOND" both read "TOKEN"',
+    );
+  });
+
   test('treats a resolver named "env" as resolver-backed metadata', async () => {
     const directory = await createFixture();
     const inputPath = path.join(directory, "env.ts");

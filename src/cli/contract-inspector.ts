@@ -110,6 +110,11 @@ function inspectTarget(
         "Envil cannot render an empty environment variable name. Pass a non-empty name to fromEnv() and avoid empty fragment keys.",
       );
     }
+    if (source === "env" && !/^[\w.-]+$/.test(runtimeKey)) {
+      throw new Error(
+        "Envil cannot render this environment variable name in dotenv format. Use only letters, digits, underscores, periods, and hyphens.",
+      );
+    }
     return {
       target,
       logicalKey: variable.getName(),
@@ -249,18 +254,20 @@ export function renderEnvExample(contract: InspectedEnvContract): string {
       const byTarget = targetOrder[left.target] - targetOrder[right.target];
       return byTarget === 0 ? left.runtimeKey.localeCompare(right.runtimeKey) : byTarget;
     });
-  const emittedKeys = new Set<string>();
+  const runtimeOwners = new Map<string, InspectedContractVariable>();
+  for (const variable of variables) {
+    const previous = runtimeOwners.get(variable.runtimeKey);
+    if (previous !== undefined) {
+      throw new Error(
+        `"${previous.logicalKey}" and "${variable.logicalKey}" both read "${variable.runtimeKey}" in the environment contract. Rename one property or map it with fromEnv().`,
+      );
+    }
+    runtimeOwners.set(variable.runtimeKey, variable);
+  }
   const groups = (["server", "client"] as const)
     .map((target) =>
       variables
         .filter((variable) => variable.target === target)
-        .filter((variable) => {
-          if (emittedKeys.has(variable.runtimeKey)) {
-            return false;
-          }
-          emittedKeys.add(variable.runtimeKey);
-          return true;
-        })
         .map((variable) => `${variable.runtimeKey}=`)
         .join("\n"),
     )

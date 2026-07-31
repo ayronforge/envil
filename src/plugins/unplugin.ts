@@ -97,6 +97,9 @@ export const envilUnplugin = createUnplugin<EnvilPluginOptions | undefined>((opt
     buildStart() {
       originCache = createExportOriginCache();
     },
+    watchChange() {
+      originCache = createExportOriginCache();
+    },
     async transform(code, id) {
       const nativeContext = this.getNativeBuildContext?.();
       return transformForTarget(
