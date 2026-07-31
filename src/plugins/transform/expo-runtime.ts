@@ -8,21 +8,6 @@ function isExpoExpression(expression: ts.Expression, context: TransformContext):
   return isImportedMember(expression, "expo", context);
 }
 
-function hasExpoOptions(expression: ts.Expression, context: TransformContext): boolean {
-  const initializer = ts.isIdentifier(expression)
-    ? localConstInitializer(expression, context)
-    : undefined;
-  return (
-    isExpoExpression(expression, context) ||
-    (initializer !== undefined && hasExpoOptions(initializer, context)) ||
-    (ts.isObjectLiteralExpression(expression) &&
-      expression.properties.some(
-        (property) =>
-          ts.isSpreadAssignment(property) && isExpoExpression(property.expression, context),
-      ))
-  );
-}
-
 function propertyNameText(name: ts.PropertyName): string | undefined {
   if (
     ts.isIdentifier(name) ||
@@ -156,31 +141,33 @@ function expoRuntimeSource(runtimeKeys: ReadonlyArray<string>): string {
     .join(", ")} }`;
 }
 
-function expoOptionsReplacements(
+interface ExpoOptionsTarget {
+  readonly start: number;
+  readonly end: number;
+  readonly expression: string;
+}
+
+function expoOptionsTargets(
   context: TransformContext,
   options: ts.Expression,
-  runtimeKeys: ReadonlyArray<string>,
-): ReadonlyArray<Replacement> {
-  const runtimeEnv = expoRuntimeSource(runtimeKeys);
+): ReadonlyArray<ExpoOptionsTarget> {
   if (isExpoExpression(options, context)) {
     return [
       {
         start: options.getStart(context.sourceFile),
         end: options.end,
-        text: `{ ...${context.code.slice(options.getStart(), options.end)}, runtimeEnv: ${runtimeEnv} }`,
+        expression: context.code.slice(options.getStart(), options.end),
       },
     ];
   }
   if (ts.isIdentifier(options)) {
     const initializer = localConstInitializer(options, context);
-    return initializer === undefined
-      ? []
-      : expoOptionsReplacements(context, initializer, runtimeKeys);
+    return initializer === undefined ? [] : expoOptionsTargets(context, initializer);
   }
   if (!ts.isObjectLiteralExpression(options)) {
     return [];
   }
-  const replacements: Replacement[] = [];
+  const targets: ExpoOptionsTarget[] = [];
   let hasExpoSpread = false;
   let prefixOverride: ts.Expression | "spread" | undefined;
   for (const property of options.properties) {
@@ -188,10 +175,10 @@ function expoOptionsReplacements(
       hasExpoSpread = true;
       prefixOverride = undefined;
       const expression = property.expression;
-      replacements.push({
+      targets.push({
         start: expression.getStart(context.sourceFile),
         end: expression.end,
-        text: `{ ...${context.code.slice(expression.getStart(), expression.end)}, runtimeEnv: ${runtimeEnv} }`,
+        expression: context.code.slice(expression.getStart(), expression.end),
       });
       continue;
     }
@@ -223,7 +210,7 @@ function expoOptionsReplacements(
       `Envil's Expo compiler does not support overriding the preset prefix "${expoPrefix}".`,
     );
   }
-  return replacements;
+  return targets;
 }
 
 function isInsideExcludedRange(
@@ -238,7 +225,13 @@ export function collectExpoRuntimeReplacements(
   context: TransformContext,
   excludedRanges: ReadonlyArray<readonly [number, number]> = [],
 ): ReadonlyArray<Replacement> {
-  const replacements: Replacement[] = [];
+  const targets = new Map<
+    string,
+    {
+      readonly target: ExpoOptionsTarget;
+      readonly runtimeKeys: Set<string>;
+    }
+  >();
 
   function visit(node: ts.Node): void {
     if (isInsideExcludedRange(node, excludedRanges)) {
@@ -247,14 +240,21 @@ export function collectExpoRuntimeReplacements(
     if (ts.isCallExpression(node) && isImportedMember(node.expression, "client", context)) {
       const values = node.arguments[0];
       const options = node.arguments[1];
-      if (values !== undefined && options !== undefined && hasExpoOptions(options, context)) {
-        const optionReplacements = expoOptionsReplacements(
-          context,
-          options,
-          expoRuntimeKeys(values, context),
-        );
-        if (optionReplacements.length > 0) {
-          replacements.push(...optionReplacements);
+      if (values !== undefined && options !== undefined) {
+        const optionTargets = expoOptionsTargets(context, options);
+        if (optionTargets.length > 0) {
+          const runtimeKeys = expoRuntimeKeys(values, context);
+          for (const target of optionTargets) {
+            const key = `${target.start}:${target.end}`;
+            const entry = targets.get(key) ?? {
+              target,
+              runtimeKeys: new Set<string>(),
+            };
+            for (const runtimeKey of runtimeKeys) {
+              entry.runtimeKeys.add(runtimeKey);
+            }
+            targets.set(key, entry);
+          }
         }
       }
     }
@@ -262,5 +262,9 @@ export function collectExpoRuntimeReplacements(
   }
 
   visit(context.sourceFile);
-  return replacements;
+  return [...targets.values()].map(({ target, runtimeKeys }) => ({
+    start: target.start,
+    end: target.end,
+    text: `{ ...${target.expression}, runtimeEnv: ${expoRuntimeSource([...runtimeKeys])} }`,
+  }));
 }

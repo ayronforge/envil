@@ -166,6 +166,92 @@ export const redisUrl = Schema.String.check(
 );
 export type RedisUrl = Schema.Schema.Type<typeof redisUrl>;
 
+function mongoHostPort(host: string): number | undefined | false {
+  if (/^%2f.+\.sock$/i.test(host)) {
+    return undefined;
+  }
+  let port: string | undefined;
+  if (host.startsWith("[")) {
+    const closingBracket = host.indexOf("]");
+    if (closingBracket < 0) {
+      return false;
+    }
+    const suffix = host.slice(closingBracket + 1);
+    if (suffix !== "") {
+      if (!/^:\d+$/.test(suffix)) {
+        return false;
+      }
+      port = suffix.slice(1);
+    }
+  } else {
+    const separator = host.lastIndexOf(":");
+    if (separator >= 0) {
+      if (host.indexOf(":") !== separator) {
+        return false;
+      }
+      port = host.slice(separator + 1);
+      if (!/^\d+$/.test(port)) {
+        return false;
+      }
+    }
+  }
+  try {
+    const parsed = new URL(`http://${host}`);
+    if (
+      parsed.hostname.length === 0 ||
+      parsed.username.length > 0 ||
+      parsed.password.length > 0 ||
+      parsed.pathname !== "/" ||
+      parsed.search !== "" ||
+      parsed.hash !== ""
+    ) {
+      return false;
+    }
+    if (port === undefined) {
+      return undefined;
+    }
+    const portNumber = Number(port);
+    return Number.isInteger(portNumber) && portNumber >= 1 && portNumber <= 65_535
+      ? portNumber
+      : false;
+  } catch {
+    return false;
+  }
+}
+
+function isMongoUrl(value: string): boolean {
+  if (value !== value.trim()) {
+    return false;
+  }
+  const match = /^(mongodb(?:\+srv)?):\/\/([^/?#]+)(?:\/[^?#]*)?(?:\?[^#]*)?$/.exec(value);
+  if (match === null) {
+    return false;
+  }
+  const scheme = match[1];
+  let authority = match[2];
+  if (scheme === undefined || authority === undefined) {
+    return false;
+  }
+  const credentialsEnd = authority.lastIndexOf("@");
+  if (credentialsEnd >= 0) {
+    const credentials = authority.slice(0, credentialsEnd);
+    const separator = credentials.indexOf(":");
+    if (credentials.includes("@") || separator <= 0 || separator === credentials.length - 1) {
+      return false;
+    }
+    authority = authority.slice(credentialsEnd + 1);
+  }
+  const hosts = authority.split(",");
+  if (hosts.some((host) => host.length === 0)) {
+    return false;
+  }
+  const ports = hosts.map(mongoHostPort);
+  if (ports.includes(false)) {
+    return false;
+  }
+  return scheme !== "mongodb+srv" || (hosts.length === 1 && ports[0] === undefined);
+}
+
 export const mongoUrl = Schema.String.check(
   Schema.makeFilter<string>(
     (value) => value.startsWith("mongodb://") || value.startsWith("mongodb+srv://"),
@@ -174,7 +260,7 @@ export const mongoUrl = Schema.String.check(
       message: "Use a complete MongoDB connection URL",
     },
   ),
-  Schema.isPattern(/^mongodb(\+srv)?:\/\/(?:[^:]+:[^@]+@)?[^/?#@]+(?:\/[^?]*)?(?:\?.*)?$/, {
+  Schema.makeFilter<string>(isMongoUrl, {
     message: "Check the MongoDB host, optional credentials, database, and query parameters",
   }),
 );

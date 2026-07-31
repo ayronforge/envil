@@ -265,6 +265,20 @@ export function createExportOriginResolver(
       return origin;
     }
 
+    if (exportName === "default") {
+      const assignment = sourceFile.statements.find(
+        (statement): statement is ts.ExportAssignment =>
+          ts.isExportAssignment(statement) && !statement.isExportEquals,
+      );
+      if (assignment !== undefined) {
+        const origin = ts.isIdentifier(assignment.expression)
+          ? await localOrigin(assignment.expression.text, new Set())
+          : undefined;
+        cache.origins.set(key, origin ?? null);
+        return origin;
+      }
+    }
+
     const initializer = constInitializer(sourceFile, exportName);
     if (
       initializer !== undefined &&

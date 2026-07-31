@@ -567,8 +567,25 @@ describe("mongoUrl", () => {
     expect(decode(mongoUrl, mUrl)).toBe(mUrl);
   });
 
+  test("accepts a MongoDB seed list with a bracketed IPv6 host", () => {
+    const value = "mongodb://host:27017,[::1]:27018/db";
+    expect(decode(mongoUrl, value)).toBe(value);
+  });
+
   test("rejects mongodb:// URLs without a host", () => {
     expect(() => decode(mongoUrl, "mongodb://?retryWrites=true")).toThrow();
+  });
+
+  test("rejects non-numeric MongoDB ports", () => {
+    expect(() => decode(mongoUrl, "mongodb://host:notaport")).toThrow();
+  });
+
+  test("rejects ports in mongodb+srv URLs", () => {
+    expect(() => decode(mongoUrl, "mongodb+srv://host:27017/db")).toThrow();
+  });
+
+  test("rejects malformed bracketed MongoDB hosts", () => {
+    expect(() => decode(mongoUrl, "mongodb://[::1/db")).toThrow();
   });
 
   test("rejects other protocols", () => {
