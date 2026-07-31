@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  createExportOriginCache,
   transformResolvedEnvilModule,
   transformEnvilModule as transformEnvilModuleWithMap,
   type EnvilBuildTarget,
@@ -295,6 +296,41 @@ client({ APP_URL: requiredString }, expo);
     }
   });
 
+  test("reuses module-origin work across resolved transforms", async () => {
+    const root = await mkdtemp(join(tmpdir(), "envil-transform-"));
+    const utilities = join(root, "utilities.ts");
+    const firstSourceId = join(root, "first.ts");
+    const secondSourceId = join(root, "second.ts");
+    await writeFile(utilities, "export function render() {}\n");
+    const originCache = createExportOriginCache();
+    let resolutions = 0;
+    const resolveModule = async (specifier: string) => {
+      resolutions += 1;
+      return specifier === "./utilities.ts" ? utilities : undefined;
+    };
+
+    try {
+      await transformResolvedEnvilModule(
+        'import * as utilities from "./utilities.ts"; utilities.render();',
+        firstSourceId,
+        "client",
+        resolveModule,
+        originCache,
+      );
+      await transformResolvedEnvilModule(
+        'import * as utilities from "./utilities.ts"; utilities.render();',
+        secondSourceId,
+        "client",
+        resolveModule,
+        originCache,
+      );
+
+      expect(resolutions).toBe(2);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("prunes intrinsic aliases exported as const declarations", async () => {
     const root = await mkdtemp(join(tmpdir(), "envil-transform-"));
     const barrel = join(root, "envil-barrel.ts");
@@ -359,6 +395,45 @@ export const appEnv = createEnv(
 
     expect(transformed).toContain('"EXPO_PUBLIC_API_URL": process.env.EXPO_PUBLIC_API_URL');
     expect(transformed).not.toContain('"EXPO_PUBLIC_URL": process.env.EXPO_PUBLIC_URL');
+  });
+
+  test("fails closed when an imported Expo schema may hide an explicit source", () => {
+    const source = `
+import { client } from "@ayronforge/envil";
+import { expo } from "@ayronforge/envil/presets";
+import { importedSchema } from "./schemas.ts";
+
+client({ URL: importedSchema }, expo);
+`;
+
+    expect(() => transformEnvilModule(source, "src/env.ts", "client")).toThrow(
+      "cannot prove the runtime source of imported client schemas",
+    );
+  });
+
+  test("compiles Expo presets factored into local const options", () => {
+    const source = `
+import { client, requiredString } from "@ayronforge/envil";
+import { expo } from "@ayronforge/envil/presets";
+
+const expoOptions = { ...expo };
+client({ URL: requiredString }, expoOptions);
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).toContain('"EXPO_PUBLIC_URL": process.env.EXPO_PUBLIC_URL');
+  });
+
+  test("compiles numeric Expo client keys", () => {
+    const source = `
+import { client, requiredString } from "@ayronforge/envil";
+import { expo } from "@ayronforge/envil/presets";
+
+client({ 1: requiredString }, expo);
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).toContain('"EXPO_PUBLIC_1": process.env.EXPO_PUBLIC_1');
   });
 
   test("compiles Expo runtime at the spread position", () => {

@@ -15,6 +15,22 @@ export type ExportOriginResolver = (
   exportName: string,
 ) => Promise<IntrinsicName | undefined>;
 
+/** Module resolution and source analysis reused for one build. */
+export interface ExportOriginCache {
+  readonly resolvedModules: Map<string, string | null>;
+  readonly sourceFiles: Map<string, ts.SourceFile>;
+  readonly origins: Map<string, IntrinsicName | null>;
+}
+
+/** Creates an empty module-origin cache for one build. */
+export function createExportOriginCache(): ExportOriginCache {
+  return {
+    resolvedModules: new Map(),
+    sourceFiles: new Map(),
+    origins: new Map(),
+  };
+}
+
 /** Returns the intrinsic exported directly by an Envil public entrypoint. */
 export function terminalOrigin(moduleName: string, exportName: string): IntrinsicName | undefined {
   if (moduleName === "@ayronforge/envil/presets") {
@@ -87,11 +103,11 @@ function constInitializer(sourceFile: ts.SourceFile, name: string): ts.Expressio
   return undefined;
 }
 
-/** Creates a per-transform re-export tracer backed by the bundler resolver. */
-export function createExportOriginResolver(resolveModule: ModuleResolver): ExportOriginResolver {
-  const sourceFiles = new Map<string, ts.SourceFile>();
-  const origins = new Map<string, IntrinsicName | null>();
-
+/** Creates a re-export tracer backed by the bundler resolver. */
+export function createExportOriginResolver(
+  resolveModule: ModuleResolver,
+  cache: ExportOriginCache = createExportOriginCache(),
+): ExportOriginResolver {
   async function originOf(
     specifier: string,
     importer: string,
@@ -103,8 +119,16 @@ export function createExportOriginResolver(resolveModule: ModuleResolver): Expor
       return terminal;
     }
 
-    const resolved = await resolveModule(specifier, importer);
-    if (resolved === undefined || resolved.startsWith("\0")) {
+    const resolutionKey = `${importer}\0${specifier}`;
+    let resolved = cache.resolvedModules.get(resolutionKey);
+    if (resolved === undefined) {
+      resolved = (await resolveModule(specifier, importer)) ?? null;
+      cache.resolvedModules.set(resolutionKey, resolved);
+    }
+    if (resolved === null) {
+      return undefined;
+    }
+    if (resolved.startsWith("\0")) {
       return undefined;
     }
     const fileName = resolved.split(/[?#]/, 1)[0] ?? resolved;
@@ -112,11 +136,11 @@ export function createExportOriginResolver(resolveModule: ModuleResolver): Expor
     if (visiting.has(key)) {
       return undefined;
     }
-    if (origins.has(key)) {
-      return origins.get(key) ?? undefined;
+    if (cache.origins.has(key)) {
+      return cache.origins.get(key) ?? undefined;
     }
 
-    let sourceFile = sourceFiles.get(fileName);
+    let sourceFile = cache.sourceFiles.get(fileName);
     if (sourceFile === undefined) {
       sourceFile = ts.createSourceFile(
         fileName,
@@ -125,7 +149,7 @@ export function createExportOriginResolver(resolveModule: ModuleResolver): Expor
         true,
         scriptKindFor(fileName),
       );
-      sourceFiles.set(fileName, sourceFile);
+      cache.sourceFiles.set(fileName, sourceFile);
     }
     const currentSourceFile = sourceFile;
     const nextVisiting = new Set(visiting).add(key);
@@ -202,7 +226,7 @@ export function createExportOriginResolver(resolveModule: ModuleResolver): Expor
           memberName,
           nextVisiting,
         );
-        origins.set(key, origin ?? null);
+        cache.origins.set(key, origin ?? null);
         return origin;
       }
     }
@@ -233,11 +257,11 @@ export function createExportOriginResolver(resolveModule: ModuleResolver): Expor
           localName,
           nextVisiting,
         );
-        origins.set(key, origin ?? null);
+        cache.origins.set(key, origin ?? null);
         return origin;
       }
       const origin = await localOrigin(localName, new Set());
-      origins.set(key, origin ?? null);
+      cache.origins.set(key, origin ?? null);
       return origin;
     }
 
@@ -248,12 +272,12 @@ export function createExportOriginResolver(resolveModule: ModuleResolver): Expor
       sourceFile.statements.some((statement) => exportsDeclaration(statement, exportName))
     ) {
       const origin = await localOrigin(initializer.text, new Set([exportName]));
-      origins.set(key, origin ?? null);
+      cache.origins.set(key, origin ?? null);
       return origin;
     }
 
     if (sourceFile.statements.some((statement) => exportsDeclaration(statement, exportName))) {
-      origins.set(key, null);
+      cache.origins.set(key, null);
       return undefined;
     }
 
@@ -275,12 +299,12 @@ export function createExportOriginResolver(resolveModule: ModuleResolver): Expor
         nextVisiting,
       );
       if (candidate !== undefined && origin !== undefined && candidate !== origin) {
-        origins.set(key, null);
+        cache.origins.set(key, null);
         return undefined;
       }
       origin = candidate ?? origin;
     }
-    origins.set(key, origin ?? null);
+    cache.origins.set(key, origin ?? null);
     return origin;
   }
 

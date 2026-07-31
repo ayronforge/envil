@@ -9,8 +9,12 @@ function isExpoExpression(expression: ts.Expression, context: TransformContext):
 }
 
 function hasExpoOptions(expression: ts.Expression, context: TransformContext): boolean {
+  const initializer = ts.isIdentifier(expression)
+    ? localConstInitializer(expression, context)
+    : undefined;
   return (
     isExpoExpression(expression, context) ||
+    (initializer !== undefined && hasExpoOptions(initializer, context)) ||
     (ts.isObjectLiteralExpression(expression) &&
       expression.properties.some(
         (property) =>
@@ -23,7 +27,8 @@ function propertyNameText(name: ts.PropertyName): string | undefined {
   if (
     ts.isIdentifier(name) ||
     ts.isStringLiteral(name) ||
-    ts.isNoSubstitutionTemplateLiteral(name)
+    ts.isNoSubstitutionTemplateLiteral(name) ||
+    ts.isNumericLiteral(name)
   ) {
     return name.text;
   }
@@ -46,11 +51,29 @@ function localConstInitializer(
   return declaration.initializer;
 }
 
+function importedModuleName(
+  identifier: ts.Identifier,
+  context: TransformContext,
+): string | undefined {
+  const symbol = context.checker.getSymbolAtLocation(identifier);
+  for (const declaration of symbol?.declarations ?? []) {
+    let current: ts.Node | undefined = declaration;
+    while (current !== undefined && !ts.isImportDeclaration(current)) {
+      current = current.parent;
+    }
+    if (current !== undefined && ts.isStringLiteral(current.moduleSpecifier)) {
+      return current.moduleSpecifier.text;
+    }
+  }
+  return undefined;
+}
+
 function explicitRuntimeKey(
   expression: ts.Expression,
   context: TransformContext,
 ): string | undefined {
   let runtimeKey: string | undefined;
+  let hasUnresolvedImportedSchema = false;
   const visitedInitializers = new Set<ts.Expression>();
 
   function visit(node: ts.Node): void {
@@ -71,11 +94,20 @@ function explicitRuntimeKey(
         visit(initializer);
         return;
       }
+      const moduleName = importedModuleName(node, context);
+      if (moduleName?.startsWith(".") === true || moduleName?.startsWith("/") === true) {
+        hasUnresolvedImportedSchema = true;
+      }
     }
     ts.forEachChild(node, visit);
   }
 
   visit(expression);
+  if (runtimeKey === undefined && hasUnresolvedImportedSchema) {
+    throw new Error(
+      "Envil's Expo compiler cannot prove the runtime source of imported client schemas. Define the sourced schema in the same module.",
+    );
+  }
   return runtimeKey;
 }
 
@@ -138,6 +170,12 @@ function expoOptionsReplacements(
         text: `{ ...${context.code.slice(options.getStart(), options.end)}, runtimeEnv: ${runtimeEnv} }`,
       },
     ];
+  }
+  if (ts.isIdentifier(options)) {
+    const initializer = localConstInitializer(options, context);
+    return initializer === undefined
+      ? []
+      : expoOptionsReplacements(context, initializer, runtimeKeys);
   }
   if (!ts.isObjectLiteralExpression(options)) {
     return [];

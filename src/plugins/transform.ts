@@ -4,11 +4,13 @@ import {
   applyReplacements,
   createDirectTransformContext,
   createResolvedTransformContext,
+  type ExportOriginCache,
   type ModuleResolver,
   type Replacement,
   type TransformContext,
   type TransformResult,
 } from "./transform/ast.ts";
+export { createExportOriginCache } from "./transform/module-origin.ts";
 import { collectClientReplacements } from "./transform/client.ts";
 import { collectServerReplacements } from "./transform/server.ts";
 
@@ -120,8 +122,9 @@ export async function transformResolvedEnvilModule(
   id: string,
   target: EnvilBuildTarget,
   resolveModule: ModuleResolver,
+  originCache?: ExportOriginCache,
 ): Promise<TransformResult | undefined> {
   const cleanId = id.split(/[?#]/, 1)[0] ?? id;
-  const context = await createResolvedTransformContext(code, cleanId, resolveModule);
+  const context = await createResolvedTransformContext(code, cleanId, resolveModule, originCache);
   return transformModule(code, cleanId, target, context);
 }

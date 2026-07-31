@@ -4,11 +4,12 @@ import ts from "typescript6";
 import {
   createExportOriginResolver,
   terminalOrigin,
+  type ExportOriginCache,
   type IntrinsicName,
   type ModuleResolver,
 } from "./module-origin.ts";
 
-export type { IntrinsicName, ModuleResolver } from "./module-origin.ts";
+export type { ExportOriginCache, IntrinsicName, ModuleResolver } from "./module-origin.ts";
 
 /** Envil import bindings proven within one source file. */
 export interface ImportedBindings {
@@ -341,9 +342,10 @@ async function resolvedBindings(
   checker: ts.TypeChecker,
   resolveModule: ModuleResolver,
   candidateNames: ReadonlySet<string>,
+  originCache?: ExportOriginCache,
 ): Promise<ImportedBindings> {
   const bindings = emptyBindings();
-  const originOf = createExportOriginResolver(resolveModule);
+  const originOf = createExportOriginResolver(resolveModule, originCache);
 
   for (const statement of sourceFile.statements) {
     if (
@@ -449,6 +451,7 @@ export async function createResolvedTransformContext(
   code: string,
   id: string,
   resolveModule: ModuleResolver,
+  originCache?: ExportOriginCache,
 ): Promise<TransformContext | undefined> {
   const sourceFile = parsedSource(code, id);
   const candidateNames = transformCandidateBindings(sourceFile);
@@ -460,7 +463,13 @@ export async function createResolvedTransformContext(
     code,
     sourceFile,
     checker,
-    bindings: await resolvedBindings(sourceFile, checker, resolveModule, candidateNames),
+    bindings: await resolvedBindings(
+      sourceFile,
+      checker,
+      resolveModule,
+      candidateNames,
+      originCache,
+    ),
   };
 }
 

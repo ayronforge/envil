@@ -5,12 +5,13 @@ import type { PluginContext as RollupPluginContext } from "rollup";
 import { createUnplugin, type NativeBuildContext } from "unplugin";
 
 import {
+  createExportOriginCache,
   transformEnvilModule,
   transformResolvedEnvilModule,
   type EnvilBuildTarget,
   type EnvilPluginOptions,
 } from "./transform.ts";
-import type { ModuleResolver } from "./transform/ast.ts";
+import type { ExportOriginCache, ModuleResolver } from "./transform/ast.ts";
 
 const pluginName = "@ayronforge/envil";
 
@@ -77,20 +78,25 @@ async function transformForTarget(
   id: string,
   target: EnvilBuildTarget,
   resolveModule?: ModuleResolver,
+  originCache?: ExportOriginCache,
 ) {
   const transformed =
     resolveModule === undefined
       ? transformEnvilModule(code, id, target)
-      : await transformResolvedEnvilModule(code, id, target, resolveModule);
+      : await transformResolvedEnvilModule(code, id, target, resolveModule, originCache);
   return transformed;
 }
 
 export const envilUnplugin = createUnplugin<EnvilPluginOptions | undefined>((options) => {
   const defaultTarget = options?.target ?? "client";
+  let originCache = createExportOriginCache();
 
   return {
     name: pluginName,
     enforce: "pre",
+    buildStart() {
+      originCache = createExportOriginCache();
+    },
     async transform(code, id) {
       const nativeContext = this.getNativeBuildContext?.();
       return transformForTarget(
@@ -98,16 +104,23 @@ export const envilUnplugin = createUnplugin<EnvilPluginOptions | undefined>((opt
         id,
         defaultTarget,
         nativeContext === undefined ? undefined : nativeModuleResolver(nativeContext),
+        originCache,
       );
     },
     rollup: {
       async transform(this: RollupPluginContext, code, id) {
-        return transformForTarget(code, id, defaultTarget, rollupModuleResolver(this));
+        return transformForTarget(code, id, defaultTarget, rollupModuleResolver(this), originCache);
       },
     },
     rolldown: {
       async transform(this: RolldownPluginContext, code, id) {
-        return transformForTarget(code, id, defaultTarget, rolldownModuleResolver(this));
+        return transformForTarget(
+          code,
+          id,
+          defaultTarget,
+          rolldownModuleResolver(this),
+          originCache,
+        );
       },
     },
     vite: {
@@ -123,7 +136,7 @@ export const envilUnplugin = createUnplugin<EnvilPluginOptions | undefined>((opt
         transformOptions: { readonly ssr?: boolean } | undefined,
       ) {
         const target = transformOptions?.ssr ? "server" : "client";
-        return transformForTarget(code, id, target, rollupModuleResolver(this));
+        return transformForTarget(code, id, target, rollupModuleResolver(this), originCache);
       },
     },
   };
