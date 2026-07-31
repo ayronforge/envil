@@ -36,6 +36,7 @@ const runtimeResultKey = "__ENVIL_INTEGRATION_RESULT__";
 const serverSentinel = "IMPORTED_SERVER_ONLY_SENTINEL";
 const resolverSentinel = "CUSTOM_RESOLVER_SERVER_ONLY_SENTINEL";
 const dependencySentinel = "DEPENDENCY_SERVER_ONLY_SENTINEL";
+const transitiveDependencySentinel = "TRANSITIVE_DEPENDENCY_SERVER_ONLY_SENTINEL";
 const defaultImportSentinel = "DEFAULT_IMPORTED_SERVER_ONLY_SENTINEL";
 const namespaceReexportSentinel = "NAMESPACE_REEXPORTED_SERVER_ONLY_SENTINEL";
 const namespaceSentinel = "MIXED_NAMESPACE_SENTINEL";
@@ -47,8 +48,10 @@ async function createFixture(): Promise<BundlerFixture> {
   temporaryDirectories.push(root);
   const entry = join(root, "entry.ts");
   const dependencyRoot = join(root, "node_modules", "envil-definitions");
+  const transitiveDependencyRoot = join(root, "node_modules", "envil-consumer");
 
   await mkdir(dependencyRoot, { recursive: true });
+  await mkdir(transitiveDependencyRoot, { recursive: true });
   await writeFile(
     join(dependencyRoot, "server-only.js"),
     `export const dependencySecret = "${dependencySentinel}";\n`,
@@ -72,9 +75,35 @@ async function createFixture(): Promise<BundlerFixture> {
 import { requiredString, server } from "./envil-barrel.js";
 import { dependencySecret } from "./server-only.js";
 
+export { requiredString, server };
 export const dependencyFragment = server(
   { DEPENDENCY_SECRET: requiredString },
   { runtimeEnv: { DEPENDENCY_SECRET: dependencySecret } },
+);
+`,
+  );
+  await writeFile(
+    join(transitiveDependencyRoot, "server-only.js"),
+    `export const transitiveDependencySecret = "${transitiveDependencySentinel}";\n`,
+  );
+  await writeFile(
+    join(transitiveDependencyRoot, "package.json"),
+    JSON.stringify({
+      name: "envil-consumer",
+      dependencies: {
+        "envil-definitions": "*",
+      },
+    }),
+  );
+  await writeFile(
+    join(transitiveDependencyRoot, "index.js"),
+    `
+import { requiredString, server } from "envil-definitions";
+import { transitiveDependencySecret } from "./server-only.js";
+
+export const transitiveDependencyFragment = server(
+  { TRANSITIVE_DEPENDENCY_SECRET: requiredString },
+  { runtimeEnv: { TRANSITIVE_DEPENDENCY_SECRET: transitiveDependencySecret } },
 );
 `,
   );
@@ -150,6 +179,7 @@ export const server = (value) => value;
     entry,
     `
 import { Effect, Option, Redacted } from "effect";
+import { transitiveDependencyFragment } from "envil-consumer";
 import { dependencyFragment } from "envil-definitions";
 import * as mixed from "./mixed-barrel.ts";
 import { envil as namespaceEnvil } from "./namespace-barrel.ts";
@@ -198,6 +228,7 @@ const resolver = configureResolver(
 const baseEnv = createEnv(
   shared({ APP_NAME: "Base" }),
   dependencyFragment,
+  transitiveDependencyFragment,
   defaultFragment,
   namespaceFragment,
   client(
@@ -267,6 +298,9 @@ function createSourceResolver(fixture: BundlerFixture) {
       }
       if (source === "envil-definitions") {
         return join(fixture.root, "node_modules", "envil-definitions", "index.js");
+      }
+      if (source === "envil-consumer") {
+        return join(fixture.root, "node_modules", "envil-consumer", "index.js");
       }
       return source === "#envil-barrel" ? join(fixture.root, "envil-package.ts") : null;
     },
@@ -338,6 +372,9 @@ function expectServerRuntime(result: Readonly<Record<string, unknown>>): void {
   expect(Reflect.get(environment, "DEFAULT_SECRET")).toBe(defaultImportSentinel);
   expect(Reflect.get(environment, "NAMESPACE_SECRET")).toBe(namespaceReexportSentinel);
   expect(Reflect.get(environment, "DEPENDENCY_SECRET")).toBe(dependencySentinel);
+  expect(Reflect.get(environment, "TRANSITIVE_DEPENDENCY_SECRET")).toBe(
+    transitiveDependencySentinel,
+  );
   expect(Reflect.get(result, "mixedNamespaceValue")).toBe(namespaceSentinel);
   const resolved: unknown = Reflect.get(environment, "RESOLVED");
   expect(Redacted.isRedacted(resolved)).toBe(true);
@@ -355,6 +392,7 @@ async function verifyTargets(buildBundle: BuildBundle): Promise<void> {
   expect(clientBundle.code).not.toContain(serverSentinel);
   expect(clientBundle.code).not.toContain(resolverSentinel);
   expect(clientBundle.code).not.toContain(dependencySentinel);
+  expect(clientBundle.code).not.toContain(transitiveDependencySentinel);
   expect(clientBundle.code).not.toContain(defaultImportSentinel);
   expect(clientBundle.code).not.toContain(namespaceReexportSentinel);
   expect(clientBundle.code).toContain(namespaceSentinel);
@@ -362,6 +400,7 @@ async function verifyTargets(buildBundle: BuildBundle): Promise<void> {
   expect(serverBundle.code).toContain(serverSentinel);
   expect(serverBundle.code).toContain(resolverSentinel);
   expect(serverBundle.code).toContain(dependencySentinel);
+  expect(serverBundle.code).toContain(transitiveDependencySentinel);
   expect(serverBundle.code).toContain(defaultImportSentinel);
   expect(serverBundle.code).toContain(namespaceReexportSentinel);
   expect(serverBundle.code).toContain(namespaceSentinel);
@@ -439,6 +478,7 @@ async function buildEsbuildBundle(
     alias: {
       "#envil-barrel": join(fixture.root, "envil-package.ts"),
       "@ayronforge/envil": envilEntry,
+      "envil-consumer": join(fixture.root, "node_modules", "envil-consumer", "index.js"),
       "envil-definitions": join(fixture.root, "node_modules", "envil-definitions", "index.js"),
     },
     entryPoints: [fixture.entry],
@@ -500,6 +540,7 @@ async function buildWebpackBundle(
       alias: {
         "#envil-barrel": join(fixture.root, "envil-package.ts"),
         "@ayronforge/envil": envilEntry,
+        "envil-consumer": join(fixture.root, "node_modules", "envil-consumer", "index.js"),
         "envil-definitions": join(fixture.root, "node_modules", "envil-definitions", "index.js"),
       },
       extensions: [".ts", ".js"],
@@ -575,6 +616,7 @@ async function buildRspackBundle(
       alias: {
         "#envil-barrel": join(fixture.root, "envil-package.ts"),
         "@ayronforge/envil": envilEntry,
+        "envil-consumer": join(fixture.root, "node_modules", "envil-consumer", "index.js"),
         "envil-definitions": join(fixture.root, "node_modules", "envil-definitions", "index.js"),
       },
       extensions: [".ts", ".js"],

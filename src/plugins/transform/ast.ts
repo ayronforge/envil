@@ -150,7 +150,7 @@ function rootIdentifier(expression: ts.Expression): ts.Identifier | undefined {
   return undefined;
 }
 
-function callsImportedBinding(sourceFile: ts.SourceFile): boolean {
+function calledImportedBindings(sourceFile: ts.SourceFile): ReadonlySet<string> {
   const importedNames = new Set<string>();
   for (const statement of sourceFile.statements) {
     if (!ts.isImportDeclaration(statement)) {
@@ -173,22 +173,18 @@ function callsImportedBinding(sourceFile: ts.SourceFile): boolean {
     }
   }
 
-  let found = false;
+  const calledNames = new Set<string>();
   function visit(node: ts.Node): void {
-    if (found) {
-      return;
-    }
     if (ts.isCallExpression(node)) {
       const root = rootIdentifier(node.expression);
       if (root !== undefined && importedNames.has(root.text)) {
-        found = true;
-        return;
+        calledNames.add(root.text);
       }
     }
     ts.forEachChild(node, visit);
   }
   visit(sourceFile);
-  return found;
+  return calledNames;
 }
 
 function directBindings(sourceFile: ts.SourceFile, checker: ts.TypeChecker): ImportedBindings {
@@ -238,6 +234,7 @@ async function resolvedBindings(
   sourceFile: ts.SourceFile,
   checker: ts.TypeChecker,
   resolveModule: ModuleResolver,
+  calledNames: ReadonlySet<string>,
 ): Promise<ImportedBindings> {
   const bindings = emptyBindings();
   const originOf = createExportOriginResolver(resolveModule);
@@ -252,7 +249,7 @@ async function resolvedBindings(
     }
     const specifier = statement.moduleSpecifier.text;
     const importClause = statement.importClause;
-    if (importClause?.name !== undefined) {
+    if (importClause?.name !== undefined && calledNames.has(importClause.name.text)) {
       const origin = await originOf(specifier, sourceFile.fileName, "default");
       if (origin !== undefined) {
         addBinding(bindings, origin, importClause.name, checker);
@@ -263,6 +260,9 @@ async function resolvedBindings(
       continue;
     }
     if (ts.isNamespaceImport(namedBindings)) {
+      if (!calledNames.has(namedBindings.name.text)) {
+        continue;
+      }
       const symbol = checker.getSymbolAtLocation(namedBindings.name);
       if (symbol === undefined) {
         continue;
@@ -281,6 +281,9 @@ async function resolvedBindings(
       continue;
     }
     for (const element of namedBindings.elements) {
+      if (!calledNames.has(element.name.text)) {
+        continue;
+      }
       const exportedName = element.propertyName?.text ?? element.name.text;
       const origin = await originOf(specifier, sourceFile.fileName, exportedName);
       if (!element.isTypeOnly && origin !== undefined) {
@@ -323,7 +326,7 @@ export function createDirectTransformContext(
   id: string,
 ): TransformContext | undefined {
   const sourceFile = parsedSource(code, id);
-  if (!callsImportedBinding(sourceFile)) {
+  if (calledImportedBindings(sourceFile).size === 0) {
     return undefined;
   }
   const checker = createSingleFileProgram(sourceFile, id, code).getTypeChecker();
@@ -342,7 +345,8 @@ export async function createResolvedTransformContext(
   resolveModule: ModuleResolver,
 ): Promise<TransformContext | undefined> {
   const sourceFile = parsedSource(code, id);
-  if (!callsImportedBinding(sourceFile)) {
+  const calledNames = calledImportedBindings(sourceFile);
+  if (calledNames.size === 0) {
     return undefined;
   }
   const checker = createSingleFileProgram(sourceFile, id, code).getTypeChecker();
@@ -350,7 +354,7 @@ export async function createResolvedTransformContext(
     code,
     sourceFile,
     checker,
-    bindings: await resolvedBindings(sourceFile, checker, resolveModule),
+    bindings: await resolvedBindings(sourceFile, checker, resolveModule, calledNames),
   };
 }
 
