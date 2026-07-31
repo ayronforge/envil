@@ -189,10 +189,7 @@ function aliasInitializer(
     : undefined;
 }
 
-function transformCandidateBindings(
-  sourceFile: ts.SourceFile,
-  checker: ts.TypeChecker,
-): ReadonlySet<string> {
+function transformCandidateBindings(sourceFile: ts.SourceFile): ReadonlySet<string> {
   const importedNames = new Set<string>();
   for (const statement of sourceFile.statements) {
     if (!ts.isImportDeclaration(statement)) {
@@ -215,54 +212,76 @@ function transformCandidateBindings(
     }
   }
 
-  const candidateNames = new Set<string>();
-  function importedRootName(
-    expression: ts.Expression,
-    visited: Set<ts.Symbol>,
-  ): string | undefined {
-    const root = rootIdentifier(expression);
-    if (root === undefined) {
-      return undefined;
-    }
-    const symbol = checker.getSymbolAtLocation(root);
-    if (symbol === undefined || visited.has(symbol)) {
-      return undefined;
-    }
-    visited.add(symbol);
-    if (
-      importedNames.has(root.text) &&
-      symbol.declarations?.some(
-        (declaration) =>
-          ts.isImportSpecifier(declaration) ||
-          ts.isNamespaceImport(declaration) ||
-          ts.isImportClause(declaration),
-      )
-    ) {
-      return root.text;
-    }
-    const declaration = immutableAliasDeclaration(root, checker);
-    const initializer = declaration === undefined ? undefined : aliasInitializer(declaration);
-    return initializer === undefined ? undefined : importedRootName(initializer, visited);
+  const aliasRoots = new Map<string, Set<string>>();
+  function addAlias(name: string, root: string): void {
+    const roots = aliasRoots.get(name) ?? new Set<string>();
+    roots.add(root);
+    aliasRoots.set(name, roots);
   }
 
-  function addImportedRoot(expression: ts.Expression): boolean {
-    const importedName = importedRootName(expression, new Set());
-    if (importedName === undefined) {
+  function addBindingAliases(name: ts.BindingName, root: string): void {
+    if (ts.isIdentifier(name)) {
+      addAlias(name.text, root);
+      return;
+    }
+    for (const element of name.elements) {
+      if (!ts.isOmittedExpression(element)) {
+        addBindingAliases(element.name, root);
+      }
+    }
+  }
+
+  function collectAliases(node: ts.Node): void {
+    if (
+      ts.isVariableDeclaration(node) &&
+      node.initializer !== undefined &&
+      ts.isVariableDeclarationList(node.parent) &&
+      (ts.getCombinedNodeFlags(node.parent) & ts.NodeFlags.Const) !== 0
+    ) {
+      const root = rootIdentifier(node.initializer);
+      if (root !== undefined) {
+        addBindingAliases(node.name, root.text);
+      }
+    }
+    ts.forEachChild(node, collectAliases);
+  }
+  collectAliases(sourceFile);
+
+  const candidateNames = new Set<string>();
+  function addImportedRoots(expression: ts.Expression): boolean {
+    const root = rootIdentifier(expression);
+    if (root === undefined) {
       return false;
     }
-    candidateNames.add(importedName);
-    return true;
+    const visited = new Set<string>();
+    const pending = [root.text];
+    let found = false;
+    while (pending.length > 0) {
+      const name = pending.pop();
+      if (name === undefined || visited.has(name)) {
+        continue;
+      }
+      visited.add(name);
+      if (importedNames.has(name)) {
+        candidateNames.add(name);
+        found = true;
+      }
+      for (const aliasRoot of aliasRoots.get(name) ?? []) {
+        pending.push(aliasRoot);
+      }
+    }
+    return found;
   }
 
   function visit(node: ts.Node): void {
-    if (ts.isCallExpression(node) && addImportedRoot(node.expression)) {
+    if (ts.isCallExpression(node) && addImportedRoots(node.expression)) {
       const options = node.arguments[1];
       if (options !== undefined) {
-        addImportedRoot(options);
+        addImportedRoots(options);
         if (ts.isObjectLiteralExpression(options)) {
           for (const property of options.properties) {
             if (ts.isSpreadAssignment(property)) {
-              addImportedRoot(property.expression);
+              addImportedRoots(property.expression);
             }
           }
         }
@@ -413,10 +432,10 @@ export function createDirectTransformContext(
   id: string,
 ): TransformContext | undefined {
   const sourceFile = parsedSource(code, id);
-  const checker = createSingleFileProgram(sourceFile, id, code).getTypeChecker();
-  if (transformCandidateBindings(sourceFile, checker).size === 0) {
+  if (transformCandidateBindings(sourceFile).size === 0) {
     return undefined;
   }
+  const checker = createSingleFileProgram(sourceFile, id, code).getTypeChecker();
   return {
     code,
     sourceFile,
@@ -432,11 +451,11 @@ export async function createResolvedTransformContext(
   resolveModule: ModuleResolver,
 ): Promise<TransformContext | undefined> {
   const sourceFile = parsedSource(code, id);
-  const checker = createSingleFileProgram(sourceFile, id, code).getTypeChecker();
-  const candidateNames = transformCandidateBindings(sourceFile, checker);
+  const candidateNames = transformCandidateBindings(sourceFile);
   if (candidateNames.size === 0) {
     return undefined;
   }
+  const checker = createSingleFileProgram(sourceFile, id, code).getTypeChecker();
   return {
     code,
     sourceFile,
