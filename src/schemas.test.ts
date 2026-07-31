@@ -275,6 +275,11 @@ describe("redisUrl", () => {
     expect(decode(redisUrl, rUrl)).toBe(rUrl);
   });
 
+  test("accepts redis:// URL with password-only auth", () => {
+    const rUrl = "redis://:secret@host:6379/0";
+    expect(decode(redisUrl, rUrl)).toBe(rUrl);
+  });
+
   test("accepts redis:// URL without auth", () => {
     const rUrl = "redis://host:6379/0";
     expect(decode(redisUrl, rUrl)).toBe(rUrl);

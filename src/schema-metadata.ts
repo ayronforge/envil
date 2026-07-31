@@ -11,6 +11,15 @@ function hasRedactedAnnotation(ast: SchemaAST.AST, visited: Set<SchemaAST.AST>):
   if (SchemaAST.resolveAt<boolean>(REDACTED_ANNOTATION)(ast) === true) {
     return true;
   }
+  const representation = SchemaAST.resolveAt<unknown>("representation")(ast);
+  if (
+    typeof representation === "object" &&
+    representation !== null &&
+    "id" in representation &&
+    representation.id === "effect/schema/Redacted"
+  ) {
+    return true;
+  }
 
   if (ast.encoding?.some((link) => hasRedactedAnnotation(link.to, visited))) {
     return true;

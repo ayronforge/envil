@@ -141,7 +141,7 @@ export const redisUrl = Schema.String.check(
       message: "Use a complete Redis connection URL",
     },
   ),
-  Schema.isPattern(/^rediss?:\/\/(?:[^:]+:[^@]+@)?[^:]+(?::\d+)?(?:\/\d+)?$/, {
+  Schema.isPattern(/^rediss?:\/\/(?:[^:]*:[^@]+@)?[^:]+(?::\d+)?(?:\/\d+)?$/, {
     message: "Check the Redis host, optional credentials, port, and database number",
   }),
 );

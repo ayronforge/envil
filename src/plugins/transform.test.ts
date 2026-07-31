@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
+  transformResolvedEnvilModule,
   transformEnvilModule as transformEnvilModuleWithMap,
   type EnvilBuildTarget,
 } from "./transform.ts";
@@ -63,6 +67,18 @@ export const appEnv = envil.createEnv(envil.server(values), envil.client({ URL: 
 
     expect(transformed).not.toContain("envil.server(values)");
     expect(transformed).toContain('envil.client({ URL: "public" })');
+  });
+
+  test("supports static namespace element accesses", () => {
+    const source = `
+import * as envil from "@ayronforge/envil";
+const values = makeArbitraryValues();
+export const appEnv = envil.createEnv(envil["server"](values), envil["client"]({ URL: "public" }));
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).not.toContain('envil["server"](values)');
+    expect(transformed).toContain('envil["client"]({ URL: "public" })');
   });
 
   test("does not rewrite local bindings that shadow the imported intrinsic", () => {
@@ -230,6 +246,38 @@ export const appEnv = createEnv(
 
     expect(transformed).toContain('server({ TOKEN: "private" })');
     expect(transformed).toContain('"EXPO_PUBLIC_APP_URL": process.env.EXPO_PUBLIC_APP_URL');
+  });
+
+  test("compiles Expo presets imported through a barrel", async () => {
+    const root = await mkdtemp(join(tmpdir(), "envil-transform-"));
+    const barrel = join(root, "envil-barrel.ts");
+    const sourceId = join(root, "env.ts");
+    await writeFile(
+      barrel,
+      `
+export { client } from "@ayronforge/envil";
+export { expo } from "@ayronforge/envil/presets";
+`,
+    );
+
+    try {
+      const source = `
+import { client, expo } from "./envil-barrel.ts";
+import { requiredString } from "@ayronforge/envil";
+client({ APP_URL: requiredString }, expo);
+`;
+      const transformed = await transformResolvedEnvilModule(
+        source,
+        sourceId,
+        "client",
+        async (specifier, importer) =>
+          specifier === "./envil-barrel.ts" && importer === sourceId ? barrel : undefined,
+      );
+
+      expect(transformed?.code).toContain('"EXPO_PUBLIC_APP_URL": process.env.EXPO_PUBLIC_APP_URL');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   test("compiles explicit Expo fromEnv names", () => {

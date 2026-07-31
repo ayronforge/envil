@@ -358,6 +358,21 @@ describe("environment composition", () => {
     }
   });
 
+  test("rejects widened native redacted schemas in client fragments", () => {
+    const nativeRedacted: Schema.Top = Schema.RedactedFromValue(Schema.String);
+    const appEnv = createEnv(
+      client({ TOKEN: nativeRedacted }, { runtimeEnv: { TOKEN: "secret" } }),
+    );
+
+    const result = Effect.runSync(Effect.result(appEnv.client));
+    expect(Result.isFailure(result)).toBe(true);
+    if (Result.isFailure(result)) {
+      expect(result.failure).toBeInstanceOf(EnvConfigurationError);
+      expect(String(result.failure)).toContain("redacted in a client fragment");
+      expect(String(result.failure)).not.toContain("secret");
+    }
+  });
+
   test("rejects nested Effect values from shared when JavaScript bypasses the types", () => {
     let failure: unknown;
     try {
