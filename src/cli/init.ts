@@ -39,14 +39,17 @@ interface GeneratedVariable {
 }
 
 function parseDotenv(source: string): ReadonlyArray<ParsedVariable> {
-  const normalizedSource = source.replace(/\r\n?/g, "\n");
+  const normalizedSource = source.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
   DOTENV_ENTRY.lastIndex = 0;
   while (DOTENV_ENTRY.lastIndex < normalizedSource.length) {
     if (DOTENV_ENTRY.exec(normalizedSource) === null) {
       throw new Error("The input contains malformed dotenv syntax.");
     }
   }
-  return Object.entries(parse(source)).map(([runtimeKey, value]) => ({ runtimeKey, value }));
+  return Object.entries(parse(normalizedSource)).map(([runtimeKey, value]) => ({
+    runtimeKey,
+    value,
+  }));
 }
 
 function detectClientPrefix(

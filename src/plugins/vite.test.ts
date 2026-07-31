@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { Redacted } from "effect";
-import { build } from "vite";
+import { build, optimizeDeps, resolveConfig } from "vite";
 
 import envil from "./vite.ts";
 
@@ -371,5 +371,52 @@ export const revealRedacted = (value) => Redacted.value(value);
     const updatedCode =
       typeof updated === "object" && updated !== null ? Reflect.get(updated, "code") : source;
     expect(updatedCode).toContain("fragment({ SECRET");
+  });
+
+  test("prunes server fragments while optimizing Vite dependencies", async () => {
+    const root = await mkdtemp(join(tmpdir(), "envil-vite-optimize-"));
+    temporaryDirectories.push(root);
+    const dependencyRoot = join(root, "node_modules", "envil-definitions");
+    const serverSentinel = "OPTIMIZED_DEPENDENCY_SERVER_ONLY_SENTINEL";
+    await mkdir(dependencyRoot, { recursive: true });
+    await writeFile(
+      join(dependencyRoot, "package.json"),
+      JSON.stringify({
+        name: "envil-definitions",
+        version: "1.0.0",
+        type: "module",
+        exports: "./index.js",
+      }),
+    );
+    await writeFile(
+      join(dependencyRoot, "index.js"),
+      `
+import { server } from "@ayronforge/envil";
+export const fragment = server({ TOKEN: "${serverSentinel}" });
+`,
+    );
+
+    const config = await resolveConfig(
+      {
+        configFile: false,
+        logLevel: "silent",
+        optimizeDeps: {
+          force: true,
+          include: ["envil-definitions"],
+          noDiscovery: true,
+        },
+        plugins: [envil()],
+        root,
+      },
+      "serve",
+    );
+    const metadata = await optimizeDeps(config, true, true);
+    const optimized = metadata.optimized["envil-definitions"];
+    if (optimized === undefined) {
+      throw new Error("Expected Vite to optimize envil-definitions.");
+    }
+    const code = await readFile(optimized.file, "utf8");
+
+    expect(code).not.toContain(serverSentinel);
   });
 });

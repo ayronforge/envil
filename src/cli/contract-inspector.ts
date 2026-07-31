@@ -257,16 +257,19 @@ export function renderEnvExample(contract: InspectedEnvContract): string {
   const runtimeOwners = new Map<string, InspectedContractVariable>();
   for (const variable of variables) {
     const previous = runtimeOwners.get(variable.runtimeKey);
-    if (previous !== undefined) {
+    if (previous !== undefined && previous.logicalKey !== variable.logicalKey) {
       throw new Error(
         `"${previous.logicalKey}" and "${variable.logicalKey}" both read "${variable.runtimeKey}" in the environment contract. Rename one property or map it with fromEnv().`,
       );
     }
-    runtimeOwners.set(variable.runtimeKey, variable);
+    if (previous === undefined) {
+      runtimeOwners.set(variable.runtimeKey, variable);
+    }
   }
+  const uniqueVariables = [...runtimeOwners.values()];
   const groups = (["server", "client"] as const)
     .map((target) =>
-      variables
+      uniqueVariables
         .filter((variable) => variable.target === target)
         .map((variable) => `${variable.runtimeKey}=`)
         .join("\n"),

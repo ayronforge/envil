@@ -694,6 +694,22 @@ client({ URL: requiredString }, { ...expo, prefix: "EXPO_PUBLIC_ALT_" });
     );
   });
 
+  test("rejects computed prefix overrides after the Expo preset spread", () => {
+    const source = `
+import { client, requiredString } from "@ayronforge/envil";
+import { expo } from "@ayronforge/envil/presets";
+
+client(
+  { APP_URL: requiredString },
+  { ...expo, ["prefix"]: "VITE_" },
+);
+`;
+
+    expect(() => transformEnvilModule(source, "src/env.ts", "client")).toThrow(
+      'does not support overriding the preset prefix "EXPO_PUBLIC_"',
+    );
+  });
+
   test("rejects spreads that can override the Expo preset prefix", () => {
     const source = `
 import { client, requiredString } from "@ayronforge/envil";

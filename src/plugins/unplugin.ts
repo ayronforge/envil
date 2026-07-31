@@ -2,7 +2,12 @@ import { dirname } from "node:path";
 
 import type { PluginContext as RolldownPluginContext } from "rolldown";
 import type { PluginContext as RollupPluginContext } from "rollup";
-import { createUnplugin, type NativeBuildContext } from "unplugin";
+import {
+  createEsbuildPlugin,
+  createUnplugin,
+  type NativeBuildContext,
+  type UnpluginFactory,
+} from "unplugin";
 
 import {
   createExportOriginCache,
@@ -104,7 +109,7 @@ async function transformForTarget(
   return transformed;
 }
 
-export const envilUnplugin = createUnplugin<EnvilPluginOptions | undefined>((options) => {
+const envilPluginFactory: UnpluginFactory<EnvilPluginOptions | undefined, false> = (options) => {
   const defaultTarget = options?.target ?? "client";
   let originCache = createExportOriginCache();
 
@@ -147,6 +152,9 @@ export const envilUnplugin = createUnplugin<EnvilPluginOptions | undefined>((opt
       config: () => ({
         optimizeDeps: {
           exclude: ["@ayronforge/envil"],
+          esbuildOptions: {
+            plugins: [envilEsbuildPlugin({ target: "client" })],
+          },
         },
       }),
       async transform(
@@ -160,6 +168,14 @@ export const envilUnplugin = createUnplugin<EnvilPluginOptions | undefined>((opt
       },
     },
   };
-});
+};
+
+const envilEsbuildPlugin = createEsbuildPlugin<EnvilPluginOptions | undefined, false>(
+  envilPluginFactory,
+);
+
+export const envilUnplugin = createUnplugin<EnvilPluginOptions | undefined, false>(
+  envilPluginFactory,
+);
 
 export type { EnvilBuildTarget, EnvilPluginOptions } from "./transform.ts";

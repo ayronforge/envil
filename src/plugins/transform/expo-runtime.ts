@@ -9,6 +9,9 @@ function isExpoExpression(expression: ts.Expression, context: TransformContext):
 }
 
 function propertyNameText(name: ts.PropertyName): string | undefined {
+  if (ts.isComputedPropertyName(name) && ts.isStringLiteralLike(name.expression)) {
+    return name.expression.text;
+  }
   if (
     ts.isIdentifier(name) ||
     ts.isStringLiteral(name) ||
@@ -111,7 +114,7 @@ function expoRuntimeKeys(values: ts.Expression, context: TransformContext): Read
   const keys: string[] = [];
   const seen = new Set<string>();
   for (const property of values.properties) {
-    if (!ts.isPropertyAssignment(property)) {
+    if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name)) {
       throw new Error(
         "Envil's Expo compiler requires explicit client schema properties without spreads or computed keys.",
       );

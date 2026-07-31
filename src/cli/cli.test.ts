@@ -85,6 +85,12 @@ describe("envil init", () => {
     expect(source).toContain("EMPTY: requiredString");
   });
 
+  test("accepts a UTF-8 BOM before the first dotenv assignment", () => {
+    const source = generateEnvSourceFromDotenv("\uFEFFPORT=3000\n");
+
+    expect(source).toContain("PORT: port");
+  });
+
   test("redacts sensitive names and inferred server connection URLs", () => {
     const source = generateEnvSourceFromDotenv(
       [
@@ -323,6 +329,23 @@ describe("envil example", () => {
     expect(() => renderEnvExample(inspectEnvContract(inputPath))).toThrow(
       '"FIRST" and "SECOND" both read "TOKEN"',
     );
+  });
+
+  test("renders one key for a valid cross-target override", async () => {
+    const directory = await createFixture();
+    const inputPath = path.join(directory, "env.ts");
+    await writeFile(
+      inputPath,
+      [
+        'import { client, createEnv, requiredString, server } from "../src/index.ts";',
+        "export const appEnv = createEnv(",
+        "  client({ TOKEN: requiredString }, { runtimeEnv: {} }),",
+        "  server({ TOKEN: requiredString }),",
+        ");",
+      ].join("\n"),
+    );
+
+    expect(renderEnvExample(inspectEnvContract(inputPath))).toBe("TOKEN=\n");
   });
 
   test('treats a resolver named "env" as resolver-backed metadata', async () => {
