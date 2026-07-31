@@ -395,6 +395,38 @@ export const fragment = serverFragment(values);
     }
   });
 
+  test("prunes namespace objects exported through default assignments", async () => {
+    const root = await mkdtemp(join(tmpdir(), "envil-transform-"));
+    const barrel = join(root, "envil-barrel.ts");
+    const sourceId = join(root, "env.ts");
+    await writeFile(
+      barrel,
+      `
+import * as envil from "@ayronforge/envil";
+export default envil;
+`,
+    );
+
+    try {
+      const transformed = await transformResolvedEnvilModule(
+        `
+import envil from "./envil-barrel.ts";
+const values = makeArbitraryValues();
+export const fragment = envil.server(values);
+`,
+        sourceId,
+        "client",
+        async (specifier, importer) =>
+          specifier === "./envil-barrel.ts" && importer === sourceId ? barrel : undefined,
+      );
+
+      expect(transformed).toBeDefined();
+      expect(transformed?.code).not.toContain("envil.server(values)");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("compiles explicit Expo fromEnv names", () => {
     const source = `
 import { client, createEnv, fromEnv, requiredString } from "@ayronforge/envil";

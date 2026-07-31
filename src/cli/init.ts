@@ -24,6 +24,8 @@ const DATABASE_SCHEMAS = [
   ["mysqlUrl", mysqlUrl],
 ] as const;
 const DATABASE_URL_SCHEME = /^(?:postgres(?:ql)?|rediss?|mongodb(?:\+srv)?|mysqls?):\/\//i;
+const DOTENV_ENTRY =
+  /[ \t]*(?:(?:#[^\n]*)?(?:\n|$)|(?:export[ \t]+)?[\w.-]+(?:[ \t]*=[ \t]*|:[ \t]+)(?:[ \t]*'(?:\\'|[^'])*'|[ \t]*"(?:\\"|[^"])*"|[ \t]*`(?:\\`|[^`])*`|[^#\n]+)?[ \t]*(?:#[^\n]*)?(?:\n|$))/y;
 
 interface ParsedVariable {
   readonly runtimeKey: string;
@@ -37,6 +39,13 @@ interface GeneratedVariable {
 }
 
 function parseDotenv(source: string): ReadonlyArray<ParsedVariable> {
+  const normalizedSource = source.replace(/\r\n?/g, "\n");
+  DOTENV_ENTRY.lastIndex = 0;
+  while (DOTENV_ENTRY.lastIndex < normalizedSource.length) {
+    if (DOTENV_ENTRY.exec(normalizedSource) === null) {
+      throw new Error("The input contains malformed dotenv syntax.");
+    }
+  }
   return Object.entries(parse(source)).map(([runtimeKey, value]) => ({ runtimeKey, value }));
 }
 

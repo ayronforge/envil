@@ -208,6 +208,36 @@ export function createExportOriginResolver(
     if (namespaceSeparator > 0) {
       const namespaceName = exportName.slice(0, namespaceSeparator);
       const memberName = exportName.slice(namespaceSeparator + 1);
+      if (namespaceName === "default") {
+        const assignment = sourceFile.statements.find(
+          (statement): statement is ts.ExportAssignment =>
+            ts.isExportAssignment(statement) &&
+            !statement.isExportEquals &&
+            ts.isIdentifier(statement.expression),
+        );
+        if (assignment !== undefined && ts.isIdentifier(assignment.expression)) {
+          for (const statement of sourceFile.statements) {
+            if (
+              !ts.isImportDeclaration(statement) ||
+              statement.importClause?.isTypeOnly === true ||
+              !ts.isStringLiteral(statement.moduleSpecifier) ||
+              statement.importClause?.namedBindings === undefined ||
+              !ts.isNamespaceImport(statement.importClause.namedBindings) ||
+              statement.importClause.namedBindings.name.text !== assignment.expression.text
+            ) {
+              continue;
+            }
+            const origin = await originOf(
+              statement.moduleSpecifier.text,
+              fileName,
+              memberName,
+              nextVisiting,
+            );
+            cache.origins.set(key, origin ?? null);
+            return origin;
+          }
+        }
+      }
       for (const statement of sourceFile.statements) {
         if (
           !ts.isExportDeclaration(statement) ||

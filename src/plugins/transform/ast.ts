@@ -361,6 +361,23 @@ async function resolvedBindings(
       const origin = await originOf(specifier, sourceFile.fileName, "default");
       if (origin !== undefined) {
         addBinding(bindings, origin, importClause.name, checker);
+      } else {
+        const symbol = checker.getSymbolAtLocation(importClause.name);
+        if (symbol !== undefined) {
+          for (const intrinsic of [
+            "server",
+            "client",
+            "configureResolver",
+            "fromEnv",
+            "expo",
+          ] satisfies ReadonlyArray<IntrinsicName>) {
+            if (
+              (await originOf(specifier, sourceFile.fileName, `default.${intrinsic}`)) === intrinsic
+            ) {
+              bindings.namespaces[intrinsic].add(symbol);
+            }
+          }
+        }
       }
     }
     const namedBindings = importClause?.namedBindings;

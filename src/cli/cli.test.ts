@@ -63,6 +63,28 @@ describe("envil init", () => {
     expect(source).not.toContain(secret);
   });
 
+  test("rejects malformed dotenv assignments instead of ignoring them", () => {
+    expect(() => generateEnvSourceFromDotenv("VALID=value\nAPI URL=https://example.com\n")).toThrow(
+      "malformed dotenv syntax",
+    );
+  });
+
+  test("accepts supported dotenv syntax while validating assignments", () => {
+    const source = generateEnvSourceFromDotenv(
+      [
+        "# comment",
+        "export API.URL=https://example.com # inline comment",
+        'MULTILINE="first',
+        'second"',
+        "EMPTY=",
+      ].join("\n"),
+    );
+
+    expect(source).toContain('"API.URL": url');
+    expect(source).toContain("MULTILINE: requiredString");
+    expect(source).toContain("EMPTY: requiredString");
+  });
+
   test("redacts sensitive names and inferred server connection URLs", () => {
     const source = generateEnvSourceFromDotenv(
       [

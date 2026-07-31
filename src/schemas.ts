@@ -90,9 +90,14 @@ export const port = strictNumberFromString
   });
 
 function isHttpUrl(value: string): boolean {
+  if (value !== value.trim() || !/^https?:\/\/[^/]/i.test(value)) {
+    return false;
+  }
   try {
     const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
+    return (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.hostname.length > 0
+    );
   } catch {
     return false;
   }

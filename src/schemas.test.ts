@@ -231,6 +231,12 @@ describe("url", () => {
     expect(() => decode(url, "example.com")).toThrow();
   });
 
+  test("rejects HTTP URLs without an explicit authority delimiter", () => {
+    for (const value of ["http:example.com", "https:/example.com", "http:///example.com"]) {
+      expect(() => decode(url, value)).toThrow();
+    }
+  });
+
   test("rejects empty string", () => {
     expect(() => decode(url, "")).toThrow();
   });
