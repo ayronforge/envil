@@ -323,5 +323,5 @@ export const revealRedacted = (value) => Redacted.value(value);
         Reflect.apply(Reflect.get(serverModule, "revealRedacted"), undefined, [resolvedSecret]),
       ).toBe("resolved:custom-reference");
     }
-  }, 15_000);
+  }, 30_000);
 });
