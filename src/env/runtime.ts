@@ -215,7 +215,7 @@ function runResolverGroup(
 
       // SAFETY: fromResolver constrains every stored reference to the
       // configured resolver's reference type. Grouping only changes the keys.
-      return (candidate as RuntimeConfiguredResolver).resolve(group.referencesByKey);
+      return (candidate as RuntimeConfiguredResolver).resolve(Object.freeze(group.referencesByKey));
     },
     catch: (failure: unknown) =>
       failure instanceof EnvConfigurationError

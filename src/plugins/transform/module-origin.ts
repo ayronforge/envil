@@ -251,33 +251,33 @@ export function createExportOriginResolver(
           cache.origins.set(key, origin ?? null);
           return origin;
         }
-        let localExport: ts.ExportSpecifier | undefined;
-        for (const statement of sourceFile.statements) {
-          if (
-            !ts.isExportDeclaration(statement) ||
-            statement.isTypeOnly ||
-            statement.moduleSpecifier !== undefined ||
-            statement.exportClause === undefined ||
-            !ts.isNamedExports(statement.exportClause)
-          ) {
-            continue;
-          }
-          localExport = statement.exportClause.elements.find(
-            (element) => !element.isTypeOnly && element.name.text === "default",
-          );
-          if (localExport !== undefined) {
-            break;
-          }
+      }
+      let localExport: ts.ExportSpecifier | undefined;
+      for (const statement of sourceFile.statements) {
+        if (
+          !ts.isExportDeclaration(statement) ||
+          statement.isTypeOnly ||
+          statement.moduleSpecifier !== undefined ||
+          statement.exportClause === undefined ||
+          !ts.isNamedExports(statement.exportClause)
+        ) {
+          continue;
         }
+        localExport = statement.exportClause.elements.find(
+          (element) => !element.isTypeOnly && element.name.text === namespaceName,
+        );
         if (localExport !== undefined) {
-          const origin = await localNamespaceOrigin(
-            localExport.propertyName?.text ?? localExport.name.text,
-            memberName,
-            new Set(),
-          );
-          cache.origins.set(key, origin ?? null);
-          return origin;
+          break;
         }
+      }
+      if (localExport !== undefined) {
+        const origin = await localNamespaceOrigin(
+          localExport.propertyName?.text ?? localExport.name.text,
+          memberName,
+          new Set(),
+        );
+        cache.origins.set(key, origin ?? null);
+        return origin;
       }
       for (const statement of sourceFile.statements) {
         if (

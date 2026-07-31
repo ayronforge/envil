@@ -680,6 +680,28 @@ describe("variable sources", () => {
     expect(env.TOKEN).toBeUndefined();
   });
 
+  test("rejects incomplete resolver responses after attempted request mutation", () => {
+    const mutatingAdapter: ResolverAdapter<"mutating", string, {}, never, never> = {
+      name: "mutating",
+      resolve: ({ referencesByKey }) =>
+        Effect.sync(() => {
+          for (const key of Object.keys(referencesByKey)) {
+            Reflect.deleteProperty(referencesByKey, key);
+          }
+          const result: Record<string, ResolvedSecret> = {};
+          return result;
+        }),
+    };
+    const source = configureResolver(mutatingAdapter, {});
+    const appEnv = createEnv(
+      server({
+        TOKEN: optional(requiredString).pipe(fromResolver(source, "remote-reference")),
+      }),
+    );
+
+    expect(() => Effect.runSync(appEnv.server)).toThrow('did not return "TOKEN"');
+  });
+
   test("client materialization never executes server resolvers", async () => {
     let calls = 0;
     const source = configureResolver(customSecretsAdapter, {});

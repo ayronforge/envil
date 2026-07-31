@@ -698,6 +698,41 @@ export const fragment = server({
     await verifyTargets(buildEsbuildBundle);
   });
 
+  test("does not read esbuild module IDs owned by custom namespaces", async () => {
+    const root = await mkdtemp(join(process.cwd(), ".envil-esbuild-namespace-"));
+    temporaryDirectories.push(root);
+    const entry = join(root, "entry.js");
+    await writeFile(
+      entry,
+      'import { render } from "virtual-module"; export const result = render();\n',
+    );
+
+    const result = await buildWithEsbuild({
+      entryPoints: [entry],
+      bundle: true,
+      format: "esm",
+      plugins: [
+        {
+          name: "virtual-module",
+          setup(build) {
+            build.onResolve({ filter: /^virtual-module$/ }, () => ({
+              path: "virtual-module",
+              namespace: "virtual",
+            }));
+            build.onLoad({ filter: /.*/, namespace: "virtual" }, () => ({
+              contents: 'export const render = () => "virtual-result";',
+              loader: "js",
+            }));
+          },
+        },
+        esbuildPlugin({ target: "client" }),
+      ],
+      write: false,
+    });
+
+    expect(result.outputFiles?.[0]?.text).toContain("virtual-result");
+  });
+
   test("compiles and executes client and server targets with webpack", async () => {
     await verifyTargets(buildWebpackBundle);
   });

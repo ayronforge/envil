@@ -167,13 +167,14 @@ const appEnv = createEnv(
     iconLight: brandIcon(siSvelte),
     iconDark: brandIcon(siSvelte),
     prefix: "PUBLIC_",
-    code: `import { client, createEnv, url } from "@ayronforge/envil"
+    code: `import { env } from "$env/dynamic/public"
+import { client, createEnv, url } from "@ayronforge/envil"
 import { sveltekit } from "@ayronforge/envil/presets"
 
 const appEnv = createEnv(
   client(
     { API_URL: url },
-    { ...sveltekit, runtimeEnv: import.meta.env },
+    { ...sveltekit, runtimeEnv: env },
   ),
 )`,
   },

@@ -22,7 +22,10 @@ function nativeModuleResolver(context: NativeBuildContext): ModuleResolver | und
         kind: "import-statement",
         resolveDir: dirname(importer),
       });
-      return resolved.errors.length > 0 || resolved.external || resolved.path === ""
+      return resolved.errors.length > 0 ||
+        resolved.external ||
+        resolved.namespace !== "file" ||
+        resolved.path === ""
         ? undefined
         : resolved.path;
     };
