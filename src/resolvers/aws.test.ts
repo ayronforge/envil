@@ -66,6 +66,59 @@ describe("awsSecretsAdapter", () => {
     }
   });
 
+  test("does not treat a binary secret as absent", async () => {
+    sendAwsCommand = () =>
+      Promise.resolve({
+        SecretBinary: new Uint8Array([1, 2, 3]),
+      } satisfies GetSecretValueResponse);
+
+    const exit = await Effect.runPromiseExit(
+      awsSecretsAdapter.resolve({ referencesByKey: { TOKEN: "binary-secret" } }),
+    );
+
+    expect(String(exit)).toContain("ResolverResponseDecodeFailed");
+    expect(String(exit)).toContain("AWS binary secrets are not supported");
+    expect(String(exit)).not.toContain("binary-secret");
+  });
+
+  test("does not treat a binary secret in a batch as absent", async () => {
+    sendAwsCommand = () =>
+      Promise.resolve({
+        SecretValues: [
+          { Name: "binary-secret", SecretBinary: new Uint8Array([1, 2, 3]) },
+          { Name: "string-secret", SecretString: "resolved" },
+        ],
+      } satisfies BatchGetSecretValueResponse);
+
+    const exit = await Effect.runPromiseExit(
+      awsSecretsAdapter.resolve({
+        referencesByKey: {
+          BINARY: "binary-secret",
+          STRING: "string-secret",
+        },
+      }),
+    );
+
+    expect(String(exit)).toContain("ResolverResponseDecodeFailed");
+    expect(String(exit)).toContain("AWS binary secrets are not supported");
+    expect(String(exit)).not.toContain("binary-secret");
+  });
+
+  test("requires JSON fragments to be own properties", async () => {
+    sendAwsCommand = () =>
+      Promise.resolve({
+        SecretString: JSON.stringify({ password: "resolved-value" }),
+      } satisfies GetSecretValueResponse);
+
+    const result = await Effect.runPromise(
+      awsSecretsAdapter.resolve({
+        referencesByKey: { TOKEN: "database#toString" },
+      }),
+    );
+
+    expect(Option.isNone(result.TOKEN)).toBe(true);
+  });
+
   test("sanitizes malformed JSON fragments", async () => {
     sendAwsCommand = () =>
       Promise.resolve({

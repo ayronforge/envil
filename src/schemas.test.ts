@@ -259,6 +259,11 @@ describe("postgresUrl", () => {
     expect(decode(postgresUrl, pgUrl)).toBe(pgUrl);
   });
 
+  test("accepts a bracketed IPv6 host", () => {
+    const pgUrl = "postgres://user:pass@[::1]:5432/app";
+    expect(decode(postgresUrl, pgUrl)).toBe(pgUrl);
+  });
+
   test("rejects other protocols", () => {
     expect(() => decode(postgresUrl, "mysql://user:pass@host:3306/db")).toThrow();
   });

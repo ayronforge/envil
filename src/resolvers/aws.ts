@@ -11,7 +11,6 @@ import {
 import {
   hasFailureField,
   initializeAdapter,
-  requestSecret,
   resolverEntries,
   resolverRecord,
   toResolvedSecret,
@@ -43,6 +42,27 @@ function isAwsNotFound(failure: unknown): boolean {
   return hasFailureField(failure, "name", "ResourceNotFoundException");
 }
 
+function decodeAwsSecretValue(
+  secretString: string | undefined,
+  secretBinary: Uint8Array | undefined,
+  operation: string,
+): Effect.Effect<ResolvedSecret, ResolverResponseDecodeFailed> {
+  if (secretString !== undefined) {
+    return Effect.succeed(toResolvedSecret(secretString));
+  }
+
+  return Effect.fail(
+    new ResolverResponseDecodeFailed({
+      adapter: "aws",
+      operation,
+      message:
+        secretBinary === undefined
+          ? "AWS returned a secret without a string value. Store the secret as SecretString and try again."
+          : "AWS binary secrets are not supported. Store the secret as SecretString and try again.",
+    }),
+  );
+}
+
 function decodeAwsValue(
   value: ResolvedSecret,
   jsonKey: string | undefined,
@@ -55,6 +75,9 @@ function decodeAwsValue(
     try: () => {
       const decoded: unknown = JSON.parse(Redacted.value(value.value));
       if (typeof decoded !== "object" || decoded === null || Array.isArray(decoded)) {
+        return Option.none();
+      }
+      if (!Object.hasOwn(decoded, jsonKey)) {
         return Option.none();
       }
       const fragment: unknown = Reflect.get(decoded, jsonKey);
@@ -93,16 +116,25 @@ function resolveAwsSecrets<const Keys extends string>(
     if (uniqueSecretIds.length === 1) {
       const secretId = uniqueSecretIds[0];
       if (secretId !== undefined) {
-        const value = yield* requestSecret(
-          "aws",
-          "read",
-          async () => {
-            const response = await client.send(
-              new sdk.GetSecretValueCommand({ SecretId: secretId }),
-            );
-            return response.SecretString;
-          },
-          isAwsNotFound,
+        const value = yield* Effect.tryPromise({
+          try: () => client.send(new sdk.GetSecretValueCommand({ SecretId: secretId })),
+          catch: (failure: unknown) => failure,
+        }).pipe(
+          Effect.matchEffect({
+            onFailure: (failure) =>
+              isAwsNotFound(failure)
+                ? Effect.succeed(Option.none())
+                : Effect.fail(
+                    new ResolverRequestFailed({
+                      adapter: "aws",
+                      operation: "read",
+                      message:
+                        "The aws resolver could not read a secret. Check provider access and try again.",
+                    }),
+                  ),
+            onSuccess: (response) =>
+              decodeAwsSecretValue(response.SecretString, response.SecretBinary, "decode-value"),
+          }),
         );
         values.set(secretId, value);
       }
@@ -139,7 +171,11 @@ function resolveAwsSecrets<const Keys extends string>(
           }
         }
         for (const secret of response.SecretValues ?? []) {
-          const value = toResolvedSecret(secret.SecretString);
+          const value = yield* decodeAwsSecretValue(
+            secret.SecretString,
+            secret.SecretBinary,
+            "decode-batch-value",
+          );
           if (secret.Name !== undefined) {
             values.set(secret.Name, value);
           }

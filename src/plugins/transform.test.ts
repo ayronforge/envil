@@ -250,6 +250,22 @@ export const appEnv = createEnv(
     expect(transformed).not.toContain('"EXPO_PUBLIC_URL": process.env.EXPO_PUBLIC_URL');
   });
 
+  test("compiles explicit Expo names from local const schemas", () => {
+    const source = `
+import { client, createEnv, fromEnv, requiredString } from "@ayronforge/envil";
+import { expo } from "@ayronforge/envil/presets";
+
+const apiUrl = requiredString.pipe(fromEnv("EXPO_PUBLIC_API_URL"));
+export const appEnv = createEnv(
+  client({ URL: apiUrl }, expo),
+);
+`;
+    const transformed = transformEnvilModule(source, "src/env.ts", "client");
+
+    expect(transformed).toContain('"EXPO_PUBLIC_API_URL": process.env.EXPO_PUBLIC_API_URL');
+    expect(transformed).not.toContain('"EXPO_PUBLIC_URL": process.env.EXPO_PUBLIC_URL');
+  });
+
   test("compiles Expo runtime at the spread position", () => {
     const source = `
 import { client, requiredString } from "@ayronforge/envil";

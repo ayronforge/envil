@@ -158,7 +158,7 @@ import { expo } from "@ayronforge/envil/presets"
 const appEnv = createEnv(
   client(
     { API_URL: url },
-    { ...expo, runtimeEnv: process.env },
+    expo,
   ),
 )`,
   },

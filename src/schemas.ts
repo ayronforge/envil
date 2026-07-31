@@ -106,16 +106,29 @@ export const url = Schema.String.check(
 );
 export type Url = Schema.Schema.Type<typeof url>;
 
+function isPostgresUrl(value: string): boolean {
+  if (value !== value.trim()) {
+    return false;
+  }
+  try {
+    const parsed = new URL(value);
+    return (
+      (parsed.protocol === "postgres:" || parsed.protocol === "postgresql:") &&
+      parsed.username.length > 0 &&
+      parsed.password.length > 0 &&
+      parsed.hostname.length > 0 &&
+      parsed.port.length > 0 &&
+      parsed.pathname.length > 1
+    );
+  } catch {
+    return false;
+  }
+}
+
 export const postgresUrl = Schema.String.check(
-  Schema.makeFilter<string>(
-    (value) => value.startsWith("postgres://") || value.startsWith("postgresql://"),
-    {
-      identifier: "PostgresUrl",
-      message: "Use a complete PostgreSQL connection URL",
-    },
-  ),
-  Schema.isPattern(/^(postgres|postgresql):\/\/[^:]+:[^@]+@[^:]+:\d+\/.+$/, {
-    message: "Include username, password, host, port, and database name",
+  Schema.makeFilter<string>(isPostgresUrl, {
+    identifier: "PostgresUrl",
+    message: "Include protocol, username, password, host, port, and database name",
   }),
 );
 export type PostgresUrl = Schema.Schema.Type<typeof postgresUrl>;

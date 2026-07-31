@@ -30,11 +30,28 @@ function propertyNameText(name: ts.PropertyName): string | undefined {
   return undefined;
 }
 
+function localConstInitializer(
+  identifier: ts.Identifier,
+  context: TransformContext,
+): ts.Expression | undefined {
+  const symbol = context.checker.getSymbolAtLocation(identifier);
+  const declaration = symbol?.declarations?.find(ts.isVariableDeclaration);
+  if (
+    declaration?.initializer === undefined ||
+    !ts.isVariableDeclarationList(declaration.parent) ||
+    (ts.getCombinedNodeFlags(declaration.parent) & ts.NodeFlags.Const) === 0
+  ) {
+    return undefined;
+  }
+  return declaration.initializer;
+}
+
 function explicitRuntimeKey(
   expression: ts.Expression,
   context: TransformContext,
 ): string | undefined {
   let runtimeKey: string | undefined;
+  const visitedInitializers = new Set<ts.Expression>();
 
   function visit(node: ts.Node): void {
     if (ts.isCallExpression(node) && isImportedMember(node.expression, "fromEnv", context)) {
@@ -46,6 +63,14 @@ function explicitRuntimeKey(
       }
       runtimeKey = name.text;
       return;
+    }
+    if (ts.isIdentifier(node)) {
+      const initializer = localConstInitializer(node, context);
+      if (initializer !== undefined && !visitedInitializers.has(initializer)) {
+        visitedInitializers.add(initializer);
+        visit(initializer);
+        return;
+      }
     }
     ts.forEachChild(node, visit);
   }
